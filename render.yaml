@@ -15,8 +15,9 @@ services:
       - key: DATABASE_URL
         fromService:
           name: speako-ai-db
-          type: pxdatabase
+          type: postgres
           property: connectionString
+
   - type: web
     name: app
     region: virginia
@@ -30,6 +31,7 @@ services:
           name: celery-redis
           type: redis
           property: connectionString
+
   - type: web
     name: flower
     region: virginia
@@ -44,12 +46,14 @@ services:
           type: redis
           name: celery-redis
           property: connectionString
+
   - type: redis
     name: celery-redis
     region: virginia
     plan: starter
     maxmemoryPolicy: noeviction
     ipAllowList: []
+
   - type: cron
     name: availability-task-dispatch
     region: virginia
@@ -67,5 +71,5 @@ services:
       - key: DATABASE_URL
         fromService:
           name: speako-ai-db
-          type: pxdatabase
+          type: postgres
           property: connectionString
