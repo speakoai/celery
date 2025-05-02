@@ -12,6 +12,11 @@ services:
           name: celery-redis
           type: redis
           property: connectionString
+      - key: DATABASE_URL
+        fromService:
+          name: speako-ai-db
+          type: pxdatabase
+          property: connectionString
   - type: web
     name: app
     region: virginia
@@ -42,6 +47,25 @@ services:
   - type: redis
     name: celery-redis
     region: virginia
-    plan: starter # we choose a plan with persistence to ensure tasks are not lost upon restart
-    maxmemoryPolicy: noeviction # recommended policy for queues
-    ipAllowList: [] # only allow internal connections
+    plan: starter
+    maxmemoryPolicy: noeviction
+    ipAllowList: []
+  - type: cron
+    name: availability-task-dispatch
+    region: virginia
+    schedule: "0 0 1 1 *"  # runs only manually by default
+    runtime: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python dispatch/availability_tasks_dispatch.py"
+    autoDeploy: true
+    envVars:
+      - key: CELERY_BROKER_URL
+        fromService:
+          name: celery-redis
+          type: redis
+          property: connectionString
+      - key: DATABASE_URL
+        fromService:
+          name: speako-ai-db
+          type: pxdatabase
+          property: connectionString
