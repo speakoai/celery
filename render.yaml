@@ -56,10 +56,10 @@ services:
   - type: cron
     name: availability-task-dispatch
     region: virginia
-    schedule: "0 0 1 1 *"  # runs only manually by default
+    schedule: "0 0 1 1 *"
     runtime: python
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "python dispatch/availability_tasks_dispatch.py"
+    startCommand: "PYTHONPATH=. python dispatch/availability_tasks_dispatch.py"
     autoDeploy: true
     envVars:
       - key: CELERY_BROKER_URL
@@ -71,3 +71,4 @@ services:
         fromDatabase:
           name: speako-db
           property: connectionString
+
