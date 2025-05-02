@@ -1,0 +1,36 @@
+# Ignore Python cache and compiled files
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Ignore virtual environments
+venv/
+ENV/
+env/
+
+# Ignore environment/config files
+.env
+*.env
+
+# Ignore OS-specific files
+.DS_Store
+Thumbs.db
+
+# Ignore logs and temporary files
+*.log
+*.tmp
+*.swp
+
+# Ignore editor/IDE files
+.vscode/
+.idea/
+
+# Ignore Celery beat and worker state files (if used)
+celerybeat-schedule
+celerybeat.pid
+
+# Ignore Python packaging files (if any in future)
+*.egg-info/
+dist/
+build/
