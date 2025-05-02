@@ -14,8 +14,8 @@ services:
           property: connectionString
       - key: DATABASE_URL
         fromService:
-          name: speako-ai-db
-          type: postgres
+          name: speako-db
+          type: pxdatabase
           property: connectionString
 
   - type: web
@@ -70,6 +70,6 @@ services:
           property: connectionString
       - key: DATABASE_URL
         fromService:
-          name: speako-ai-db
-          type: postgres
+          name: speako-db
+          type: pxdatabase
           property: connectionString
