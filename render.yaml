@@ -13,9 +13,8 @@ services:
           type: redis
           property: connectionString
       - key: DATABASE_URL
-        fromService:
+        fromDatabase:
           name: speako-db
-          type: pxdatabase
           property: connectionString
 
   - type: web
@@ -69,7 +68,6 @@ services:
           type: redis
           property: connectionString
       - key: DATABASE_URL
-        fromService:
+        fromDatabase:
           name: speako-db
-          type: pxdatabase
           property: connectionString
