@@ -4,6 +4,7 @@ from flask import Flask, request, jsonify, render_template_string
 import redis
 import os
 from dotenv import load_dotenv
+import json
 
 load_dotenv()
 
@@ -24,7 +25,7 @@ HTML_TEMPLATE = """
   </form>
   {% if value %}
     <h2>Value:</h2>
-    <pre>{{ value }}</pre>
+    <pre>{{ value | safe }}</pre>
   {% elif key %}
     <p><strong>No value found for this key.</strong></p>
   {% endif %}
@@ -37,7 +38,13 @@ def index():
     key = request.args.get("key")
     value = None
     if key:
-        value = redis_client.get(key)
+        raw_value = redis_client.get(key)
+        if raw_value:
+            try:
+                parsed = json.loads(raw_value)
+                value = json.dumps(parsed, indent=2, ensure_ascii=False)
+            except json.JSONDecodeError:
+                value = raw_value  # fallback to raw value
     return render_template_string(HTML_TEMPLATE, key=key, value=value)
 
 @app.route("/api")
