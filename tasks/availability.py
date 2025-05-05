@@ -171,7 +171,7 @@ def gen_availability(tenant_id, location_id, location_tz="UTC"):
         logger.info(f"[LOCAL TEST] Cached key: {cache_key}")
         cur.close()
 
-        print("[DEBUG] Final JSON output:")
+        print(f"[DEBUG] JSON generated and cached for tenant_id={tenant_id}, location_id={location_id}")
         pprint(response)
 
         return response
