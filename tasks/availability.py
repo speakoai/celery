@@ -11,7 +11,7 @@ import redis
 import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from pprint import pprint
+import time
 
 
 print(f"[DEBUG] DATABASE_URL: {os.getenv('DATABASE_URL')}")
@@ -54,6 +54,7 @@ def gen_availability(tenant_id, location_id, location_tz="UTC"):
         return
 
     try:
+
         pg_conn = psycopg2.connect(db_url)
         print("✅ Connected to PostgreSQL")
         print(f"🔍 Using DB URL: {os.getenv('DATABASE_URL')}")
@@ -62,7 +63,7 @@ def gen_availability(tenant_id, location_id, location_tz="UTC"):
         print("[DEBUG] Connected to Redis")
 
         cur = pg_conn.cursor()
-
+        db_start = time.time() #record the current time of db_start for benchmarking
         start_date = datetime.now(ZoneInfo(location_tz)).replace(hour=0, minute=0, second=0, microsecond=0)
         days_range = 60
 
@@ -171,8 +172,11 @@ def gen_availability(tenant_id, location_id, location_tz="UTC"):
         logger.info(f"[LOCAL TEST] Cached key: {cache_key}")
         cur.close()
 
+        db_end = time.time() #record the current time of db_end for benchmarking
+        print(f"[INFO] DB fetch duration: {db_end - db_start:.2f}s") #print the time difference
+
         print(f"[DEBUG] JSON generated and cached for tenant_id={tenant_id}, location_id={location_id}")
-        
+
         return response
 
     except Exception as e:
