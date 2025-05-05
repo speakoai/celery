@@ -80,7 +80,8 @@ services:
     startCommand: gunicorn cache_viewer:app
     envVars:
       - key: REDIS_URL
-        fromDatabase:
+        fromService:
           name: speako-cache
+          type: redis
           property: connectionString
     autoDeploy: true
