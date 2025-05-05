@@ -41,7 +41,7 @@ def index():
     value = None
 
     if tenant_id and location_id:
-        cache_key = f"availability_v1:tenant_{tenant_id}_location_{location_id}"
+        cache_key = f"availability:tenant_{tenant_id}_location_{location_id}"
         raw_value = redis_client.get(cache_key)
         if raw_value:
             try:
