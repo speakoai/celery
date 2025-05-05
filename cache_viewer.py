@@ -10,7 +10,6 @@ load_dotenv()
 
 app = Flask(__name__)
 REDIS_URL = os.getenv("REDIS_URL")
-
 redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 
 HTML_TEMPLATE = """
@@ -20,14 +19,15 @@ HTML_TEMPLATE = """
 <body>
   <h1>Redis Cache Viewer</h1>
   <form method="get">
-    Key: <input type="text" name="key" value="{{ key }}">
+    Tenant ID: <input type="text" name="tenant_id" value="{{ tenant_id }}">
+    Location ID: <input type="text" name="location_id" value="{{ location_id }}">
     <button type="submit">Fetch</button>
   </form>
   {% if value %}
-    <h2>Value:</h2>
+    <h2>Value for Key: {{ cache_key }}</h2>
     <pre>{{ value | safe }}</pre>
-  {% elif key %}
-    <p><strong>No value found for this key.</strong></p>
+  {% elif cache_key %}
+    <p><strong>No value found for key: {{ cache_key }}</strong></p>
   {% endif %}
 </body>
 </html>
@@ -35,27 +35,28 @@ HTML_TEMPLATE = """
 
 @app.route("/")
 def index():
-    key = request.args.get("key")
+    tenant_id = request.args.get("tenant_id")
+    location_id = request.args.get("location_id")
+    cache_key = None
     value = None
-    if key:
-        raw_value = redis_client.get(key)
+
+    if tenant_id and location_id:
+        cache_key = f"availability_v1:tenant_{tenant_id}_location_{location_id}"
+        raw_value = redis_client.get(cache_key)
         if raw_value:
             try:
                 parsed = json.loads(raw_value)
                 value = json.dumps(parsed, indent=2, ensure_ascii=False)
             except json.JSONDecodeError:
                 value = raw_value  # fallback to raw value
-    return render_template_string(HTML_TEMPLATE, key=key, value=value)
 
-@app.route("/api")
-def api():
-    key = request.args.get("key")
-    if not key:
-        return jsonify({"error": "Missing ?key= parameter"}), 400
-    value = redis_client.get(key)
-    if value:
-        return jsonify({"key": key, "value": value})
-    return jsonify({"error": "Key not found"}), 404
+    return render_template_string(
+        HTML_TEMPLATE,
+        tenant_id=tenant_id or '',
+        location_id=location_id or '',
+        cache_key=cache_key,
+        value=value
+    )
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000)
