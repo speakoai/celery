@@ -72,3 +72,15 @@ services:
           name: speako-db
           property: connectionString
 
+  - type: web
+    name: cache-viewer
+    runtime: python
+    plan: free
+    buildCommand: ""
+    startCommand: gunicorn cache_viewer:app
+    envVars:
+      - key: REDIS_URL
+        fromDatabase:
+          name: speako-cache
+          property: connectionString
+    autoDeploy: true

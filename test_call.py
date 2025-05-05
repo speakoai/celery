@@ -1,4 +1,8 @@
-from tasks.availability import fetch_sample_data
+from tasks.availability import gen_availability
 
-result = fetch_sample_data.delay()
-print("Task queued. Task ID:", result.id)
+if __name__ == "__main__":
+    result = gen_availability(tenant_id=1, location_id=1)
+    if result:
+        print("✅ Task completed with result:")
+    else:
+        print("❌ No result returned")
