@@ -16,6 +16,11 @@ services:
         fromDatabase:
           name: speako-db
           property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: speako-cache
+          type: redis
+          property: connectionString
 
   - type: web
     name: app
@@ -76,7 +81,7 @@ services:
     name: cache-viewer
     runtime: python
     plan: free
-    buildCommand: ""
+    buildCommand: pip install -r requirements.txt
     startCommand: gunicorn cache_viewer:app
     envVars:
       - key: REDIS_URL
