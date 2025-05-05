@@ -79,6 +79,7 @@ services:
 
   - type: web
     name: cache-viewer
+    region: virginia
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
