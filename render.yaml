@@ -91,3 +91,22 @@ services:
           type: redis
           property: connectionString
     autoDeploy: true
+
+  - type: cron
+    name: gen-availability-cron-aus
+    region: virginia
+    env: python
+    schedule: "0 * * * *" # runs every hour, so if it reach a timezone of anyting inside jobs dict, it trigger the worker
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "PYTHONPATH=. python dispatch/gen_availability_dispatch.py"
+    envVars:
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: speako-cache
+          property: connectionString
+      - key: DATABASE_URL
+        fromDatabase:
+          name: speako-db
+          property: connectionString
+
