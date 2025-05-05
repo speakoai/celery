@@ -10,7 +10,7 @@ load_dotenv()
 app = Flask(__name__)
 REDIS_URL = os.getenv("REDIS_URL")
 
-redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True, ssl=True)
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
