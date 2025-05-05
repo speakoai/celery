@@ -20,24 +20,32 @@ HTML_TEMPLATE = """
 <body>
   <h1>Redis Cache Viewer</h1>
   <form method="get">
-    Key: <input type="text" name="key" value="{{ key }}">
+    Tenant ID: <input type="text" name="tenant_id" value="{{ tenant_id }}">
+    Location ID: <input type="text" name="location_id" value="{{ location_id }}">
     <button type="submit">Fetch</button>
   </form>
   {% if value %}
-    <h2>Value:</h2>
+    <h2>Value for key: {{ key }}</h2>
     <pre>{{ value | safe }}</pre>
-  {% elif key %}
-    <p><strong>No value found for this key.</strong></p>
+  {% elif tenant_id and location_id %}
+    <p><strong>No value found for key: {{ key }}</strong></p>
   {% endif %}
 </body>
 </html>
 """
 
+def construct_key(tenant_id, location_id):
+    """Construct Redis key in the format availability:tenant_<tenant_id>:location_<location_id>"""
+    return f"availability:tenant_{tenant_id}:location_{location_id}"
+
 @app.route("/")
 def index():
-    key = request.args.get("key")
+    tenant_id = request.args.get("tenant_id", "")
+    location_id = request.args.get("location_id", "")
     value = None
-    if key:
+    key = None
+    if tenant_id and location_id:
+        key = construct_key(tenant_id, location_id)
         raw_value = redis_client.get(key)
         if raw_value:
             try:
@@ -45,13 +53,15 @@ def index():
                 value = json.dumps(parsed, indent=2, ensure_ascii=False)
             except json.JSONDecodeError:
                 value = raw_value  # fallback to raw value
-    return render_template_string(HTML_TEMPLATE, key=key, value=value)
+    return render_template_string(HTML_TEMPLATE, tenant_id=tenant_id, location_id=location_id, key=key, value=value)
 
 @app.route("/api")
 def api():
-    key = request.args.get("key")
-    if not key:
-        return jsonify({"error": "Missing ?key= parameter"}), 400
+    tenant_id = request.args.get("tenant_id")
+    location_id = request.args.get("location_id")
+    if not tenant_id or not location_id:
+        return jsonify({"error": "Missing ?tenant_id= or ?location_id= parameter"}), 400
+    key = construct_key(tenant_id, location_id)
     value = redis_client.get(key)
     if value:
         return jsonify({"key": key, "value": value})
