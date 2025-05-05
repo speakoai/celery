@@ -172,8 +172,7 @@ def gen_availability(tenant_id, location_id, location_tz="UTC"):
         cur.close()
 
         print(f"[DEBUG] JSON generated and cached for tenant_id={tenant_id}, location_id={location_id}")
-        pprint(response)
-
+        
         return response
 
     except Exception as e:
