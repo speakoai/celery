@@ -15,7 +15,7 @@ def run_all_jobs():
         now_local = datetime.now(pytz.timezone(job["location_tz"]))
         if now_local.hour == 0:
             print(f"[INFO] Generating availability for tenant {job['tenant_id']} location {job['location_id']} at {now_local}")
-            gen_availability(job["tenant_id"], job["location_id"], job["location_tz"])
+            gen_availability.delay(job["tenant_id"], job["location_id"], job["location_tz"])
         else:
             print(f"[SKIP] It's not midnight in {job['location_tz']}")
 
