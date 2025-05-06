@@ -42,7 +42,8 @@ def fetch_sample_data():
     except Exception as e:
         logger.error(f"[PRODUCTION] Database error: {e}")
         return None
-    
+
+@app.task   
 def gen_availability(tenant_id, location_id, location_tz="UTC"):
     logger.info(f"[LOCAL TEST] Generating availability for tenant={tenant_id}, location={location_id}")
 
