@@ -188,8 +188,7 @@ def gen_availability(tenant_id, location_id, location_tz="UTC"):
 
 @app.task   
 def gen_availability_venue(tenant_id, location_id, location_tz="UTC"):
-    now_local = datetime.now(ZoneInfo(location_tz)).strftime("%Y-%m-%d %H:%M:%S %Z")
-    logger.info(f"[LOCAL TEST] Generating availability for tenant={tenant_id}, location={location_id} at {now_local}")
+    logger.info(f"[LOCAL TEST] Generating availability for tenant={tenant_id}, location={location_id}")
 
     db_url = os.getenv("DATABASE_URL")
     redis_url = os.getenv("REDIS_URL")
@@ -199,6 +198,7 @@ def gen_availability_venue(tenant_id, location_id, location_tz="UTC"):
         return
 
     try:
+
         pg_conn = psycopg2.connect(db_url)
         print("✅ Connected to PostgreSQL")
         print(f"🔍 Using DB URL: {os.getenv('DATABASE_URL')}")
@@ -207,7 +207,7 @@ def gen_availability_venue(tenant_id, location_id, location_tz="UTC"):
         print("[DEBUG] Connected to Redis")
 
         cur = pg_conn.cursor()
-        db_start = time.time()
+        db_start = time.time() #record the current time of db_start for benchmarking
         start_date = datetime.now(ZoneInfo(location_tz)).replace(hour=0, minute=0, second=0, microsecond=0)
         days_range = 60
 
@@ -232,7 +232,7 @@ def gen_availability_venue(tenant_id, location_id, location_tz="UTC"):
                 "duration": int(row[2])
             })
 
-        venue_services, location_services = {}, set()
+        staff_services, location_services = {}, set()
         for day_offset in range(days_range):
             current_date = start_date + timedelta(days=day_offset)
             current_date_str = current_date.strftime("%Y-%m-%d")
@@ -241,53 +241,50 @@ def gen_availability_venue(tenant_id, location_id, location_tz="UTC"):
 
             availability = {
                 "date": current_date_str,
+                "staff": [],
                 "holiday": None,
                 "is_open": True,
                 "open_hours": []
             }
 
             cur.execute("""
-                SELECT v.venue_id, v.name, va.start_time, va.end_time, v.venue_unit_type, v.capacity
-                FROM venue_unit v
-                JOIN venue_availability va ON v.tenant_id = va.tenant_id AND v.venue_id = va.venue_id
-                WHERE v.tenant_id = %s AND va.location_id = %s AND va.type = 'recurring'
-                AND va.day_of_week = %s AND (va.specific_date IS NULL OR va.specific_date <> %s)
-                AND va.is_active = TRUE
+                SELECT s.staff_id, s.name, sa.start_time, sa.end_time
+                FROM staff s
+                JOIN staff_availability sa ON s.tenant_id = sa.tenant_id AND s.staff_id = sa.staff_id
+                WHERE s.tenant_id = %s AND sa.location_id = %s AND sa.type = 'recurring'
+                AND sa.day_of_week = %s AND (sa.specific_date IS NULL OR sa.specific_date <> %s)
+                AND sa.is_active = TRUE
             """, (tenant_id, location_id, db_day, current_date_str))
-            venue_rows = cur.fetchall()
+            staff_rows = cur.fetchall()
 
             if day_offset == 0:
-                cur.execute("SELECT venue_id, service_id FROM venue_services WHERE tenant_id = %s", (tenant_id,))
-                for vid, svc_id in cur.fetchall():
-                    venue_services.setdefault(vid, []).append(svc_id)
+                cur.execute("SELECT staff_id, service_id FROM staff_services WHERE tenant_id = %s", (tenant_id,))
+                for sid, svc_id in cur.fetchall():
+                    staff_services.setdefault(sid, []).append(svc_id)
 
                 cur.execute("SELECT service_id FROM location_services WHERE tenant_id = %s AND location_id = %s", (tenant_id, location_id))
                 location_services = {r[0] for r in cur.fetchall()}
 
             cur.execute("""
-                SELECT venue_id, customer_id, start_time, end_time
+                SELECT staff_id, customer_id, start_time, end_time
                 FROM bookings
                 WHERE tenant_id = %s AND location_id = %s
                 AND start_time >= %s AND start_time < %s::date + INTERVAL '1 day'
             """, (tenant_id, location_id, current_date_str, current_date_str))
             booking_rows = cur.fetchall()
-            bookings = [{"venue_id": r[0], "customer_id": r[1], "start_time": r[2].strftime("%Y-%m-%d %H:%M:%S"), "end_time": r[3].strftime("%Y-%m-%d %H:%M:%S")} for r in booking_rows]
+            bookings = [{"staff_id": r[0], "customer_id": r[1], "start_time": r[2].strftime("%Y-%m-%d %H:%M:%S"), "end_time": r[3].strftime("%Y-%m-%d %H:%M:%S")} for r in booking_rows]
 
-            venue_dict = {}
-            venue_types = set()
-            for vid, name, start, end, venue_type, capacity in venue_rows:
-                venue_dict.setdefault(vid, {
-                    "id": vid,
+            staff_dict = {}
+            for sid, name, start, end in staff_rows:
+                staff_dict.setdefault(sid, {
+                    "id": sid,
                     "name": name,
-                    "capacity": capacity,
-                    "service": [svc for svc in venue_services.get(vid, []) if svc in location_services],
+                    "service": [svc for svc in staff_services.get(sid, []) if svc in location_services],
                     "slots": []
                 })["slots"].append({"start": str(start), "end": str(end)})
-                venue_types.add(venue_type)
 
-            updated_venue_dict = reconstruct_staff_availability(bookings, venue_dict)
-            venue_key = "tables" if venue_types and all(vt == "dining_table" for vt in venue_types) else "venues"
-            availability[venue_key] = list(updated_venue_dict.values())
+            updated_staff_dict = reconstruct_staff_availability(bookings, staff_dict)
+            availability["staff"] = list(updated_staff_dict.values())
 
             cur.execute("""
                 SELECT COUNT(*)
@@ -319,8 +316,8 @@ def gen_availability_venue(tenant_id, location_id, location_tz="UTC"):
         logger.info(f"[LOCAL TEST] Cached key: {cache_key}")
         cur.close()
 
-        db_end = time.time()
-        print(f"[INFO] DB fetch duration: {db_end - db_start:.2f}s")
+        db_end = time.time() #record the current time of db_end for benchmarking
+        print(f"[INFO] DB fetch duration: {db_end - db_start:.2f}s") #print the time difference
 
         print(f"[DEBUG] JSON generated and cached for tenant_id={tenant_id}, location_id={location_id}")
 
