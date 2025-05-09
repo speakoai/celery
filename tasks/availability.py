@@ -188,7 +188,8 @@ def gen_availability(tenant_id, location_id, location_tz="UTC"):
 
 @app.task   
 def gen_availability_venue(tenant_id, location_id, location_tz="UTC"):
-    logger.info(f"[LOCAL TEST] Generating availability for tenant={tenant_id}, location={location_id}")
+    now_local = datetime.now(ZoneInfo(location_tz)).strftime("%Y-%m-%d %H:%M:%S %Z")
+    logger.info(f"[LOCAL TEST] Generating availability for tenant={tenant_id}, location={location_id} at {now_local}")
 
     db_url = os.getenv("DATABASE_URL")
     redis_url = os.getenv("REDIS_URL")
