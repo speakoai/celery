@@ -6,8 +6,8 @@ from tasks.availability import gen_availability, gen_availability_venue
 
 def run_all_jobs():
     jobs = [
-        {"tenant_id": 2, "location_id": 34, "location_tz": "Australia/Sydney"},
-        {"tenant_id": 2, "location_id": 35, "location_tz": "Australia/Sydney"},
+        {"tenant_id": 1, "location_id": 1, "location_tz": "Australia/Sydney"},
+        {"tenant_id": 1, "location_id": 2, "location_tz": "Australia/Sydney"},
         # Add more as needed
     ]
 
