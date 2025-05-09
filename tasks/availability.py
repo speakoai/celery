@@ -282,7 +282,6 @@ def gen_availability_venue(tenant_id, location_id, location_tz="UTC"):
                     "id": vuid,
                     "name": name,
                     "capacity": capacity,
-                    "venue_unit_type": venue_unit_type,
                     "service": [svc for svc in venue_unit_services.get(vuid, []) if svc in location_services],
                     "slots": []
                 })["slots"].append({"start": str(start), "end": str(end)})
