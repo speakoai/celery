@@ -186,10 +186,9 @@ def gen_availability(tenant_id, location_id, location_tz="UTC"):
         traceback.print_exc()
         return None
 
-@app.task   
+@app.task
 def gen_availability_venue(tenant_id, location_id, location_tz="UTC"):
-    now_local = datetime.now(ZoneInfo(location_tz)).strftime("%Y-%m-%d %H:%M:%S %Z")
-    logger.info(f"[LOCAL TEST] Generating venue availability for tenant={tenant_id}, location={location_id} at {now_local}")
+    logger.info(f"[LOCAL TEST] Generating availability for tenant={tenant_id}, location={location_id}")
 
     db_url = os.getenv("DATABASE_URL")
     redis_url = os.getenv("REDIS_URL")
@@ -232,7 +231,7 @@ def gen_availability_venue(tenant_id, location_id, location_tz="UTC"):
                 "duration": int(row[2])
             })
 
-        venue_services, location_services = {}, set()
+        venue_unit_services, location_services = {}, set()
         for day_offset in range(days_range):
             current_date = start_date + timedelta(days=day_offset)
             current_date_str = current_date.strftime("%Y-%m-%d")
@@ -241,53 +240,50 @@ def gen_availability_venue(tenant_id, location_id, location_tz="UTC"):
 
             availability = {
                 "date": current_date_str,
+                "venue_units": [],
                 "holiday": None,
                 "is_open": True,
                 "open_hours": []
             }
 
             cur.execute("""
-                SELECT v.venue_id, v.name, va.start_time, va.end_time, v.venue_unit_type, v.capacity
-                FROM venue_unit v
-                JOIN venue_availability va ON v.tenant_id = va.tenant_id AND v.venue_id = va.venue_id
-                WHERE v.tenant_id = %s AND va.location_id = %s AND va.type = 'recurring'
+                SELECT vu.venue_unit_id, vu.name, va.start_time, va.end_time
+                FROM venue_unit vu
+                JOIN venue_availability va ON vu.tenant_id = va.tenant_id AND vu.venue_unit_id = va.venue_unit_id
+                WHERE vu.tenant_id = %s AND va.location_id = %s AND va.type = 'recurring'
                 AND va.day_of_week = %s AND (va.specific_date IS NULL OR va.specific_date <> %s)
                 AND va.is_active = TRUE
             """, (tenant_id, location_id, db_day, current_date_str))
             venue_rows = cur.fetchall()
 
             if day_offset == 0:
-                cur.execute("SELECT venue_id, service_id FROM venue_services WHERE tenant_id = %s", (tenant_id,))
-                for vid, svc_id in cur.fetchall():
-                    venue_services.setdefault(vid, []).append(svc_id)
+                cur.execute("SELECT venue_unit_id, service_id FROM venue_unit_services WHERE tenant_id = %s", (tenant_id,))
+                for vuid, svc_id in cur.fetchall():
+                    venue_unit_services.setdefault(vuid, []).append(svc_id)
 
                 cur.execute("SELECT service_id FROM location_services WHERE tenant_id = %s AND location_id = %s", (tenant_id, location_id))
                 location_services = {r[0] for r in cur.fetchall()}
 
             cur.execute("""
-                SELECT venue_id, customer_id, start_time, end_time
+                SELECT venue_unit_id, customer_id, start_time, end_time
                 FROM bookings
                 WHERE tenant_id = %s AND location_id = %s
                 AND start_time >= %s AND start_time < %s::date + INTERVAL '1 day'
             """, (tenant_id, location_id, current_date_str, current_date_str))
             booking_rows = cur.fetchall()
-            bookings = [{"venue_id": r[0], "customer_id": r[1], "start_time": r[2].strftime("%Y-%m-%d %H:%M:%S"), "end_time": r[3].strftime("%Y-%m-%d %H:%M:%S")} for r in booking_rows]
+            bookings = [{"venue_unit_id": r[0], "customer_id": r[1], "start_time": r[2].strftime("%Y-%m-%d %H:%M:%S"), "end_time": r[3].strftime("%Y-%m-%d %H:%M:%S")} for r in booking_rows]
 
             venue_dict = {}
-            venue_types = set()
-            for vid, name, start, end, venue_type, capacity in venue_rows:
-                venue_dict.setdefault(vid, {
-                    "id": vid,
+            for vuid, name, start, end in venue_rows:
+                venue_dict.setdefault(vuid, {
+                    "id": vuid,
                     "name": name,
-                    "capacity": capacity,
-                    "service": [svc for svc in venue_services.get(vid, []) if svc in location_services],
+                    "service": [svc for svc in venue_unit_services.get(vuid, []) if svc in location_services],
                     "slots": []
                 })["slots"].append({"start": str(start), "end": str(end)})
-                venue_types.add(venue_type)
 
             updated_venue_dict = reconstruct_staff_availability(bookings, venue_dict)
-            venue_key = "tables" if venue_types and all(vt == "dining_table" for vt in venue_types) else "venues"
-            availability[venue_key] = list(updated_venue_dict.values())
+            availability["venue_units"] = list(updated_venue_dict.values())
 
             cur.execute("""
                 SELECT COUNT(*)
@@ -321,7 +317,6 @@ def gen_availability_venue(tenant_id, location_id, location_tz="UTC"):
 
         db_end = time.time()
         print(f"[INFO] DB fetch duration: {db_end - db_start:.2f}s")
-
         print(f"[DEBUG] JSON generated and cached for tenant_id={tenant_id}, location_id={location_id}")
 
         return response
