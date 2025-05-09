@@ -3,7 +3,7 @@ load_dotenv()
 
 from tasks.celery_app import app
 from celery.utils.log import get_task_logger
-from tasks.utils.availability_helpers import reconstruct_staff_availability
+from tasks.utils.availability_helpers import reconstruct_staff_availability, reconstruct_venue_availability
 
 import os
 import psycopg2
@@ -240,14 +240,13 @@ def gen_availability_venue(tenant_id, location_id, location_tz="UTC"):
 
             availability = {
                 "date": current_date_str,
-                "venue_units": [],
                 "holiday": None,
                 "is_open": True,
                 "open_hours": []
             }
 
             cur.execute("""
-                SELECT vu.venue_unit_id, vu.name, va.start_time, va.end_time
+                SELECT vu.venue_unit_id, vu.name, vu.venue_unit_type, vu.capacity, va.start_time, va.end_time
                 FROM venue_unit vu
                 JOIN venue_availability va ON vu.tenant_id = va.tenant_id AND vu.venue_unit_id = va.venue_unit_id
                 WHERE vu.tenant_id = %s AND va.location_id = %s AND va.type = 'recurring'
@@ -274,16 +273,23 @@ def gen_availability_venue(tenant_id, location_id, location_tz="UTC"):
             bookings = [{"venue_unit_id": r[0], "customer_id": r[1], "start_time": r[2].strftime("%Y-%m-%d %H:%M:%S"), "end_time": r[3].strftime("%Y-%m-%d %H:%M:%S")} for r in booking_rows]
 
             venue_dict = {}
-            for vuid, name, start, end in venue_rows:
+            is_dining_table = False
+
+            for vuid, name, venue_unit_type, capacity, start, end in venue_rows:
+                if venue_unit_type == "dining_table":
+                    is_dining_table = True
                 venue_dict.setdefault(vuid, {
                     "id": vuid,
                     "name": name,
+                    "capacity": capacity,
+                    "venue_unit_type": venue_unit_type,
                     "service": [svc for svc in venue_unit_services.get(vuid, []) if svc in location_services],
                     "slots": []
                 })["slots"].append({"start": str(start), "end": str(end)})
 
-            updated_venue_dict = reconstruct_staff_availability(bookings, venue_dict)
-            availability["venue_units"] = list(updated_venue_dict.values())
+            updated_venue_dict = reconstruct_venue_availability(bookings, venue_dict)
+            venue_key_name = "tables" if is_dining_table else "venue_units"
+            availability[venue_key_name] = list(updated_venue_dict.values())
 
             cur.execute("""
                 SELECT COUNT(*)
