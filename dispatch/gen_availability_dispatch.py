@@ -14,6 +14,7 @@ def run_all_jobs():
     
 
     for job in jobs:
+        now_local = datetime.now(pytz.timezone(job["location_tz"]))
         print(f"[INFO] Generating availability for tenant {job['tenant_id']} location {job['location_id']} at {now_local}")
         gen_availability_venue.delay(job["tenant_id"], job["location_id"], job["location_tz"])
 
