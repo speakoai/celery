@@ -43,7 +43,7 @@ def fetch_sample_data():
         logger.error(f"[PRODUCTION] Database error: {e}")
         return None
 
-@app.task   
+@app.task
 def gen_availability(tenant_id, location_id, location_tz="UTC"):
     logger.info(f"[LOCAL TEST] Generating availability for tenant={tenant_id}, location={location_id}")
 
@@ -55,7 +55,6 @@ def gen_availability(tenant_id, location_id, location_tz="UTC"):
         return
 
     try:
-
         pg_conn = psycopg2.connect(db_url)
         print("✅ Connected to PostgreSQL")
         print(f"🔍 Using DB URL: {os.getenv('DATABASE_URL')}")
@@ -64,17 +63,13 @@ def gen_availability(tenant_id, location_id, location_tz="UTC"):
         print("[DEBUG] Connected to Redis")
 
         cur = pg_conn.cursor()
-        db_start = time.time() #record the current time of db_start for benchmarking
+        db_start = time.time()
         start_date = datetime.now(ZoneInfo(location_tz)).replace(hour=0, minute=0, second=0, microsecond=0)
         days_range = 60
+        chunk_size = 3
 
-        response = {
-            "tenant_id": tenant_id,
-            "location_id": location_id,
-            "services": [],
-            "availabilities": []
-        }
-
+        # Preload services once
+        services = []
         cur.execute("""
             SELECT s.service_id, s.name, EXTRACT(EPOCH FROM s.duration)/60
             FROM location_services ls
@@ -83,108 +78,118 @@ def gen_availability(tenant_id, location_id, location_tz="UTC"):
             ORDER BY s.service_id
         """, (tenant_id, location_id))
         for row in cur.fetchall():
-            response["services"].append({
+            services.append({
                 "id": row[0],
                 "name": row[1],
                 "duration": int(row[2])
             })
 
         staff_services, location_services = {}, set()
-        for day_offset in range(days_range):
-            current_date = start_date + timedelta(days=day_offset)
-            current_date_str = current_date.strftime("%Y-%m-%d")
-            python_day = current_date.weekday()
-            db_day = (python_day + 1) % 7
+        # Preload services on first day
+        cur.execute("SELECT staff_id, service_id FROM staff_services WHERE tenant_id = %s", (tenant_id,))
+        for sid, svc_id in cur.fetchall():
+            staff_services.setdefault(sid, []).append(svc_id)
 
-            availability = {
-                "date": current_date_str,
-                "staff": [],
-                "holiday": None,
-                "is_open": True,
-                "open_hours": []
+        cur.execute("SELECT service_id FROM location_services WHERE tenant_id = %s AND location_id = %s", (tenant_id, location_id))
+        location_services = {r[0] for r in cur.fetchall()}
+
+        for chunk_start in range(0, days_range, chunk_size):
+            response = {
+                "tenant_id": tenant_id,
+                "location_id": location_id,
+                "services": services,
+                "availabilities": []
             }
 
-            cur.execute("""
-                SELECT s.staff_id, s.name, sa.start_time, sa.end_time
-                FROM staff s
-                JOIN staff_availability sa ON s.tenant_id = sa.tenant_id AND s.staff_id = sa.staff_id
-                WHERE s.tenant_id = %s AND sa.location_id = %s AND sa.type = 'recurring'
-                AND sa.day_of_week = %s AND (sa.specific_date IS NULL OR sa.specific_date <> %s)
-                AND sa.is_active = TRUE
-            """, (tenant_id, location_id, db_day, current_date_str))
-            staff_rows = cur.fetchall()
+            for day_offset in range(chunk_start, min(chunk_start + chunk_size, days_range)):
+                current_date = start_date + timedelta(days=day_offset)
+                current_date_str = current_date.strftime("%Y-%m-%d")
+                python_day = current_date.weekday()
+                db_day = (python_day + 1) % 7
 
-            if day_offset == 0:
-                cur.execute("SELECT staff_id, service_id FROM staff_services WHERE tenant_id = %s", (tenant_id,))
-                for sid, svc_id in cur.fetchall():
-                    staff_services.setdefault(sid, []).append(svc_id)
+                availability = {
+                    "date": current_date_str,
+                    "staff": [],
+                    "holiday": None,
+                    "is_open": True,
+                    "open_hours": []
+                }
 
-                cur.execute("SELECT service_id FROM location_services WHERE tenant_id = %s AND location_id = %s", (tenant_id, location_id))
-                location_services = {r[0] for r in cur.fetchall()}
-
-            cur.execute("""
-                SELECT staff_id, customer_id, start_time, end_time
-                FROM bookings
-                WHERE tenant_id = %s AND location_id = %s
-                AND start_time >= %s AND start_time < %s::date + INTERVAL '1 day'
-            """, (tenant_id, location_id, current_date_str, current_date_str))
-            booking_rows = cur.fetchall()
-            bookings = [{"staff_id": r[0], "customer_id": r[1], "start_time": r[2].strftime("%Y-%m-%d %H:%M:%S"), "end_time": r[3].strftime("%Y-%m-%d %H:%M:%S")} for r in booking_rows]
-
-            staff_dict = {}
-            for sid, name, start, end in staff_rows:
-                staff_dict.setdefault(sid, {
-                    "id": sid,
-                    "name": name,
-                    "service": [svc for svc in staff_services.get(sid, []) if svc in location_services],
-                    "slots": []
-                })["slots"].append({"start": str(start), "end": str(end)})
-
-            updated_staff_dict = reconstruct_staff_availability(bookings, staff_dict)
-            availability["staff"] = list(updated_staff_dict.values())
-
-            cur.execute("""
-                SELECT COUNT(*)
-                FROM location_availability
-                WHERE tenant_id = %s AND location_id = %s AND type = 'one_time'
-                AND specific_date = %s AND is_active = true AND is_closed = true
-            """, (tenant_id, location_id, current_date_str))
-            if cur.fetchone()[0] > 0:
-                availability["holiday"] = True
-                availability["is_open"] = False
-            else:
                 cur.execute("""
-                    SELECT start_time, end_time
-                    FROM location_availability
-                    WHERE tenant_id = %s AND location_id = %s AND is_active = true AND is_closed = false
-                    AND ((type = 'recurring' AND day_of_week = %s) OR (type = 'one_time' AND specific_date = %s))
-                    ORDER BY start_time
+                    SELECT s.staff_id, s.name, sa.start_time, sa.end_time
+                    FROM staff s
+                    JOIN staff_availability sa ON s.tenant_id = sa.tenant_id AND s.staff_id = sa.staff_id
+                    WHERE s.tenant_id = %s AND sa.location_id = %s AND sa.type = 'recurring'
+                    AND sa.day_of_week = %s AND (sa.specific_date IS NULL OR sa.specific_date <> %s)
+                    AND sa.is_active = TRUE
                 """, (tenant_id, location_id, db_day, current_date_str))
-                hours = cur.fetchall()
-                for s, e in hours:
-                    availability["open_hours"].append({"start": s.strftime("%H:%M"), "end": e.strftime("%H:%M")})
-                if not availability["open_hours"]:
+                staff_rows = cur.fetchall()
+
+                cur.execute("""
+                    SELECT staff_id, customer_id, start_time, end_time
+                    FROM bookings
+                    WHERE tenant_id = %s AND location_id = %s
+                    AND start_time >= %s AND start_time < %s::date + INTERVAL '1 day'
+                """, (tenant_id, location_id, current_date_str, current_date_str))
+                booking_rows = cur.fetchall()
+                bookings = [{"staff_id": r[0], "customer_id": r[1], "start_time": r[2].strftime("%Y-%m-%d %H:%M:%S"), "end_time": r[3].strftime("%Y-%m-%d %H:%M:%S")} for r in booking_rows]
+
+                staff_dict = {}
+                for sid, name, start, end in staff_rows:
+                    staff_dict.setdefault(sid, {
+                        "id": sid,
+                        "name": name,
+                        "service": [svc for svc in staff_services.get(sid, []) if svc in location_services],
+                        "slots": []
+                    })["slots"].append({"start": str(start), "end": str(end)})
+
+                updated_staff_dict = reconstruct_staff_availability(bookings, staff_dict)
+                availability["staff"] = list(updated_staff_dict.values())
+
+                cur.execute("""
+                    SELECT COUNT(*)
+                    FROM location_availability
+                    WHERE tenant_id = %s AND location_id = %s AND type = 'one_time'
+                    AND specific_date = %s AND is_active = true AND is_closed = true
+                """, (tenant_id, location_id, current_date_str))
+                if cur.fetchone()[0] > 0:
+                    availability["holiday"] = True
                     availability["is_open"] = False
+                else:
+                    cur.execute("""
+                        SELECT start_time, end_time
+                        FROM location_availability
+                        WHERE tenant_id = %s AND location_id = %s AND is_active = true AND is_closed = false
+                        AND ((type = 'recurring' AND day_of_week = %s) OR (type = 'one_time' AND specific_date = %s))
+                        ORDER BY start_time
+                    """, (tenant_id, location_id, db_day, current_date_str))
+                    hours = cur.fetchall()
+                    for s, e in hours:
+                        availability["open_hours"].append({"start": s.strftime("%H:%M"), "end": e.strftime("%H:%M")})
+                    if not availability["open_hours"]:
+                        availability["is_open"] = False
 
-            response["availabilities"].append(availability)
+                response["availabilities"].append(availability)
 
-        cache_key = f"availability:tenant_{tenant_id}:location_{location_id}"
-        valkey_client.set(cache_key, json.dumps(response))
-        logger.info(f"[LOCAL TEST] Cached key: {cache_key}")
+            # Cache per 3-day chunk
+            chunk_start_date_str = (start_date + timedelta(days=chunk_start)).strftime("%Y-%m-%d")
+            cache_key = f"availability:tenant_{tenant_id}:location_{location_id}:start_date_{chunk_start_date_str}"
+            valkey_client.set(cache_key, json.dumps(response))
+            logger.info(f"[LOCAL TEST] Cached key: {cache_key}")
+
         cur.close()
-
-        db_end = time.time() #record the current time of db_end for benchmarking
-        print(f"[INFO] DB fetch duration: {db_end - db_start:.2f}s") #print the time difference
-
+        db_end = time.time()
+        print(f"[INFO] DB fetch duration: {db_end - db_start:.2f}s")
         print(f"[DEBUG] JSON generated and cached for tenant_id={tenant_id}, location_id={location_id}")
 
-        return response
+        return {"status": "success"}
 
     except Exception as e:
         import traceback
         logger.error(f"[LOCAL TEST] Exception occurred: {e}")
         traceback.print_exc()
         return None
+
 
 @app.task
 def gen_availability_venue(tenant_id, location_id, location_tz="UTC"):
