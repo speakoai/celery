@@ -200,23 +200,16 @@ def gen_availability_venue(tenant_id, location_id, location_tz="UTC"):
     try:
         pg_conn = psycopg2.connect(db_url)
         print("✅ Connected to PostgreSQL")
-        print(f"🔍 Using DB URL: {os.getenv('DATABASE_URL')}")
-
         valkey_client = redis.Redis.from_url(redis_url, decode_responses=True)
         print("[DEBUG] Connected to Redis")
 
         cur = pg_conn.cursor()
-        db_start = time.time()
         start_date = datetime.now(ZoneInfo(location_tz)).replace(hour=0, minute=0, second=0, microsecond=0)
         days_range = 60
+        chunk_size = 3
 
-        response = {
-            "tenant_id": tenant_id,
-            "location_id": location_id,
-            "services": [],
-            "availabilities": []
-        }
-
+        # Preload services
+        services = []
         cur.execute("""
             SELECT s.service_id, s.name, EXTRACT(EPOCH FROM s.duration)/60
             FROM location_services ls
@@ -225,106 +218,113 @@ def gen_availability_venue(tenant_id, location_id, location_tz="UTC"):
             ORDER BY s.service_id
         """, (tenant_id, location_id))
         for row in cur.fetchall():
-            response["services"].append({
+            services.append({
                 "id": row[0],
                 "name": row[1],
                 "duration": int(row[2])
             })
 
-        venue_unit_services, location_services = {}, set()
-        for day_offset in range(days_range):
-            current_date = start_date + timedelta(days=day_offset)
-            current_date_str = current_date.strftime("%Y-%m-%d")
-            python_day = current_date.weekday()
-            db_day = (python_day + 1) % 7
+        # Preload service mappings
+        venue_unit_services = {}
+        location_services = set()
+        cur.execute("SELECT venue_unit_id, service_id FROM venue_unit_services WHERE tenant_id = %s", (tenant_id,))
+        for vuid, svc_id in cur.fetchall():
+            venue_unit_services.setdefault(vuid, []).append(svc_id)
 
-            availability = {
-                "date": current_date_str,
-                "holiday": None,
-                "is_open": True,
-                "open_hours": []
+        cur.execute("SELECT service_id FROM location_services WHERE tenant_id = %s AND location_id = %s", (tenant_id, location_id))
+        location_services = {r[0] for r in cur.fetchall()}
+
+        for chunk_start in range(0, days_range, chunk_size):
+            response = {
+                "tenant_id": tenant_id,
+                "location_id": location_id,
+                "services": services,
+                "availabilities": []
             }
 
-            cur.execute("""
-                SELECT vu.venue_unit_id, vu.name, vu.venue_unit_type, vu.capacity, va.start_time, va.end_time
-                FROM venue_unit vu
-                JOIN venue_availability va ON vu.tenant_id = va.tenant_id AND vu.venue_unit_id = va.venue_unit_id
-                WHERE vu.tenant_id = %s AND va.location_id = %s AND va.type = 'recurring'
-                AND va.day_of_week = %s AND (va.specific_date IS NULL OR va.specific_date <> %s)
-                AND va.is_active = TRUE
-            """, (tenant_id, location_id, db_day, current_date_str))
-            venue_rows = cur.fetchall()
+            for day_offset in range(chunk_start, min(chunk_start + chunk_size, days_range)):
+                current_date = start_date + timedelta(days=day_offset)
+                current_date_str = current_date.strftime("%Y-%m-%d")
+                python_day = current_date.weekday()
+                db_day = (python_day + 1) % 7
 
-            if day_offset == 0:
-                cur.execute("SELECT venue_unit_id, service_id FROM venue_unit_services WHERE tenant_id = %s", (tenant_id,))
-                for vuid, svc_id in cur.fetchall():
-                    venue_unit_services.setdefault(vuid, []).append(svc_id)
+                availability = {
+                    "date": current_date_str,
+                    "holiday": None,
+                    "is_open": True,
+                    "open_hours": []
+                }
 
-                cur.execute("SELECT service_id FROM location_services WHERE tenant_id = %s AND location_id = %s", (tenant_id, location_id))
-                location_services = {r[0] for r in cur.fetchall()}
-
-            cur.execute("""
-                SELECT venue_unit_id, customer_id, start_time, end_time
-                FROM bookings
-                WHERE tenant_id = %s AND location_id = %s
-                AND start_time >= %s AND start_time < %s::date + INTERVAL '1 day'
-            """, (tenant_id, location_id, current_date_str, current_date_str))
-            booking_rows = cur.fetchall()
-            bookings = [{"venue_unit_id": r[0], "customer_id": r[1], "start_time": r[2].strftime("%Y-%m-%d %H:%M:%S"), "end_time": r[3].strftime("%Y-%m-%d %H:%M:%S")} for r in booking_rows]
-
-            venue_dict = {}
-            is_dining_table = False
-
-            for vuid, name, venue_unit_type, capacity, start, end in venue_rows:
-                if venue_unit_type == "dining_table":
-                    is_dining_table = True
-                venue_dict.setdefault(vuid, {
-                    "id": vuid,
-                    "name": name,
-                    "capacity": capacity,
-                    "service": [svc for svc in venue_unit_services.get(vuid, []) if svc in location_services],
-                    "slots": []
-                })["slots"].append({"start": str(start), "end": str(end)})
-
-            updated_venue_dict = reconstruct_venue_availability(bookings, venue_dict)
-            venue_key_name = "tables" if is_dining_table else "venue_units"
-            availability[venue_key_name] = list(updated_venue_dict.values())
-
-            cur.execute("""
-                SELECT COUNT(*)
-                FROM location_availability
-                WHERE tenant_id = %s AND location_id = %s AND type = 'one_time'
-                AND specific_date = %s AND is_active = true AND is_closed = true
-            """, (tenant_id, location_id, current_date_str))
-            if cur.fetchone()[0] > 0:
-                availability["holiday"] = True
-                availability["is_open"] = False
-            else:
                 cur.execute("""
-                    SELECT start_time, end_time
-                    FROM location_availability
-                    WHERE tenant_id = %s AND location_id = %s AND is_active = true AND is_closed = false
-                    AND ((type = 'recurring' AND day_of_week = %s) OR (type = 'one_time' AND specific_date = %s))
-                    ORDER BY start_time
+                    SELECT vu.venue_unit_id, vu.name, vu.venue_unit_type, vu.capacity, va.start_time, va.end_time
+                    FROM venue_unit vu
+                    JOIN venue_availability va ON vu.tenant_id = va.tenant_id AND vu.venue_unit_id = va.venue_unit_id
+                    WHERE vu.tenant_id = %s AND va.location_id = %s AND va.type = 'recurring'
+                    AND va.day_of_week = %s AND (va.specific_date IS NULL OR va.specific_date <> %s)
+                    AND va.is_active = TRUE
                 """, (tenant_id, location_id, db_day, current_date_str))
-                hours = cur.fetchall()
-                for s, e in hours:
-                    availability["open_hours"].append({"start": s.strftime("%H:%M"), "end": e.strftime("%H:%M")})
-                if not availability["open_hours"]:
+                venue_rows = cur.fetchall()
+
+                cur.execute("""
+                    SELECT venue_unit_id, customer_id, start_time, end_time
+                    FROM bookings
+                    WHERE tenant_id = %s AND location_id = %s
+                    AND start_time >= %s AND start_time < %s::date + INTERVAL '1 day'
+                """, (tenant_id, location_id, current_date_str, current_date_str))
+                booking_rows = cur.fetchall()
+                bookings = [{"venue_unit_id": r[0], "customer_id": r[1], "start_time": r[2].strftime("%Y-%m-%d %H:%M:%S"), "end_time": r[3].strftime("%Y-%m-%d %H:%M:%S")} for r in booking_rows]
+
+                venue_dict = {}
+                is_dining_table = False
+
+                for vuid, name, venue_unit_type, capacity, start, end in venue_rows:
+                    if venue_unit_type == "dining_table":
+                        is_dining_table = True
+                    venue_dict.setdefault(vuid, {
+                        "id": vuid,
+                        "name": name,
+                        "capacity": capacity,
+                        "service": [svc for svc in venue_unit_services.get(vuid, []) if svc in location_services],
+                        "slots": []
+                    })["slots"].append({"start": str(start), "end": str(end)})
+
+                updated_venue_dict = reconstruct_venue_availability(bookings, venue_dict)
+                venue_key_name = "tables" if is_dining_table else "venue_units"
+                availability[venue_key_name] = list(updated_venue_dict.values())
+
+                cur.execute("""
+                    SELECT COUNT(*)
+                    FROM location_availability
+                    WHERE tenant_id = %s AND location_id = %s AND type = 'one_time'
+                    AND specific_date = %s AND is_active = true AND is_closed = true
+                """, (tenant_id, location_id, current_date_str))
+                if cur.fetchone()[0] > 0:
+                    availability["holiday"] = True
                     availability["is_open"] = False
+                else:
+                    cur.execute("""
+                        SELECT start_time, end_time
+                        FROM location_availability
+                        WHERE tenant_id = %s AND location_id = %s AND is_active = true AND is_closed = false
+                        AND ((type = 'recurring' AND day_of_week = %s) OR (type = 'one_time' AND specific_date = %s))
+                        ORDER BY start_time
+                    """, (tenant_id, location_id, db_day, current_date_str))
+                    hours = cur.fetchall()
+                    for s, e in hours:
+                        availability["open_hours"].append({"start": s.strftime("%H:%M"), "end": e.strftime("%H:%M")})
+                    if not availability["open_hours"]:
+                        availability["is_open"] = False
 
-            response["availabilities"].append(availability)
+                response["availabilities"].append(availability)
 
-        cache_key = f"availability:tenant_{tenant_id}:location_{location_id}"
-        valkey_client.set(cache_key, json.dumps(response))
-        logger.info(f"[LOCAL TEST] Cached key: {cache_key}")
+            chunk_start_date_str = (start_date + timedelta(days=chunk_start)).strftime("%Y-%m-%d")
+            cache_key = f"availability:tenant_{tenant_id}:location_{location_id}:start_date_{chunk_start_date_str}"
+            valkey_client.set(cache_key, json.dumps(response))
+            logger.info(f"[LOCAL TEST] Cached key: {cache_key}")
+
         cur.close()
-
-        db_end = time.time()
-        print(f"[INFO] DB fetch duration: {db_end - db_start:.2f}s")
-        print(f"[DEBUG] JSON generated and cached for tenant_id={tenant_id}, location_id={location_id}")
-
-        return response
+        print(f"[DEBUG] All chunks cached successfully for tenant={tenant_id}, location={location_id}")
+        return {"status": "success"}
 
     except Exception as e:
         import traceback
