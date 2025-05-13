@@ -84,9 +84,11 @@ def reconstruct_venue_availability(bookings, venue_dict):
                 for s in current_slots:
                     temp.extend(subtract_booking_from_slot(s, booking))
                 current_slots = temp
-            updated_slots.extend([{
-                'start': s['start'].strftime('%H:%M:%S'),
-                'end': s['end'].strftime('%H:%M:%S')
-            } for s in current_slots])
+            for s in current_slots:
+                updated_slots.append({
+                    'start': s['start'].strftime('%H:%M:%S'),
+                    'end': s['end'].strftime('%H:%M:%S'),
+                    'service_duration': slot.get('service_duration')  # this still corresponds to this slot
+                })
         venue['slots'] = updated_slots
     return updated_venue_dict

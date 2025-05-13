@@ -261,7 +261,7 @@ def gen_availability_venue(tenant_id, location_id, location_tz="UTC"):
                 }
 
                 cur.execute("""
-                    SELECT vu.venue_unit_id, vu.name, vu.venue_unit_type, vu.capacity, va.start_time, va.end_time
+                    SELECT vu.venue_unit_id, vu.name, vu.venue_unit_type, vu.capacity, vu.min_capacity, va.service_duration, va.start_time, va.end_time, va.availability_id
                     FROM venue_unit vu
                     JOIN venue_availability va ON vu.tenant_id = va.tenant_id AND vu.venue_unit_id = va.venue_unit_id
                     WHERE vu.tenant_id = %s AND va.location_id = %s AND va.type = 'recurring'
@@ -282,16 +282,18 @@ def gen_availability_venue(tenant_id, location_id, location_tz="UTC"):
                 venue_dict = {}
                 is_dining_table = False
 
-                for vuid, name, venue_unit_type, capacity, start, end in venue_rows:
+                for vuid, name, venue_unit_type, capacity, min_capacity, service_duration, start, end, va_availability_id in venue_rows:
                     if venue_unit_type == "dining_table":
                         is_dining_table = True
                     venue_dict.setdefault(vuid, {
                         "id": vuid,
                         "name": name,
                         "capacity": capacity,
+                        "min_capacity": min_capacity,
                         "service": [svc for svc in venue_unit_services.get(vuid, []) if svc in location_services],
                         "slots": []
-                    })["slots"].append({"start": str(start), "end": str(end)})
+                    })["slots"].append({"start": str(start), "end": str(end), "service_duration": str(service_duration)})
+                    #print(f"[DEBUG] Slot added: {start} - {end}, duration={service_duration}, vuid={vuid}, , vuid={va_availability_id}")
 
                 updated_venue_dict = reconstruct_venue_availability(bookings, venue_dict)
                 venue_key_name = "tables" if is_dining_table else "venue_units"
