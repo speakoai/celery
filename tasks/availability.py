@@ -130,6 +130,7 @@ def gen_availability(tenant_id, location_id, location_tz="UTC"):
                     FROM bookings
                     WHERE tenant_id = %s AND location_id = %s
                     AND start_time >= %s AND start_time < %s::date + INTERVAL '1 day'
+                    AND status = 'confirmed'
                 """, (tenant_id, location_id, current_date_str, current_date_str))
                 booking_rows = cur.fetchall()
                 bookings = [{"staff_id": r[0], "customer_id": r[1], "start_time": r[2].strftime("%Y-%m-%d %H:%M:%S"), "end_time": r[3].strftime("%Y-%m-%d %H:%M:%S")} for r in booking_rows]
@@ -172,8 +173,21 @@ def gen_availability(tenant_id, location_id, location_tz="UTC"):
                 response["availabilities"].append(availability)
 
             # Cache per 3-day chunk
-            chunk_start_date_str = (start_date + timedelta(days=chunk_start)).strftime("%Y-%m-%d")
+            # Get the chunk's start date
+            chunk_start_date = start_date + timedelta(days=chunk_start)
+            chunk_start_date_str = chunk_start_date.strftime("%Y-%m-%d")
             cache_key = f"availability:tenant_{tenant_id}:location_{location_id}:start_date_{chunk_start_date_str}"
+
+            # ➖ Delete the previous day's key
+            prev_day = chunk_start_date - timedelta(days=1)
+            prev_day_key = f"availability:tenant_{tenant_id}:location_{location_id}:start_date_{prev_day.strftime('%Y-%m-%d')}"
+            deleted = valkey_client.delete(prev_day_key)
+            if deleted:
+                logger.info(f"[LOCAL TEST] Deleted previous cache key: {prev_day_key}")
+            else:
+                logger.info(f"[LOCAL TEST] No previous cache key to delete: {prev_day_key}")
+
+            # ✅ Set current chunk's key
             valkey_client.set(cache_key, json.dumps(response))
             logger.info(f"[LOCAL TEST] Cached key: {cache_key}")
 
@@ -275,6 +289,7 @@ def gen_availability_venue(tenant_id, location_id, location_tz="UTC"):
                     FROM bookings
                     WHERE tenant_id = %s AND location_id = %s
                     AND start_time >= %s AND start_time < %s::date + INTERVAL '1 day'
+                    AND status = 'confirmed'
                 """, (tenant_id, location_id, current_date_str, current_date_str))
                 booking_rows = cur.fetchall()
                 bookings = [{"venue_unit_id": r[0], "customer_id": r[1], "start_time": r[2].strftime("%Y-%m-%d %H:%M:%S"), "end_time": r[3].strftime("%Y-%m-%d %H:%M:%S")} for r in booking_rows]
@@ -324,10 +339,23 @@ def gen_availability_venue(tenant_id, location_id, location_tz="UTC"):
 
                 response["availabilities"].append(availability)
 
-            chunk_start_date_str = (start_date + timedelta(days=chunk_start)).strftime("%Y-%m-%d")
+            chunk_start_date = start_date + timedelta(days=chunk_start)
+            chunk_start_date_str = chunk_start_date.strftime("%Y-%m-%d")
             cache_key = f"availability:tenant_{tenant_id}:location_{location_id}:start_date_{chunk_start_date_str}"
+
+            # ➖ Delete previous day's key
+            prev_day = chunk_start_date - timedelta(days=1)
+            prev_day_key = f"availability:tenant_{tenant_id}:location_{location_id}:start_date_{prev_day.strftime('%Y-%m-%d')}"
+            deleted = valkey_client.delete(prev_day_key)
+            if deleted:
+                logger.info(f"[LOCAL TEST] Deleted previous cache key: {prev_day_key}")
+            else:
+                logger.info(f"[LOCAL TEST] No previous cache key to delete: {prev_day_key}")
+
+            # ✅ Set current chunk's key
             valkey_client.set(cache_key, json.dumps(response))
             logger.info(f"[LOCAL TEST] Cached key: {cache_key}")
+
 
         cur.close()
         print(f"[DEBUG] All chunks cached successfully for tenant={tenant_id}, location={location_id}")
