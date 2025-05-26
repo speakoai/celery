@@ -9,3 +9,4 @@ app.autodiscover_tasks(['tasks'])
 
 # 👇 Add this line
 import tasks.availability
+import tasks.sms
