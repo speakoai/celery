@@ -1,9 +1,9 @@
-from celery_app import celery_app
+from tasks.celery_app import app
 from twilio.rest import Client
 import psycopg2
 import os
 
-@celery_app.task
+@app.task
 def send_sms_confirmation_new(booking_id: int):
     try:
         # Connect to database
