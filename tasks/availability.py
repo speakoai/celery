@@ -13,6 +13,12 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import time
 
+import logging
+
+logger = logging.getLogger("availability_logger")
+if not logger.handlers:
+    logging.basicConfig(level=logging.INFO)
+
 
 print(f"[DEBUG] DATABASE_URL: {os.getenv('DATABASE_URL')}")
 print(f"[DEBUG] REDIS_URL: {os.getenv('REDIS_URL')}")
