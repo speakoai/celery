@@ -11,7 +11,7 @@ def send_sms_confirmation_new(booking_id: int):
         cur = conn.cursor()
 
         cur.execute("""
-            SELECT customer_name, customer_phone, start_time, service_name, staff_name
+            SELECT customer_name, customer_phone, start_time
             FROM bookings
             WHERE booking_id = %s
         """, (booking_id,))
@@ -21,11 +21,10 @@ def send_sms_confirmation_new(booking_id: int):
             print(f"[SMS] Booking {booking_id} not found.")
             return
 
-        name, phone, date, service, staff = row
+        name, phone, date = row
 
         message = (
             f"Hi {name}, your booking is confirmed on {date.strftime('%Y-%m-%d %H:%M')} "
-            f"with {staff} for {service}. Thank you!"
         )
 
         client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
