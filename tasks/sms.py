@@ -7,7 +7,7 @@ import os
 def send_sms_confirmation_new(booking_id: int):
     try:
         # Connect to database
-        conn = psycopg2.connect(os.getenv("DB_URL"))
+        conn = psycopg2.connect(os.getenv("DATABASE_URL"))
         cur = conn.cursor()
 
         cur.execute("""
