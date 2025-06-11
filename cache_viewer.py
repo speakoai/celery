@@ -170,6 +170,81 @@ def venue_generator():
                     error_message=error_message,
                     success_message=success_message
                 )
+                
+            # Step 4: Display uploaded result
+            elif step == "4" and request.form.get("action") == "generate":
+                tenant_id = request.form.get("tenant_id")
+                location_id = request.form.get("location_id")
+                selected_location = {
+                    "tenant_id": tenant_id,
+                    "location_id": location_id
+                }
+
+                # Reconstruct parsed rows
+                from flask import Markup
+                import json
+
+                csv_rows = request.form.getlist("csv_data")
+                parsed_rows = [json.loads(row) for row in csv_rows]
+
+                inserted_units = []
+
+                with psycopg2.connect(db_url, cursor_factory=RealDictCursor) as conn:
+                    with conn.cursor() as cur:
+                        # Get location availability once
+                        cur.execute("""
+                            SELECT day_of_week, start_time, end_time, is_closed
+                            FROM location_availability
+                            WHERE tenant_id = %s AND location_id = %s
+                            AND type = 'recurring' AND is_active = true
+                            ORDER BY day_of_week, start_time
+                        """, (tenant_id, location_id))
+                        location_availabilities = cur.fetchall()
+
+                        for row in parsed_rows:
+                            # Insert into venue_unit
+                            cur.execute("""
+                                INSERT INTO venue_unit (tenant_id, name, venue_unit_type, capacity, min_capacity)
+                                VALUES (%s, %s, %s, %s, %s)
+                                RETURNING venue_unit_id
+                            """, (
+                                tenant_id,
+                                row["name"],
+                                row["venue_unit_type"],
+                                int(row["capacity"]),
+                                int(row["min_capacity"])
+                            ))
+                            venue_unit_id = cur.fetchone()["venue_unit_id"]
+                            inserted_units.append({**row, "venue_unit_id": venue_unit_id})
+
+                            # Create availability for this unit
+                            for avail in location_availabilities:
+                                cur.execute("""
+                                    INSERT INTO venue_availability (
+                                        tenant_id, venue_unit_id, location_id, type,
+                                        day_of_week, specific_date, start_time, end_time,
+                                        is_active, service_duration
+                                    ) VALUES (
+                                        %s, %s, %s, 'recurring',
+                                        %s, NULL, %s, %s,
+                                        true, 60
+                                    )
+                                """, (
+                                    tenant_id,
+                                    venue_unit_id,
+                                    location_id,
+                                    avail["day_of_week"],
+                                    avail["start_time"],
+                                    avail["end_time"]
+                                ))
+
+                    conn.commit()
+
+                return render_template("venue.html",
+                                    step=4,
+                                    selected_location=selected_location,
+                                    inserted_units=inserted_units)
+
 
 # ----------------------------
 # Helper Function

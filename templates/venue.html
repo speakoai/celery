@@ -141,12 +141,51 @@
             {% for row in parsed_rows %}
                 <tr>
                 <td>{{ row["name"] }}</td>
-                <td>{{ row.venue_unit_type }}</td>
-                <td>{{ row.capacity }}</td>
-                <td>{{ row.min_capacity }}</td>
+                <td>{{ row["venue_unit_type"] }}</td>
+                <td>{{ row["capacity"] }}</td>
+                <td>{{ row["min_capacity"] }}</td>
                 </tr>
             {% endfor %}
             </table>
+        
+            <form method="POST">
+            <input type="hidden" name="step" value="4">
+            <input type="hidden" name="tenant_id" value="{{ selected_location.tenant_id }}">
+            <input type="hidden" name="location_id" value="{{ selected_location.location_id }}">
+            <input type="hidden" name="action" value="generate">
+        
+            {% for row in parsed_rows %}
+                <input type="hidden" name="csv_data" value="{{ row | tojson | safe }}">
+            {% endfor %}
+        
+            <button type="submit" style="margin-top: 20px;">Generate Venues/Tables with Availabilities</button>
+            </form>
         {% endif %}
+    {% endif %}
+    {% if step == 4 %}
+        <h3>Step 4: Inserted Venues/Tables</h3>
+
+        <table border="1" cellpadding="5" cellspacing="0">
+            <tr>
+            <th>Venue Unit ID</th>
+            <th>Name</th>
+            <th>Type</th>
+            <th>Capacity</th>
+            <th>Min Capacity</th>
+            </tr>
+            {% for unit in inserted_units %}
+            <tr>
+                <td>{{ unit["venue_unit_id"] }}</td>
+                <td>{{ unit["name"] }}</td>
+                <td>{{ unit["venue_unit_type"] }}</td>
+                <td>{{ unit["capacity"] }}</td>
+                <td>{{ unit["min_capacity"] }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+
+        <p style="margin-top: 20px; color: green;">
+            ✅ {{ inserted_units|length }} venues/tables created with availability.
+        </p>
     {% endif %}
 {% endblock %}
