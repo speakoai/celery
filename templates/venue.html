@@ -102,4 +102,51 @@
         <button type="submit">Proceed to Upload Venue/Table CSV</button>
     </form>
     {% endif %}
+
+    {% if step == 3 %}
+        <h3>Step 3: Upload Venue/Table CSV</h3>
+        <p><strong>Tenant ID:</strong> {{ selected_location.tenant_id }}</p>
+        <p><strong>Location ID:</strong> {{ selected_location.location_id }}</p>
+
+        {% if error_message %}
+            <p style="color: red;"><strong>Error:</strong> {{ error_message }}</p>
+        {% endif %}
+
+        {% if success_message %}
+            <p style="color: green;"><strong>{{ success_message }}</strong></p>
+        {% endif %}
+
+        <form method="POST" enctype="multipart/form-data">
+            <input type="hidden" name="step" value="3">
+            <input type="hidden" name="tenant_id" value="{{ selected_location.tenant_id }}">
+            <input type="hidden" name="location_id" value="{{ selected_location.location_id }}">
+
+            <div style="margin-bottom: 15px;">
+            <label for="csv_file">Upload CSV File:</label><br>
+            <input type="file" id="csv_file" name="file" accept=".csv" required>
+            </div>
+
+            <button type="submit">Upload and Process</button>
+        </form>
+
+        {% if parsed_rows %}
+            <h4>Preview of Uploaded Data</h4>
+            <table border="1" cellpadding="5" cellspacing="0">
+            <tr>
+                <th>Name</th>
+                <th>Venue Unit Type</th>
+                <th>Capacity</th>
+                <th>Min Capacity</th>
+            </tr>
+            {% for row in parsed_rows %}
+                <tr>
+                <td>{{ row.name }}</td>
+                <td>{{ row.venue_unit_type }}</td>
+                <td>{{ row.capacity }}</td>
+                <td>{{ row.min_capacity }}</td>
+                </tr>
+            {% endfor %}
+            </table>
+        {% endif %}
+    {% endif %}
 {% endblock %}
