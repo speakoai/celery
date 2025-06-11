@@ -41,32 +41,65 @@
     <p><strong>Tenant ID:</strong> {{ selected_location.tenant_id }}</p>
     <p><strong>Location ID:</strong> {{ selected_location.location_id }}</p>
 
+    <!-- Option 1: Copy from location -->
+    <div style="margin: 20px 0;">
+        <label>
+        <input type="radio" name="availability_source" value="location" checked>
+        <strong>Option 1:</strong> Apply the location availability to the venues/tables.
+        </label>
+        <br>
+        <small style="margin-left: 22px; display: block;">
+        By selecting this, you will have to manually create duration for each venue/table.
+        </small>
+    </div>
+
+    <!-- Show location availability -->
     {% if availabilities %}
-      <table border="1" cellpadding="6" cellspacing="0">
+        <table border="1" cellpadding="6" cellspacing="0">
         <tr>
-          <th>Day of Week</th>
-          <th>Start Time</th>
-          <th>End Time</th>
-          <th>Is Closed?</th>
+            <th>Day of Week</th>
+            <th>Start Time</th>
+            <th>End Time</th>
+            <th>Is Closed?</th>
         </tr>
         {% for row in availabilities %}
-          <tr>
-            <td>{{ row.day_of_week }}</td>
+            <tr>
+            <td>{{ ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][row.day_of_week] }}</td>
             <td>{{ row.start_time }}</td>
             <td>{{ row.end_time }}</td>
             <td>{{ 'Yes' if row.is_closed else 'No' }}</td>
-          </tr>
+            </tr>
         {% endfor %}
-      </table>
+        </table>
     {% else %}
-      <p>No availability found for this location.</p>
+        <p>No availability found for this location.</p>
     {% endif %}
 
+    <!-- Option 2: Copy from availability template -->
+    <div style="margin: 20px 0;">
+        <label>
+        <input type="radio" name="availability_source" value="template">
+        <strong>Option 2:</strong> Apply the location availability using an availability template.
+        </label>
+        <br>
+        <small style="margin-left: 22px; display: block;">
+        Use predefined templates to define availability across venues/tables.
+        </small>
+
+        <div style="margin-left: 22px; margin-top: 8px;">
+        <select name="template_id" disabled>
+            <option value="">-- Select an availability template --</option>
+            <!-- Empty for now -->
+        </select>
+        </div>
+    </div>
+
+    <!-- Proceed button -->
     <form method="POST" style="margin-top: 20px;">
-      <input type="hidden" name="step" value="3">
-      <input type="hidden" name="tenant_id" value="{{ selected_location.tenant_id }}">
-      <input type="hidden" name="location_id" value="{{ selected_location.location_id }}">
-      <button type="submit">Proceed to Upload CSV</button>
+        <input type="hidden" name="step" value="3">
+        <input type="hidden" name="tenant_id" value="{{ selected_location.tenant_id }}">
+        <input type="hidden" name="location_id" value="{{ selected_location.location_id }}">
+        <button type="submit">Proceed to Upload CSV</button>
     </form>
-  {% endif %}
+   {% endif %}
 {% endblock %}
