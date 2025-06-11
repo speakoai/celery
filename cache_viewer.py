@@ -153,11 +153,9 @@ def venue_generator():
                             content = file.read().decode("utf-8")
                             stream = StringIO(content)
                             reader = csv.DictReader(stream)
-                            for raw_row in reader:
-                                # Normalize keys: strip spaces and lowercase them
-                                row = {k.strip().lower(): v.strip() for k, v in raw_row.items()}
-                                print(row)
-                                parsed_rows.append(row)
+                            for row in reader:
+                                cleaned_row = {k.strip().lower().replace('\ufeff', ''): v.strip() for k, v in row.items()}
+                                parsed_rows.append(cleaned_row)
 
 
                             success_message = f"Uploaded {len(parsed_rows)} venue rows successfully."
