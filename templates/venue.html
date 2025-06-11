@@ -48,7 +48,7 @@
         <strong>Option 1:</strong> Apply the location availability to the venues/tables.
         </label>
         <br>
-        <small style="margin-left: 22px; display: block;">
+        <small style="margin-left: 24px; display: block; margin-top: 4px; color: #666;">
         By selecting this, you will have to manually create duration for each venue/table.
         </small>
     </div>
@@ -82,11 +82,11 @@
         <strong>Option 2:</strong> Apply the location availability using an availability template.
         </label>
         <br>
-        <small style="margin-left: 22px; display: block;">
+        <small style="margin-left: 24px; display: block; margin-top: 4px; color: #666;">
         Use predefined templates to define availability across venues/tables.
         </small>
 
-        <div style="margin-left: 22px; margin-top: 8px;">
+        <div style="margin-left: 24px; margin-top: 8px;">
         <select name="template_id" disabled>
             <option value="">-- Select an availability template --</option>
             <!-- Empty for now -->
@@ -99,7 +99,7 @@
         <input type="hidden" name="step" value="3">
         <input type="hidden" name="tenant_id" value="{{ selected_location.tenant_id }}">
         <input type="hidden" name="location_id" value="{{ selected_location.location_id }}">
-        <button type="submit">Proceed to Upload CSV</button>
+        <button type="submit">Proceed to Upload Venue/Table CSV</button>
     </form>
-   {% endif %}
+    {% endif %}
 {% endblock %}

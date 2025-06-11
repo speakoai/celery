@@ -89,6 +89,7 @@ def venue_generator():
                 SELECT tenant_id, location_id, name 
                 FROM locations 
                 WHERE is_active = true 
+                AND location_type = 'rest'
                 ORDER BY name ASC
             """)
             locations = cur.fetchall()
