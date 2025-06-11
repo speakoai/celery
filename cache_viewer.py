@@ -75,31 +75,40 @@ def allowed_file(filename):
 
 @app.route("/venue", methods=["GET", "POST"])
 def venue_generator():
+    from io import StringIO
+    import csv
+
     db_url = os.getenv("DATABASE_URL")
     selected_location = None
     locations = []
     availabilities = []
+    parsed_rows = []
+    error_message = ""
+    success_message = ""
 
-    step = request.form.get("step", "1")  # Default to Step 1
+    # Determine current step
+    if request.method == "POST":
+        step = request.form.get("step", "1")
+    else:
+        step = "1"
 
     with psycopg2.connect(db_url, cursor_factory=RealDictCursor) as conn:
         with conn.cursor() as cur:
-            # Always needed for Step 1 dropdown
+            # Step 1: load location dropdown (filtered by type = 'rest')
             cur.execute("""
-                SELECT tenant_id, location_id, name 
-                FROM locations 
-                WHERE is_active = true 
-                AND location_type = 'rest'
+                SELECT tenant_id, location_id, name
+                FROM locations
+                WHERE is_active = true AND location_type = 'rest'
                 ORDER BY name ASC
             """)
             locations = cur.fetchall()
 
+            # Step 1: Just render dropdown
             if step == "1":
-                # Just showing dropdown
                 return render_template("venue.html", step=1, locations=locations)
 
+            # Step 2: Display recurring availability for selected location
             elif step == "2":
-                # Process Step 1 submission and fetch availability
                 tenant_id = request.form.get("tenant_id")
                 location_id = request.form.get("location_id")
                 selected_location = {
@@ -116,14 +125,50 @@ def venue_generator():
                 """, (tenant_id, location_id))
                 availabilities = cur.fetchall()
 
-    return render_template(
-        "venue.html",
-        step=2,
-        locations=locations,
-        selected_location=selected_location,
-        availabilities=availabilities
-    )
+                return render_template(
+                    "venue.html",
+                    step=2,
+                    locations=locations,
+                    selected_location=selected_location,
+                    availabilities=availabilities
+                )
 
+            # Step 3: Upload and parse CSV
+            elif step == "3":
+                tenant_id = request.form.get("tenant_id")
+                location_id = request.form.get("location_id")
+                selected_location = {
+                    "tenant_id": tenant_id,
+                    "location_id": location_id
+                }
+
+                if "file" in request.files:
+                    file = request.files["file"]
+                    if file.filename == "":
+                        error_message = "No file selected."
+                    elif not file.filename.lower().endswith(".csv"):
+                        error_message = "Only CSV files are allowed."
+                    else:
+                        try:
+                            content = file.read().decode("utf-8")
+                            stream = StringIO(content)
+                            reader = csv.DictReader(stream)
+
+                            for row in reader:
+                                parsed_rows.append(row)
+
+                            success_message = f"Uploaded {len(parsed_rows)} venue rows successfully."
+                        except Exception as e:
+                            error_message = f"Failed to read CSV: {str(e)}"
+
+                return render_template(
+                    "venue.html",
+                    step=3,
+                    selected_location=selected_location,
+                    parsed_rows=parsed_rows,
+                    error_message=error_message,
+                    success_message=success_message
+                )
 
 # ----------------------------
 # Helper Function
