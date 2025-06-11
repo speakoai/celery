@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify, render_template, redirect, url_for
+from werkzeug.utils import secure_filename
 import redis
 import os
 from dotenv import load_dotenv
@@ -65,6 +66,27 @@ def api():
         return jsonify({"key": key, "value": value})
     return jsonify({"error": "Key not found"}), 404
 
+
+# Allowed extension check
+def allowed_file(filename):
+    return "." in filename and filename.rsplit(".", 1)[1].lower() == "csv"
+
+@app.route("/venue", methods=["GET", "POST"])
+def venue_generator():
+    message = ""
+    if request.method == "POST":
+        file = request.files.get("file")
+        if not file or file.filename == "":
+            message = "No file selected."
+        elif not allowed_file(file.filename):
+            message = "Only CSV files are allowed."
+        else:
+            filename = secure_filename(file.filename)
+            content = file.read().decode("utf-8")
+            # Later: parse `content` and insert to DB
+            message = f"Successfully uploaded: {filename} (Preview disabled for now)"
+
+    return render_template("venue.html", message=message)
 
 # ----------------------------
 # Helper Function
