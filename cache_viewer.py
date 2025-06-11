@@ -4,6 +4,8 @@ import redis
 import os
 from dotenv import load_dotenv
 import json
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 load_dotenv()
 
@@ -73,20 +75,32 @@ def allowed_file(filename):
 
 @app.route("/venue", methods=["GET", "POST"])
 def venue_generator():
-    message = ""
-    if request.method == "POST":
-        file = request.files.get("file")
-        if not file or file.filename == "":
-            message = "No file selected."
-        elif not allowed_file(file.filename):
-            message = "Only CSV files are allowed."
-        else:
-            filename = secure_filename(file.filename)
-            content = file.read().decode("utf-8")
-            # Later: parse `content` and insert to DB
-            message = f"Successfully uploaded: {filename} (Preview disabled for now)"
+    selected_location = None
+    locations = []
 
-    return render_template("venue.html", message=message)
+    # Connect to PostgreSQL
+    db_url = os.getenv("DATABASE_URL")
+    with psycopg2.connect(db_url, cursor_factory=RealDictCursor) as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT tenant_id, location_id, name 
+                FROM locations 
+                WHERE is_active = true 
+                ORDER BY name ASC
+            """)
+            locations = cur.fetchall()
+
+    if request.method == "POST":
+        tenant_id = request.form.get("tenant_id")
+        location_id = request.form.get("location_id")
+        selected_location = {
+            "tenant_id": tenant_id,
+            "location_id": location_id
+        }
+        # TODO: Proceed to Step 2 using selected_location
+
+    return render_template("venue.html", locations=locations, selected_location=selected_location)
+
 
 # ----------------------------
 # Helper Function

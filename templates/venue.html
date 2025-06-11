@@ -1,18 +1,30 @@
 {% extends "base.html" %}
 
 {% block content %}
-  <h2>Venue/Table Generator</h2>
+  <h2>Step 1: Select Location</h2>
 
-  <form method="POST" enctype="multipart/form-data">
-    <div style="margin-bottom: 10px;">
-      <label>Upload CSV File:
-        <input type="file" name="file" accept=".csv">
-      </label>
+  <form method="POST">
+    <div style="margin-bottom: 15px;">
+      <label for="location_select">Choose a location:</label><br>
+      <select id="location_select" name="location_id" required>
+        <option value="">-- Select a location --</option>
+        {% for loc in locations %}
+          <option value="{{ loc.location_id }}"
+            {% if selected_location and loc.location_id == selected_location.location_id|int %}selected{% endif %}>
+            {{ loc.name }} (Tenant {{ loc.tenant_id }})
+          </option>
+        {% endfor %}
+      </select>
+      <!-- Carry tenant_id in a hidden field -->
+      {% if selected_location %}
+        <input type="hidden" name="tenant_id" value="{{ selected_location.tenant_id }}">
+      {% endif %}
     </div>
-    <button type="submit">Upload</button>
+    <button type="submit">Next</button>
   </form>
 
-  {% if message %}
-    <p><strong>{{ message }}</strong></p>
+  {% if selected_location %}
+    <p>You selected location ID <strong>{{ selected_location.location_id }}</strong> under tenant <strong>{{ selected_location.tenant_id }}</strong>.</p>
+    <p><em>(Step 2 to be added next)</em></p>
   {% endif %}
 {% endblock %}
