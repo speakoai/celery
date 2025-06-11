@@ -6,38 +6,37 @@
   {% if step == 1 %}
     <h3>Step 1: Select Location</h3>
     <form method="POST" id="location-form">
-        <input type="hidden" name="step" value="2">
-        <input type="hidden" name="tenant_id" id="tenant_id">
+      <input type="hidden" name="step" value="2">
+      <input type="hidden" name="tenant_id" id="tenant_id">
 
-        <div style="margin-bottom: 15px;">
+      <div style="margin-bottom: 15px;">
         <label for="location_select">Choose a location:</label><br>
         <select id="location_select" name="location_id" required>
-            <option value="">-- Select a location --</option>
-            {% for loc in locations %}
+          <option value="">-- Select a location --</option>
+          {% for loc in locations %}
             <option value="{{ loc.location_id }}" data-tenant-id="{{ loc.tenant_id }}">
-                {{ loc.name }} (Tenant {{ loc.tenant_id }})
+              {{ loc.name }} (Tenant {{ loc.tenant_id }})
             </option>
-            {% endfor %}
+          {% endfor %}
         </select>
-        </div>
+      </div>
 
-        <button type="submit">Next</button>
+      <button type="submit">Next</button>
     </form>
 
     <script>
-        const locationSelect = document.getElementById('location_select');
-        const tenantIdInput = document.getElementById('tenant_id');
+      const locationSelect = document.getElementById('location_select');
+      const tenantIdInput = document.getElementById('tenant_id');
 
-        locationSelect.addEventListener('change', () => {
+      locationSelect.addEventListener('change', () => {
         const selectedOption = locationSelect.options[locationSelect.selectedIndex];
         const tenantId = selectedOption.getAttribute('data-tenant-id');
         tenantIdInput.value = tenantId;
-        });
+      });
     </script>
   {% endif %}
 
-
-  {% elif step == 2 %}
+  {% if step == 2 %}
     <h3>Step 2: Confirm Availability for Selected Location</h3>
     <p><strong>Tenant ID:</strong> {{ selected_location.tenant_id }}</p>
     <p><strong>Location ID:</strong> {{ selected_location.location_id }}</p>
