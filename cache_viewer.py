@@ -40,7 +40,7 @@ def cache_viewer():
                 parsed = json.loads(raw_value)
                 value = json.dumps(parsed, indent=2, ensure_ascii=False)
             except json.JSONDecodeError:
-                value = raw_value  # fallback to raw value
+                value = raw_value
 
     return render_template("cache_viewer.html", tenant_id=tenant_id, location_id=location_id,
                            start_date=start_date, key=key, value=value)
