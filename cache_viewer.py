@@ -75,13 +75,16 @@ def allowed_file(filename):
 
 @app.route("/venue", methods=["GET", "POST"])
 def venue_generator():
+    db_url = os.getenv("DATABASE_URL")
     selected_location = None
     locations = []
+    availabilities = []
 
-    # Connect to PostgreSQL
-    db_url = os.getenv("DATABASE_URL")
+    step = request.form.get("step", "1")  # Default to Step 1
+
     with psycopg2.connect(db_url, cursor_factory=RealDictCursor) as conn:
         with conn.cursor() as cur:
+            # Always needed for Step 1 dropdown
             cur.execute("""
                 SELECT tenant_id, location_id, name 
                 FROM locations 
@@ -90,16 +93,35 @@ def venue_generator():
             """)
             locations = cur.fetchall()
 
-    if request.method == "POST":
-        tenant_id = request.form.get("tenant_id")
-        location_id = request.form.get("location_id")
-        selected_location = {
-            "tenant_id": tenant_id,
-            "location_id": location_id
-        }
-        # TODO: Proceed to Step 2 using selected_location
+            if step == "1":
+                # Just showing dropdown
+                return render_template("venue.html", step=1, locations=locations)
 
-    return render_template("venue.html", locations=locations, selected_location=selected_location)
+            elif step == "2":
+                # Process Step 1 submission and fetch availability
+                tenant_id = request.form.get("tenant_id")
+                location_id = request.form.get("location_id")
+                selected_location = {
+                    "tenant_id": tenant_id,
+                    "location_id": location_id
+                }
+
+                cur.execute("""
+                    SELECT day_of_week, start_time, end_time, is_closed
+                    FROM location_availability
+                    WHERE tenant_id = %s AND location_id = %s
+                      AND type = 'recurring' AND is_active = true
+                    ORDER BY day_of_week, start_time
+                """, (tenant_id, location_id))
+                availabilities = cur.fetchall()
+
+    return render_template(
+        "venue.html",
+        step=2,
+        locations=locations,
+        selected_location=selected_location,
+        availabilities=availabilities
+    )
 
 
 # ----------------------------

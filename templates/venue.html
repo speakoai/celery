@@ -1,30 +1,59 @@
 {% extends "base.html" %}
 
 {% block content %}
-  <h2>Step 1: Select Location</h2>
+  <h2>Venue/Table Generator</h2>
 
-  <form method="POST">
-    <div style="margin-bottom: 15px;">
-      <label for="location_select">Choose a location:</label><br>
-      <select id="location_select" name="location_id" required>
-        <option value="">-- Select a location --</option>
-        {% for loc in locations %}
-          <option value="{{ loc.location_id }}"
-            {% if selected_location and loc.location_id == selected_location.location_id|int %}selected{% endif %}>
-            {{ loc.name }} (Tenant {{ loc.tenant_id }})
-          </option>
+  {% if step == 1 %}
+    <h3>Step 1: Select Location</h3>
+    <form method="POST">
+      <input type="hidden" name="step" value="2">
+      <div style="margin-bottom: 15px;">
+        <label for="location_select">Choose a location:</label><br>
+        <select id="location_select" name="location_id" required>
+          <option value="">-- Select a location --</option>
+          {% for loc in locations %}
+            <option value="{{ loc.location_id }}">{{ loc.name }} (Tenant {{ loc.tenant_id }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <!-- store tenant_id in a hidden field based on selection -->
+      <div style="margin-bottom: 10px;">
+        <label>Tenant ID: <input type="text" name="tenant_id" required></label>
+      </div>
+      <button type="submit">Next</button>
+    </form>
+
+  {% elif step == 2 %}
+    <h3>Step 2: Confirm Availability for Selected Location</h3>
+    <p><strong>Tenant ID:</strong> {{ selected_location.tenant_id }}</p>
+    <p><strong>Location ID:</strong> {{ selected_location.location_id }}</p>
+
+    {% if availabilities %}
+      <table border="1" cellpadding="6" cellspacing="0">
+        <tr>
+          <th>Day of Week</th>
+          <th>Start Time</th>
+          <th>End Time</th>
+          <th>Is Closed?</th>
+        </tr>
+        {% for row in availabilities %}
+          <tr>
+            <td>{{ row.day_of_week }}</td>
+            <td>{{ row.start_time }}</td>
+            <td>{{ row.end_time }}</td>
+            <td>{{ 'Yes' if row.is_closed else 'No' }}</td>
+          </tr>
         {% endfor %}
-      </select>
-      <!-- Carry tenant_id in a hidden field -->
-      {% if selected_location %}
-        <input type="hidden" name="tenant_id" value="{{ selected_location.tenant_id }}">
-      {% endif %}
-    </div>
-    <button type="submit">Next</button>
-  </form>
+      </table>
+    {% else %}
+      <p>No availability found for this location.</p>
+    {% endif %}
 
-  {% if selected_location %}
-    <p>You selected location ID <strong>{{ selected_location.location_id }}</strong> under tenant <strong>{{ selected_location.tenant_id }}</strong>.</p>
-    <p><em>(Step 2 to be added next)</em></p>
+    <form method="POST" style="margin-top: 20px;">
+      <input type="hidden" name="step" value="3">
+      <input type="hidden" name="tenant_id" value="{{ selected_location.tenant_id }}">
+      <input type="hidden" name="location_id" value="{{ selected_location.location_id }}">
+      <button type="submit">Proceed to Upload CSV</button>
+    </form>
   {% endif %}
 {% endblock %}
