@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head><title>Cache Viewer</title></head>
+<body>
+  <h1>Redis Cache Viewer</h1>
+  <form method="get">
+    Tenant ID: <input type="text" name="tenant_id" value="{{ tenant_id }}">
+    Location ID: <input type="text" name="location_id" value="{{ location_id }}">
+    Start Date (optional): <input type="date" name="start_date" value="{{ start_date }}">
+    <button type="submit">Fetch</button>
+  </form>
+  {% if value %}
+    <h2>Value for key: {{ key }}</h2>
+    <pre>{{ value | safe }}</pre>
+  {% elif tenant_id and location_id %}
+    <p><strong>No value found for key: {{ key }}</strong></p>
+  {% endif %}
+</body>
+</html>

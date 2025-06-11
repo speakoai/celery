@@ -8,7 +8,8 @@ def run_all_jobs():
         {"tenant_id": 1, "location_id": 2, "location_tz": "Australia/Sydney", "location_type": "nail"},
         {"tenant_id": 2, "location_id": 34, "location_tz": "Australia/Sydney", "location_type": "rest"},
         {"tenant_id": 2, "location_id": 35, "location_tz": "Australia/Sydney", "location_type": "rest"},
-        {"tenant_id": 35, "location_id": 41, "location_tz": "Australia/Sydney", "location_type": "rest"},
+        {"tenant_id": 35, "location_id": 41, "location_tz": "Australia/Brisbane", "location_type": "rest"},
+        {"tenant_id": 36, "location_id": 42, "location_tz": "Australia/Brisbane", "location_type": "rest"},
         # Add more as needed
     ]
 

@@ -85,10 +85,19 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn cache_viewer:app
     envVars:
+      - key: CELERY_BROKER_URL
+        fromService:
+          name: celery-redis
+          type: redis
+          property: connectionString
       - key: REDIS_URL
         fromService:
-          name: speako-cache
           type: redis
+          name: speako-cache
+          property: connectionString
+      - key: DATABASE_URL
+        fromDatabase:
+          name: speako-db
           property: connectionString
     autoDeploy: true
 
