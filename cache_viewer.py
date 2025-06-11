@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 import json
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from html import unescape
 
 load_dotenv()
 
@@ -185,7 +186,7 @@ def venue_generator():
                 import json
 
                 csv_rows = request.form.getlist("csv_data")
-                parsed_rows = [json.loads(row) for row in csv_rows]
+                parsed_rows = [json.loads(unescape(row)) for row in csv_rows]
 
                 inserted_units = []
 
