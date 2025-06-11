@@ -4,21 +4,24 @@
   <title>Speako Admin</title>
   <style>
     .nav-buttons {
-      margin-bottom: 20px;
+      margin: 20px 0;
     }
     .nav-buttons a button {
       margin-right: 12px;
     }
+    body {
+      font-family: sans-serif;
+      padding: 20px;
+    }
   </style>
 </head>
 <body>
+  <h1>Welcome to Speako Admin Panel</h1>
+  <p>Choose a tool from below:</p>
+
   <div class="nav-buttons">
-    <a href="/"><button>🏠 Home</button></a>
     <a href="/cache"><button>🔍 Cache Viewer</button></a>
     <a href="/venue"><button>📄 Venue/Table Generator</button></a>
     <a href="/availability"><button>⚙️ Availability Generator</button></a>
+    <a href="/"><button>🏠 Home</button></a>
   </div>
-
-  {% block content %}{% endblock %}
-</body>
-</html>
