@@ -5,23 +5,37 @@
 
   {% if step == 1 %}
     <h3>Step 1: Select Location</h3>
-    <form method="POST">
-      <input type="hidden" name="step" value="2">
-      <div style="margin-bottom: 15px;">
+    <form method="POST" id="location-form">
+        <input type="hidden" name="step" value="2">
+        <input type="hidden" name="tenant_id" id="tenant_id">
+
+        <div style="margin-bottom: 15px;">
         <label for="location_select">Choose a location:</label><br>
         <select id="location_select" name="location_id" required>
-          <option value="">-- Select a location --</option>
-          {% for loc in locations %}
-            <option value="{{ loc.location_id }}">{{ loc.name }} (Tenant {{ loc.tenant_id }})</option>
-          {% endfor %}
+            <option value="">-- Select a location --</option>
+            {% for loc in locations %}
+            <option value="{{ loc.location_id }}" data-tenant-id="{{ loc.tenant_id }}">
+                {{ loc.name }} (Tenant {{ loc.tenant_id }})
+            </option>
+            {% endfor %}
         </select>
-      </div>
-      <!-- store tenant_id in a hidden field based on selection -->
-      <div style="margin-bottom: 10px;">
-        <label>Tenant ID: <input type="text" name="tenant_id" required></label>
-      </div>
-      <button type="submit">Next</button>
+        </div>
+
+        <button type="submit">Next</button>
     </form>
+
+    <script>
+        const locationSelect = document.getElementById('location_select');
+        const tenantIdInput = document.getElementById('tenant_id');
+
+        locationSelect.addEventListener('change', () => {
+        const selectedOption = locationSelect.options[locationSelect.selectedIndex];
+        const tenantId = selectedOption.getAttribute('data-tenant-id');
+        tenantIdInput.value = tenantId;
+        });
+    </script>
+  {% endif %}
+
 
   {% elif step == 2 %}
     <h3>Step 2: Confirm Availability for Selected Location</h3>
