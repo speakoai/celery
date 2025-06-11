@@ -156,6 +156,7 @@ def venue_generator():
                             for raw_row in reader:
                                 # Normalize keys: strip spaces and lowercase them
                                 row = {k.strip().lower(): v.strip() for k, v in raw_row.items()}
+                                print(row)
                                 parsed_rows.append(row)
 
 
