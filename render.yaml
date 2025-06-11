@@ -81,7 +81,7 @@ services:
     name: cache-viewer
     region: virginia
     runtime: python
-    plan: free
+    plan: starter
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn cache_viewer:app
     envVars:

@@ -1,14 +1,6 @@
-<!DOCTYPE html>
-<html>
-<head>
-  <title>Speako Admin Panel</title>
-</head>
-<body>
-  <h1>Speako Tools</h1>
-  <ul>
-    <li><a href="/cache"><button>🔍 Cache Viewer</button></a></li>
-    <li><a href="/venue"><button>📄 Venue/Table Generator</button></a></li>
-    <li><a href="/availability"><button>⚙️ Availability Generator</button></a></li>
-  </ul>
-</body>
-</html>
+{% extends "base.html" %}
+
+{% block content %}
+  <h1>Welcome to Speako Admin Panel</h1>
+  <p>Choose a tool from the navigation above.</p>
+{% endblock %}

@@ -1,7 +1,6 @@
-<!DOCTYPE html>
-<html>
-<head><title>Cache Viewer</title></head>
-<body>
+{% extends "base.html" %}
+
+{% block content %}
   <h1>Redis Cache Viewer</h1>
   <form method="get">
     Tenant ID: <input type="text" name="tenant_id" value="{{ tenant_id }}">
@@ -15,5 +14,4 @@
   {% elif tenant_id and location_id %}
     <p><strong>No value found for key: {{ key }}</strong></p>
   {% endif %}
-</body>
-</html>
+{% endblock %}
