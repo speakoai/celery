@@ -57,14 +57,18 @@
     {% if availabilities %}
         <table border="1" cellpadding="6" cellspacing="0">
         <tr>
+            <th>Type</th>
             <th>Day of Week</th>
+            <th>Specific Date</th>
             <th>Start Time</th>
             <th>End Time</th>
             <th>Is Closed?</th>
         </tr>
         {% for row in availabilities %}
             <tr>
-            <td>{{ ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][row.day_of_week] }}</td>
+            <td>{{ row.type }}</td>
+            <td>{{ ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][row.day_of_week] if row.type == 'recurring' else '-' }}</td>
+            <td>{{ row.specific_date if row.type == 'one_time' else '-' }}</td>
             <td>{{ row.start_time }}</td>
             <td>{{ row.end_time }}</td>
             <td>{{ 'Yes' if row.is_closed else 'No' }}</td>
@@ -72,7 +76,7 @@
         {% endfor %}
         </table>
     {% else %}
-        <p>No availability found for this location.</p>
+        <p>No active availability found for this location.</p>
     {% endif %}
 
     <!-- Option 2: Copy from availability template -->
@@ -143,10 +147,12 @@
                   <h4>Template Availability</h4>
                   <table border="1" cellpadding="6" cellspacing="0">
                     <tr>
+                      <th>Type</th>
                       <th>Day of Week</th>
+                      <th>Specific Date</th>
                       <th>Start Time</th>
                       <th>End Time</th>
-                      <th>Is Closed?</th>
+                      <th>Active?</th>
                       <th>Service Duration</th>
                     </tr>
                 `;
@@ -154,18 +160,20 @@
                 data.availabilities.forEach(row => {
                   html += `
                     <tr>
-                      <td>${days[row.day_of_week]}</td>
+                      <td>${row.type}</td>
+                      <td>${row.type === 'recurring' ? days[row.day_of_week] : '-'}</td>
+                      <td>${row.type === 'one_time' ? row.specific_date : '-'}</td>
                       <td>${row.start_time}</td>
                       <td>${row.end_time}</td>
-                      <td>${row.is_closed ? 'Yes' : 'No'}</td>
-                      <td>${row.service_duration} minutes</td>
+                      <td>${row.is_active ? 'Yes' : 'No'}</td>
+                      <td>${row.service_duration || 'Not specified'} minutes</td>
                     </tr>
                   `;
                 });
                 html += '</table>';
                 templateAvailabilityDiv.innerHTML = html;
               } else {
-                templateAvailabilityDiv.innerHTML = '<p>No availability found for this template.</p>';
+                templateAvailabilityDiv.innerHTML = '<p>No active availability found for this template.</p>';
               }
             })
             .catch(error => {

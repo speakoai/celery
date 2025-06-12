@@ -67,15 +67,12 @@ def api():
     return jsonify({"error": "Key not found"}), 404
 
 # ----------------------------
-# New Endpoint: Get Template Availability
+# Get Template Availability
 # ----------------------------
 @app.route("/get_template_availability")
 def get_template_availability():
     tenant_id = request.args.get("tenant_id")
     template_id = request.args.get("template_id")
-    
-    print("tenant_id" + str(tenant_id))
-    print("template_id" + str(template_id))
 
     if not tenant_id or not template_id:
         return jsonify({"error": "Missing tenant_id or template_id parameter"}), 400
@@ -84,10 +81,10 @@ def get_template_availability():
         with psycopg2.connect(os.getenv("DATABASE_URL"), cursor_factory=RealDictCursor) as conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    SELECT day_of_week, start_time, end_time, is_closed, service_duration
+                    SELECT type, day_of_week, specific_date, start_time, end_time, is_active, service_duration
                     FROM availability_template_details
-                    WHERE tenant_id = %s AND template_id = %s
-                    ORDER BY day_of_week, start_time
+                    WHERE tenant_id = %s AND template_id = %s AND is_active = true
+                    ORDER BY type, day_of_week, specific_date, start_time
                 """, (tenant_id, template_id))
                 availabilities = cur.fetchall()
                 return jsonify({"availabilities": availabilities})
@@ -120,7 +117,7 @@ def venue_generator():
 
     with psycopg2.connect(db_url, cursor_factory=RealDictCursor) as conn:
         with conn.cursor() as cur:
-            # Load locations (unchanged)
+            # Load locations
             cur.execute("""
                 SELECT tenant_id, location_id, name
                 FROM locations
@@ -133,7 +130,7 @@ def venue_generator():
             if step == "1":
                 return render_template("venue.html", step=1, locations=locations)
 
-            # Step 2: Display recurring availability or template options
+            # Step 2: Display all availability or template options
             elif step == "2":
                 tenant_id = request.form.get("tenant_id")
                 location_id = request.form.get("location_id")
@@ -142,13 +139,12 @@ def venue_generator():
                     "location_id": location_id
                 }
 
-                # Fetch location availability
+                # Fetch location availability (all types)
                 cur.execute("""
-                    SELECT day_of_week, start_time, end_time, is_closed
+                    SELECT type, day_of_week, specific_date, start_time, end_time, is_closed
                     FROM location_availability
-                    WHERE tenant_id = %s AND location_id = %s
-                      AND type = 'recurring' AND is_active = true
-                    ORDER BY day_of_week, start_time
+                    WHERE tenant_id = %s AND location_id = %s AND is_active = true
+                    ORDER BY type, day_of_week, specific_date, start_time
                 """, (tenant_id, location_id))
                 availabilities = cur.fetchall()
 
@@ -235,20 +231,18 @@ def venue_generator():
                         # Fetch availabilities based on source
                         if availability_source == "template" and selected_template_id:
                             cur.execute("""
-                                SELECT day_of_week, start_time, end_time, is_closed, service_duration
+                                SELECT type, day_of_week, specific_date, start_time, end_time, is_active, service_duration
                                 FROM availability_template_details
-                                WHERE tenant_id = %s AND template_id = %s
-                                AND is_closed = false
-                                ORDER BY day_of_week, start_time
+                                WHERE tenant_id = %s AND template_id = %s AND is_active = true
+                                ORDER BY type, day_of_week, specific_date, start_time
                             """, (tenant_id, selected_template_id))
                             availabilities = cur.fetchall()
                         else:
                             cur.execute("""
-                                SELECT day_of_week, start_time, end_time, is_closed
+                                SELECT type, day_of_week, specific_date, start_time, end_time, is_closed
                                 FROM location_availability
-                                WHERE tenant_id = %s AND location_id = %s
-                                AND type = 'recurring' AND is_active = true
-                                ORDER BY day_of_week, start_time
+                                WHERE tenant_id = %s AND location_id = %s AND is_active = true
+                                ORDER BY type, day_of_week, specific_date, start_time
                             """, (tenant_id, location_id))
                             availabilities = cur.fetchall()
 
@@ -270,22 +264,25 @@ def venue_generator():
 
                             # Create availability for this unit
                             for avail in availabilities:
-                                service_duration = avail.get("service_duration", 60)  # Default to 60 for location availability
+                                # Default to 60 for location availability or if service_duration is NULL
+                                service_duration = avail.get("service_duration", 60) if availability_source == "template" else 60
                                 cur.execute("""
                                     INSERT INTO venue_availability (
                                         tenant_id, venue_unit_id, location_id, type,
                                         day_of_week, specific_date, start_time, end_time,
                                         is_active, service_duration
                                     ) VALUES (
-                                        %s, %s, %s, 'recurring',
-                                        %s, NULL, %s, %s,
+                                        %s, %s, %s, %s,
+                                        %s, %s, %s, %s,
                                         true, %s
                                     )
                                 """, (
                                     tenant_id,
                                     venue_unit_id,
                                     location_id,
+                                    avail["type"],
                                     avail["day_of_week"],
+                                    avail.get("specific_date"),
                                     avail["start_time"],
                                     avail["end_time"],
                                     service_duration
