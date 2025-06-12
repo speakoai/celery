@@ -87,7 +87,20 @@ def get_template_availability():
                     ORDER BY type, day_of_week, specific_date, start_time
                 """, (tenant_id, template_id))
                 availabilities = cur.fetchall()
-                return jsonify({"availabilities": availabilities})
+                # Convert time and date objects to strings for JSON serialization
+                serialized_availabilities = [
+                    {
+                        "type": avail["type"],
+                        "day_of_week": avail["day_of_week"],
+                        "specific_date": avail["specific_date"].strftime("%Y-%m-%d") if avail["specific_date"] else None,
+                        "start_time": avail["start_time"].strftime("%H:%M:%S"),
+                        "end_time": avail["end_time"].strftime("%H:%M:%S"),
+                        "is_active": avail["is_active"],
+                        "service_duration": avail["service_duration"]
+                    }
+                    for avail in availabilities
+                ]
+                return jsonify({"availabilities": serialized_availabilities})
     except Exception as e:
         return jsonify({"error": f"Failed to fetch template availability: {str(e)}"}), 500
 
