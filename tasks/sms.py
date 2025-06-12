@@ -5,6 +5,7 @@ from tasks.celery_app import app
 from twilio.rest import Client
 import psycopg2
 import os
+import re
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 
@@ -219,8 +220,11 @@ def send_sms_confirmation_can(booking_id: int):
     except Exception as e:
         print(f"[SMS] Error: {e}")
 
+# Simple email validation regex
+EMAIL_REGEX = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+
 @app.task
-def send_email_confirmation_new_rest(booking_id: int, host_email: str) -> str:
+def send_email_confirmation_new_rest(booking_id: int) -> str:
     try:
         # Connect to database
         conn = psycopg2.connect(os.getenv("DATABASE_URL"))
@@ -236,6 +240,7 @@ def send_email_confirmation_new_rest(booking_id: int, host_email: str) -> str:
                 b.customer_phone,
                 b.venue_unit_id,
                 l.name AS location_name,
+                l.booking_email_recipients,
                 vu.name AS venue_unit_name
             FROM bookings b
             JOIN locations l
@@ -260,8 +265,33 @@ def send_email_confirmation_new_rest(booking_id: int, host_email: str) -> str:
             customer_phone,
             venue_unit_id,
             location_name,
+            booking_email_recipients,
             venue_unit_name
         ) = row
+
+        # Parse email recipients
+        if not booking_email_recipients:
+            fallback_email = os.getenv("FALLBACK_EMAIL")
+            if not fallback_email:
+                print(f"[EMAIL] No email recipients or fallback email for booking {booking_id}.")
+                return "failed"
+            to_emails = [fallback_email]
+        else:
+            # Split by comma or semicolon, strip whitespace, filter valid emails
+            to_emails = []
+            for email in re.split('[,;]', booking_email_recipients):
+                email = email.strip()
+                if email and re.match(EMAIL_REGEX, email):
+                    to_emails.append(email)
+                else:
+                    print(f"[EMAIL] Invalid email skipped: {email}")
+
+            if not to_emails:
+                fallback_email = os.getenv("FALLBACK_EMAIL")
+                if not fallback_email:
+                    print(f"[EMAIL] No valid email recipients or fallback email for booking {booking_id}.")
+                    return "failed"
+                to_emails = [fallback_email]
 
         # Construct email message with helping text and systematic data
         email_body = (
@@ -285,16 +315,17 @@ def send_email_confirmation_new_rest(booking_id: int, host_email: str) -> str:
         # Set up SendGrid email
         message = Mail(
             from_email=os.getenv("SENDGRID_FROM_EMAIL"),
-            to_emails=host_email,
+            to_emails=to_emails,
             subject=f"New Booking Confirmation (Ref: {booking_ref})",
             plain_text_content=email_body
         )
 
         # Send email via SendGrid
         sg = SendGridAPIClient(os.getenv("SENDGRID_API_KEY"))
+        print(f"SENDGRID API KEY: "{os.getenv("SENDGRID_API_KEY")})
         response = sg.send(message)
 
-        print(f"[EMAIL] Sent to {host_email}: {email_body}")
+        print(f"[EMAIL] Sent to {to_emails}: {email_body}")
         return "success"
 
     except Exception as e:
@@ -309,7 +340,7 @@ def send_email_confirmation_new_rest(booking_id: int, host_email: str) -> str:
             conn.close()
             
 @app.task
-def send_email_confirmation_new(booking_id: int, host_email: str) -> str:
+def send_email_confirmation_new(booking_id: int) -> str:
     try:
         # Connect to database
         conn = psycopg2.connect(os.getenv("DATABASE_URL"))
@@ -326,6 +357,7 @@ def send_email_confirmation_new(booking_id: int, host_email: str) -> str:
                 b.staff_id,
                 b.service_id,
                 l.name AS location_name,
+                l.booking_email_recipients,
                 s.name AS staff_name,
                 sv.name AS service_name
             FROM bookings b
@@ -354,9 +386,34 @@ def send_email_confirmation_new(booking_id: int, host_email: str) -> str:
             staff_id,
             service_id,
             location_name,
+            booking_email_recipients,
             staff_name,
             service_name
         ) = row
+
+        # Parse email recipients
+        if not booking_email_recipients:
+            fallback_email = os.getenv("FALLBACK_EMAIL")
+            if not fallback_email:
+                print(f"[EMAIL] No email recipients or fallback email for booking {booking_id}.")
+                return "failed"
+            to_emails = [fallback_email]
+        else:
+            # Split by comma or semicolon, strip whitespace, filter valid emails
+            to_emails = []
+            for email in re.split('[,;]', booking_email_recipients):
+                email = email.strip()
+                if email and re.match(EMAIL_REGEX, email):
+                    to_emails.append(email)
+                else:
+                    print(f"[EMAIL] Invalid email skipped: {email}")
+
+            if not to_emails:
+                fallback_email = os.getenv("FALLBACK_EMAIL")
+                if not fallback_email:
+                    print(f"[EMAIL] No valid email recipients or fallback email for booking {booking_id}.")
+                    return "failed"
+                to_emails = [fallback_email]
 
         # Construct email message with helping text and systematic data
         email_body = (
@@ -382,7 +439,7 @@ def send_email_confirmation_new(booking_id: int, host_email: str) -> str:
         # Set up SendGrid email
         message = Mail(
             from_email=os.getenv("SENDGRID_FROM_EMAIL"),
-            to_emails=host_email,
+            to_emails=to_emails,
             subject=f"New Booking Confirmation (Ref: {booking_ref})",
             plain_text_content=email_body
         )
@@ -391,7 +448,7 @@ def send_email_confirmation_new(booking_id: int, host_email: str) -> str:
         sg = SendGridAPIClient(os.getenv("SENDGRID_API_KEY"))
         response = sg.send(message)
 
-        print(f"[EMAIL] Sent to {host_email}: {email_body}")
+        print(f"[EMAIL] Sent to {to_emails}: {email_body}")
         return "success"
 
     except Exception as e:
