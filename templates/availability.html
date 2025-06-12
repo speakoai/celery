@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <h2>Regenerate Availabilities</h2>
+
+  <form method="POST" id="availability-form">
+    <div style="margin-bottom: 15px;">
+      <label for="location_select">Choose a location:</label><br>
+      <select id="location_select" name="location_id" required>
+        <option value="">-- Select a location --</option>
+        {% for loc in locations %}
+          <option value="{{ loc.location_id }}" data-tenant-id="{{ loc.tenant_id }}" data-location-type="{{ loc.location_type }}" data-timezone="{{ loc.timezone }}">
+            {{ loc.name }} (Tenant {{ loc.tenant_id }}, Type: {{ loc.location_type }}, Timezone: {{ loc.timezone }})
+          </option>
+        {% endfor %}
+      </select>
+      <input type="hidden" name="tenant_id" id="tenant_id">
+      <input type="hidden" name="location_type" id="location_type">
+      <input type="hidden" name="timezone" id="timezone">
+    </div>
+
+    <button type="submit" name="action" value="regenerate">Re-gen Availabilities for Location</button>
+  </form>
+
+  {% if result is not none %}
+    <div style="margin-top: 20px;">
+      {% if result %}
+        <p style="color: green;">✅ Task completed with result: {{ result }}</p>
+      {% else %}
+        <p style="color: red;">❌ No result returned</p>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  <script>
+    const locationSelect = document.getElementById('location_select');
+    const tenantIdInput = document.getElementById('tenant_id');
+    const locationTypeInput = document.getElementById('location_type');
+    const timezoneInput = document.getElementById('timezone');
+
+    locationSelect.addEventListener('change', () => {
+      const selectedOption = locationSelect.options[locationSelect.selectedIndex];
+      tenantIdInput.value = selectedOption.getAttribute('data-tenant-id');
+      locationTypeInput.value = selectedOption.getAttribute('data-location-type');
+      timezoneInput.value = selectedOption.getAttribute('data-timezone');
+    });
+  </script>
+{% endblock %}

@@ -7,6 +7,7 @@ import json
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from html import unescape
+from tasks.availability import gen_availability, gen_availability_venue
 
 load_dotenv()
 
@@ -103,6 +104,49 @@ def get_template_availability():
                 return jsonify({"availabilities": serialized_availabilities})
     except Exception as e:
         return jsonify({"error": f"Failed to fetch template availability: {str(e)}"}), 500
+
+# ----------------------------
+# Availability Regeneration Route
+# ----------------------------
+@app.route("/availability", methods=["GET", "POST"])
+def availability():
+    db_url = os.getenv("DATABASE_URL")
+    locations = []
+    result = None
+
+    with psycopg2.connect(db_url, cursor_factory=RealDictCursor) as conn:
+        with conn.cursor() as cur:
+            # Fetch active locations
+            cur.execute("""
+                SELECT tenant_id, location_id, name, location_type, timezone
+                FROM locations
+                WHERE is_active = true
+                ORDER BY name ASC
+            """)
+            locations = cur.fetchall()
+
+    if request.method == "POST" and request.form.get("action") == "regenerate":
+        tenant_id = request.form.get("tenant_id")
+        location_id = request.form.get("location_id")
+        location_type = request.form.get("location_type")
+        timezone = request.form.get("timezone")
+
+        if not tenant_id or not location_id or not location_type or not timezone:
+            result = None  # Trigger error display
+        else:
+            try:
+                # Convert tenant_id and location_id to integers
+                tenant_id = int(tenant_id)
+                location_id = int(location_id)
+                # Execute appropriate function based on location_type
+                if location_type == "rest":
+                    result = gen_availability_venue(tenant_id=tenant_id, location_id=location_id, location_tz=timezone)
+                else:
+                    result = gen_availability(tenant_id=tenant_id, location_id=location_id, location_tz=timezone)
+            except Exception as e:
+                result = None  # Treat exceptions as failure
+
+    return render_template("availability.html", locations=locations, result=result)
 
 # Allowed extension check
 def allowed_file(filename):
