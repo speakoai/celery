@@ -10,7 +10,7 @@
         <option value="">-- Select a location --</option>
         {% for loc in locations %}
           <option value="{{ loc.location_id }}" data-tenant-id="{{ loc.tenant_id }}" data-location-type="{{ loc.location_type }}" data-timezone="{{ loc.timezone }}">
-            {{ loc.name }} (Tenant {{ loc.tenant_id }}, Type: {{ loc.location_type }}, Timezone: {{ loc.timezone }})
+            {{ loc.name }} (Tenant {{ loc.tenant_id }}, Location ID: {{ loc.location_id }}, Type: {{ loc.location_type }}, Timezone: {{ loc.timezone }})
           </option>
         {% endfor %}
       </select>
