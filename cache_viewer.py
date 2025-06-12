@@ -8,6 +8,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from html import unescape
 from tasks.availability import gen_availability, gen_availability_venue
+from functools import wraps
 
 load_dotenv()
 
@@ -17,10 +18,32 @@ app = Flask(__name__)
 REDIS_URL = os.getenv("REDIS_URL")
 redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 
+# Allowed IPs configuration
+ALLOWED_IPS = os.getenv("ALLOWED_IPS", "").split(",") if os.getenv("ALLOWED_IPS") else []
+
+# Decorator to restrict access by IP
+def restrict_ip(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # Get client IP, accounting for proxies
+        client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+        # X-Forwarded-For may contain multiple IPs (client, proxies); take the first (client)
+        if client_ip:
+            client_ip = client_ip.split(',')[0].strip()
+        
+        if not ALLOWED_IPS:  # Allow all if ALLOWED_IPS is empty
+            return f(*args, **kwargs)
+        if client_ip in ALLOWED_IPS:
+            return f(*args, **kwargs)
+        else:
+            return jsonify({"error": f"Access denied for IP: {client_ip}"}), 403
+    return decorated_function
+
 # ----------------------------
 # Home Page with 3 Buttons
 # ----------------------------
 @app.route("/")
+@restrict_ip
 def home():
     return render_template("home.html")
 
@@ -28,6 +51,7 @@ def home():
 # Cache Viewer Page
 # ----------------------------
 @app.route("/cache")
+@restrict_ip
 def cache_viewer():
     tenant_id = request.args.get("tenant_id", "")
     location_id = request.args.get("location_id", "")
@@ -52,6 +76,7 @@ def cache_viewer():
 # Cache API Endpoint (optional)
 # ----------------------------
 @app.route("/api")
+@restrict_ip
 def api():
     tenant_id = request.args.get("tenant_id")
     location_id = request.args.get("location_id")
@@ -71,6 +96,7 @@ def api():
 # Get Template Availability
 # ----------------------------
 @app.route("/get_template_availability")
+@restrict_ip
 def get_template_availability():
     tenant_id = request.args.get("tenant_id")
     template_id = request.args.get("template_id")
@@ -109,6 +135,7 @@ def get_template_availability():
 # Availability Regeneration Route
 # ----------------------------
 @app.route("/availability", methods=["GET", "POST"])
+@restrict_ip
 def availability():
     db_url = os.getenv("DATABASE_URL")
     locations = []
@@ -153,6 +180,7 @@ def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() == "csv"
 
 @app.route("/venue", methods=["GET", "POST"])
+@restrict_ip
 def venue_generator():
     from io import StringIO
     import csv
