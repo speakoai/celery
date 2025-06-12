@@ -87,105 +87,189 @@
         </small>
 
         <div style="margin-left: 24px; margin-top: 8px;">
-        <select name="template_id" disabled>
+        <select name="template_id" id="template_select">
             <option value="">-- Select an availability template --</option>
-            <!-- Empty for now -->
+            {% for template in templates %}
+            <option value="{{ template.template_id }}">{{ template.template_name }}</option>
+            {% endfor %}
         </select>
         </div>
     </div>
 
+    <!-- Container for template availability -->
+    <div id="template_availability" style="margin-top: 20px;"></div>
+
     <!-- Proceed button -->
-    <form method="POST" style="margin-top: 20px;">
+    <form method="POST" style="margin-top: 20px;" id="proceed-form">
         <input type="hidden" name="step" value="3">
         <input type="hidden" name="tenant_id" value="{{ selected_location.tenant_id }}">
         <input type="hidden" name="location_id" value="{{ selected_location.location_id }}">
+        <input type="hidden" name="availability_source" id="availability_source" value="location">
+        <input type="hidden" name="selected_template_id" id="selected_template_id" value="">
         <button type="submit">Proceed to Upload Venue/Table CSV</button>
     </form>
+
+    <script>
+      const templateSelect = document.getElementById('template_select');
+      const availabilitySourceInput = document.getElementById('availability_source');
+      const selectedTemplateIdInput = document.getElementById('selected_template_id');
+      const locationRadio = document.querySelector('input[value="location"]');
+      const templateRadio = document.querySelector('input[value="template"]');
+      const templateAvailabilityDiv = document.getElementById('template_availability');
+
+      // Enable/disable template dropdown based on radio selection
+      function updateTemplateSelect() {
+        templateSelect.disabled = !templateRadio.checked;
+        availabilitySourceInput.value = templateRadio.checked ? 'template' : 'location';
+        selectedTemplateIdInput.value = templateRadio.checked ? templateSelect.value : '';
+        if (!templateRadio.checked) {
+          templateAvailabilityDiv.innerHTML = '';
+        }
+      }
+
+      locationRadio.addEventListener('change', updateTemplateSelect);
+      templateRadio.addEventListener('change', updateTemplateSelect);
+
+      // Fetch and display template availability when template is selected
+      templateSelect.addEventListener('change', () => {
+        selectedTemplateIdInput.value = templateSelect.value;
+        availabilitySourceInput.value = 'template';
+        if (templateSelect.value) {
+          fetch(`/get_template_availability?tenant_id={{ selected_location.tenant_id }}&template_id=${templateSelect.value}`)
+            .then(response => response.json())
+            .then(data => {
+              if (data.availabilities && data.availabilities.length > 0) {
+                let html = `
+                  <h4>Template Availability</h4>
+                  <table border="1" cellpadding="6" cellspacing="0">
+                    <tr>
+                      <th>Day of Week</th>
+                      <th>Start Time</th>
+                      <th>End Time</th>
+                      <th>Is Closed?</th>
+                      <th>Service Duration</th>
+                    </tr>
+                `;
+                const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                data.availabilities.forEach(row => {
+                  html += `
+                    <tr>
+                      <td>${days[row.day_of_week]}</td>
+                      <td>${row.start_time}</td>
+                      <td>${row.end_time}</td>
+                      <td>${row.is_closed ? 'Yes' : 'No'}</td>
+                      <td>${row.service_duration} minutes</td>
+                    </tr>
+                  `;
+                });
+                html += '</table>';
+                templateAvailabilityDiv.innerHTML = html;
+              } else {
+                templateAvailabilityDiv.innerHTML = '<p>No availability found for this template.</p>';
+              }
+            })
+            .catch(error => {
+              templateAvailabilityDiv.innerHTML = '<p>Error loading availability.</p>';
+              console.error('Error:', error);
+            });
+        } else {
+          templateAvailabilityDiv.innerHTML = '';
+        }
+      });
+
+      // Initialize state
+      updateTemplateSelect();
+    </script>
+  {% endif %}
+
+  {% if step == 3 %}
+    <h3>Step 3: Upload Venue/Table CSV</h3>
+    <p><strong>Tenant ID:</strong> {{ selected_location.tenant_id }}</p>
+    <p><strong>Location ID:</strong> {{ selected_location.location_id }}</p>
+
+    {% if error_message %}
+      <p style="color: red;"><strong>Error:</strong> {{ error_message }}</p>
     {% endif %}
 
-    {% if step == 3 %}
-        <h3>Step 3: Upload Venue/Table CSV</h3>
-        <p><strong>Tenant ID:</strong> {{ selected_location.tenant_id }}</p>
-        <p><strong>Location ID:</strong> {{ selected_location.location_id }}</p>
-
-        {% if error_message %}
-            <p style="color: red;"><strong>Error:</strong> {{ error_message }}</p>
-        {% endif %}
-
-        {% if success_message %}
-            <p style="color: green;"><strong>{{ success_message }}</strong></p>
-        {% endif %}
-
-        <form method="POST" enctype="multipart/form-data">
-            <input type="hidden" name="step" value="3">
-            <input type="hidden" name="tenant_id" value="{{ selected_location.tenant_id }}">
-            <input type="hidden" name="location_id" value="{{ selected_location.location_id }}">
-
-            <div style="margin-bottom: 15px;">
-            <label for="csv_file">Upload CSV File:</label><br>
-            <input type="file" id="csv_file" name="file" accept=".csv" required>
-            </div>
-
-            <button type="submit">Upload and Preview</button>
-        </form>
-
-        {% if parsed_rows %}
-            <h4>Preview of Uploaded Data</h4>
-            <table border="1" cellpadding="5" cellspacing="0">
-            <tr>
-                <th>Name</th>
-                <th>Venue Unit Type</th>
-                <th>Capacity</th>
-                <th>Min Capacity</th>
-            </tr>
-            {% for row in parsed_rows %}
-                <tr>
-                <td>{{ row["name"] }}</td>
-                <td>{{ row["venue_unit_type"] }}</td>
-                <td>{{ row["capacity"] }}</td>
-                <td>{{ row["min_capacity"] }}</td>
-                </tr>
-            {% endfor %}
-            </table>
-        
-            <form method="POST">
-            <input type="hidden" name="step" value="4">
-            <input type="hidden" name="tenant_id" value="{{ selected_location.tenant_id }}">
-            <input type="hidden" name="location_id" value="{{ selected_location.location_id }}">
-            <input type="hidden" name="action" value="generate">
-        
-            {% for row in parsed_rows %}
-                <input type="hidden" name="csv_data" value="{{ row | tojson | forceescape }}">
-            {% endfor %}
-        
-            <button type="submit" style="margin-top: 20px;">Generate Venues/Tables with Availabilities</button>
-            </form>
-        {% endif %}
+    {% if success_message %}
+      <p style="color: green;"><strong>{{ success_message }}</strong></p>
     {% endif %}
-    {% if step == 4 %}
-        <h3>Step 4: Inserted Venues/Tables</h3>
 
-        <table border="1" cellpadding="5" cellspacing="0">
-            <tr>
-            <th>Venue Unit ID</th>
-            <th>Name</th>
-            <th>Type</th>
-            <th>Capacity</th>
-            <th>Min Capacity</th>
-            </tr>
-            {% for unit in inserted_units %}
-            <tr>
-                <td>{{ unit["venue_unit_id"] }}</td>
-                <td>{{ unit["name"] }}</td>
-                <td>{{ unit["venue_unit_type"] }}</td>
-                <td>{{ unit["capacity"] }}</td>
-                <td>{{ unit["min_capacity"] }}</td>
-            </tr>
-            {% endfor %}
-        </table>
+    <form method="POST" enctype="multipart/form-data">
+      <input type="hidden" name="step" value="3">
+      <input type="hidden" name="tenant_id" value="{{ selected_location.tenant_id }}">
+      <input type="hidden" name="location_id" value="{{ selected_location.location_id }}">
+      <input type="hidden" name="availability_source" value="{{ availability_source }}">
+      <input type="hidden" name="selected_template_id" value="{{ selected_template_id }}">
 
-        <p style="margin-top: 20px; color: green;">
-            ✅ {{ inserted_units|length }} venues/tables created with availability.
-        </p>
+      <div style="margin-bottom: 15px;">
+        <label for="csv_file">Upload CSV File:</label><br>
+        <input type="file" id="csv_file" name="file" accept=".csv" required>
+      </div>
+
+      <button type="submit">Upload and Preview</button>
+    </form>
+
+    {% if parsed_rows %}
+      <h4>Preview of Uploaded Data</h4>
+      <table border="1" cellpadding="5" cellspacing="0">
+        <tr>
+          <th>Name</th>
+          <th>Venue Unit Type</th>
+          <th>Capacity</th>
+          <th>Min Capacity</th>
+        </tr>
+        {% for row in parsed_rows %}
+          <tr>
+            <td>{{ row["name"] }}</td>
+            <td>{{ row["venue_unit_type"] }}</td>
+            <td>{{ row["capacity"] }}</td>
+            <td>{{ row["min_capacity"] }}</td>
+          </tr>
+        {% endfor %}
+      </table>
+  
+      <form method="POST">
+        <input type="hidden" name="step" value="4">
+        <input type="hidden" name="tenant_id" value="{{ selected_location.tenant_id }}">
+        <input type="hidden" name="location_id" value="{{ selected_location.location_id }}">
+        <input type="hidden" name="action" value="generate">
+        <input type="hidden" name="availability_source" value="{{ availability_source }}">
+        <input type="hidden" name="selected_template_id" value="{{ selected_template_id }}">
+  
+        {% for row in parsed_rows %}
+          <input type="hidden" name="csv_data" value="{{ row | tojson | forceescape }}">
+        {% endfor %}
+  
+        <button type="submit" style="margin-top: 20px;">Generate Venues/Tables with Availabilities</button>
+      </form>
     {% endif %}
+  {% endif %}
+
+  {% if step == 4 %}
+    <h3>Step 4: Inserted Venues/Tables</h3>
+
+    <table border="1" cellpadding="5" cellspacing="0">
+      <tr>
+        <th>Venue Unit ID</th>
+        <th>Name</th>
+        <th>Type</th>
+        <th>Capacity</th>
+        <th>Min Capacity</th>
+      </tr>
+      {% for unit in inserted_units %}
+        <tr>
+          <td>{{ unit["venue_unit_id"] }}</td>
+          <td>{{ unit["name"] }}</td>
+          <td>{{ unit["venue_unit_type"] }}</td>
+          <td>{{ unit["capacity"] }}</td>
+          <td>{{ unit["min_capacity"] }}</td>
+        </tr>
+      {% endfor %}
+    </table>
+
+    <p style="margin-top: 20px; color: green;">
+      ✅ {{ inserted_units|length }} venues/tables created with availability.
+    </p>
+  {% endif %}
 {% endblock %}

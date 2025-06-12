@@ -16,14 +16,12 @@ app = Flask(__name__)
 REDIS_URL = os.getenv("REDIS_URL")
 redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 
-
 # ----------------------------
 # Home Page with 3 Buttons
 # ----------------------------
 @app.route("/")
 def home():
     return render_template("home.html")
-
 
 # ----------------------------
 # Cache Viewer Page
@@ -49,7 +47,6 @@ def cache_viewer():
     return render_template("cache_viewer.html", tenant_id=tenant_id, location_id=location_id,
                            start_date=start_date, key=key, value=value)
 
-
 # ----------------------------
 # Cache API Endpoint (optional)
 # ----------------------------
@@ -69,6 +66,30 @@ def api():
         return jsonify({"key": key, "value": value})
     return jsonify({"error": "Key not found"}), 404
 
+# ----------------------------
+# New Endpoint: Get Template Availability
+# ----------------------------
+@app.route("/get_template_availability")
+def get_template_availability():
+    tenant_id = request.args.get("tenant_id")
+    template_id = request.args.get("template_id")
+
+    if not tenant_id or not template_id:
+        return jsonify({"error": "Missing tenant_id or template_id parameter"}), 400
+
+    try:
+        with psycopg2.connect(os.getenv("DATABASE_URL"), cursor_factory=RealDictCursor) as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT day_of_week, start_time, end_time, is_closed, service_duration
+                    FROM availability_template_details
+                    WHERE tenant_id = %s AND template_id = %s
+                    ORDER BY day_of_week, start_time
+                """, (tenant_id, template_id))
+                availabilities = cur.fetchall()
+                return jsonify({"availabilities": availabilities})
+    except Exception as e:
+        return jsonify({"error": f"Failed to fetch template availability: {str(e)}"}), 500
 
 # Allowed extension check
 def allowed_file(filename):
@@ -83,6 +104,7 @@ def venue_generator():
     selected_location = None
     locations = []
     availabilities = []
+    templates = []
     parsed_rows = []
     error_message = ""
     success_message = ""
@@ -95,7 +117,7 @@ def venue_generator():
 
     with psycopg2.connect(db_url, cursor_factory=RealDictCursor) as conn:
         with conn.cursor() as cur:
-            # Step 1: load location dropdown (filtered by type = 'rest')
+            # Load locations (unchanged)
             cur.execute("""
                 SELECT tenant_id, location_id, name
                 FROM locations
@@ -108,7 +130,7 @@ def venue_generator():
             if step == "1":
                 return render_template("venue.html", step=1, locations=locations)
 
-            # Step 2: Display recurring availability for selected location
+            # Step 2: Display recurring availability or template options
             elif step == "2":
                 tenant_id = request.form.get("tenant_id")
                 location_id = request.form.get("location_id")
@@ -117,6 +139,7 @@ def venue_generator():
                     "location_id": location_id
                 }
 
+                # Fetch location availability
                 cur.execute("""
                     SELECT day_of_week, start_time, end_time, is_closed
                     FROM location_availability
@@ -126,18 +149,30 @@ def venue_generator():
                 """, (tenant_id, location_id))
                 availabilities = cur.fetchall()
 
+                # Fetch availability templates for tenant
+                cur.execute("""
+                    SELECT template_id, template_name
+                    FROM availability_template
+                    WHERE tenant_id = %s
+                    ORDER BY template_name ASC
+                """, (tenant_id,))
+                templates = cur.fetchall()
+
                 return render_template(
                     "venue.html",
                     step=2,
                     locations=locations,
                     selected_location=selected_location,
-                    availabilities=availabilities
+                    availabilities=availabilities,
+                    templates=templates
                 )
 
             # Step 3: Upload and parse CSV
             elif step == "3":
                 tenant_id = request.form.get("tenant_id")
                 location_id = request.form.get("location_id")
+                availability_source = request.form.get("availability_source", "location")
+                selected_template_id = request.form.get("selected_template_id", "")
                 selected_location = {
                     "tenant_id": tenant_id,
                     "location_id": location_id
@@ -157,8 +192,6 @@ def venue_generator():
                             for row in reader:
                                 cleaned_row = {k.strip().lower().replace('\ufeff', ''): v.strip() for k, v in row.items()}
                                 parsed_rows.append(cleaned_row)
-
-
                             success_message = f"Uploaded {len(parsed_rows)} venue rows successfully."
                         except Exception as e:
                             error_message = f"Failed to read CSV: {str(e)}"
@@ -169,13 +202,17 @@ def venue_generator():
                     selected_location=selected_location,
                     parsed_rows=parsed_rows,
                     error_message=error_message,
-                    success_message=success_message
+                    success_message=success_message,
+                    availability_source=availability_source,
+                    selected_template_id=selected_template_id
                 )
-                
+
             # Step 4: Display uploaded result
             elif step == "4" and request.form.get("action") == "generate":
                 tenant_id = request.form.get("tenant_id")
                 location_id = request.form.get("location_id")
+                availability_source = request.form.get("availability_source", "location")
+                selected_template_id = request.form.get("selected_template_id", "")
                 selected_location = {
                     "tenant_id": tenant_id,
                     "location_id": location_id
@@ -192,15 +229,25 @@ def venue_generator():
 
                 with psycopg2.connect(db_url, cursor_factory=RealDictCursor) as conn:
                     with conn.cursor() as cur:
-                        # Get location availability once
-                        cur.execute("""
-                            SELECT day_of_week, start_time, end_time, is_closed
-                            FROM location_availability
-                            WHERE tenant_id = %s AND location_id = %s
-                            AND type = 'recurring' AND is_active = true
-                            ORDER BY day_of_week, start_time
-                        """, (tenant_id, location_id))
-                        location_availabilities = cur.fetchall()
+                        # Fetch availabilities based on source
+                        if availability_source == "template" and selected_template_id:
+                            cur.execute("""
+                                SELECT day_of_week, start_time, end_time, is_closed, service_duration
+                                FROM availability_template_details
+                                WHERE tenant_id = %s AND template_id = %s
+                                AND is_closed = false
+                                ORDER BY day_of_week, start_time
+                            """, (tenant_id, selected_template_id))
+                            availabilities = cur.fetchall()
+                        else:
+                            cur.execute("""
+                                SELECT day_of_week, start_time, end_time, is_closed
+                                FROM location_availability
+                                WHERE tenant_id = %s AND location_id = %s
+                                AND type = 'recurring' AND is_active = true
+                                ORDER BY day_of_week, start_time
+                            """, (tenant_id, location_id))
+                            availabilities = cur.fetchall()
 
                         for row in parsed_rows:
                             # Insert into venue_unit
@@ -219,7 +266,8 @@ def venue_generator():
                             inserted_units.append({**row, "venue_unit_id": venue_unit_id})
 
                             # Create availability for this unit
-                            for avail in location_availabilities:
+                            for avail in availabilities:
+                                service_duration = avail.get("service_duration", 60)  # Default to 60 for location availability
                                 cur.execute("""
                                     INSERT INTO venue_availability (
                                         tenant_id, venue_unit_id, location_id, type,
@@ -228,7 +276,7 @@ def venue_generator():
                                     ) VALUES (
                                         %s, %s, %s, 'recurring',
                                         %s, NULL, %s, %s,
-                                        true, 60
+                                        true, %s
                                     )
                                 """, (
                                     tenant_id,
@@ -236,7 +284,8 @@ def venue_generator():
                                     location_id,
                                     avail["day_of_week"],
                                     avail["start_time"],
-                                    avail["end_time"]
+                                    avail["end_time"],
+                                    service_duration
                                 ))
 
                     conn.commit()
@@ -246,7 +295,6 @@ def venue_generator():
                                     selected_location=selected_location,
                                     inserted_units=inserted_units)
 
-
 # ----------------------------
 # Helper Function
 # ----------------------------
@@ -255,7 +303,6 @@ def construct_key(tenant_id, location_id, start_date=None):
     if start_date:
         key += f":start_date_{start_date}"
     return key
-
 
 # ----------------------------
 # App Entrypoint for Local Dev (Render uses gunicorn)
