@@ -322,7 +322,7 @@ def send_email_confirmation_new_rest(booking_id: int) -> str:
 
         # Send email via SendGrid
         sg = SendGridAPIClient(os.getenv("SENDGRID_API_KEY"))
-        print(f"SENDGRID API KEY: "{os.getenv("SENDGRID_API_KEY")})
+        print(f"SENDGRID API KEY: {os.getenv('SENDGRID_API_KEY')}")
         response = sg.send(message)
 
         print(f"[EMAIL] Sent to {to_emails}: {email_body}")
