@@ -7,6 +7,7 @@ __pycache__/
 # Ignore virtual environments
 venv/
 ENV/
+venv311/
 env/
 
 # Ignore environment/config files
