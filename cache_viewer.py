@@ -73,6 +73,9 @@ def api():
 def get_template_availability():
     tenant_id = request.args.get("tenant_id")
     template_id = request.args.get("template_id")
+    
+    print("tenant_id" + str(tenant_id))
+    print("template_id" + str(template_id))
 
     if not tenant_id or not template_id:
         return jsonify({"error": "Missing tenant_id or template_id parameter"}), 400
