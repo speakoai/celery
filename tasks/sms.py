@@ -54,15 +54,17 @@ def send_sms_confirmation_new(booking_id: int):
             staff_name,
             service_name
         ) = row
+        
+        clean_ref = booking_ref[3:] if booking_ref.startswith("REF") else booking_ref
 
         if location_type == "rest":
             message = (
-                f"Hi {customer_name}, your booking (Ref: {booking_ref}) for {party_num} "
+                f"Hi {customer_name}, your booking (Ref: {clean_ref}) for {party_num} "
                 f"is confirmed at {location_name} on {start_time.strftime('%Y-%m-%d %H:%M')}."
             )
         else:
             message = (
-                f"Hi {customer_name}, your booking (Ref: {booking_ref}) "
+                f"Hi {customer_name}, your booking (Ref: {clean_ref}) "
                 f"is confirmed at {location_name} on {start_time.strftime('%Y-%m-%d %H:%M')} "
                 f"with {staff_name} for {service_name}."
             )
@@ -125,15 +127,17 @@ def send_sms_confirmation_mod(booking_id: int):
             staff_name,
             service_name
         ) = row
+        
+        clean_ref = booking_ref[3:] if booking_ref.startswith("REF") else booking_ref
 
         if location_type == "rest":
             message = (
-                f"Hi {customer_name}, your booking (Ref: {booking_ref}) for {party_num} "
+                f"Hi {customer_name}, your booking (Ref: {clean_ref}) for {party_num} "
                 f"has been successfully updated at {location_name} to {start_time.strftime('%Y-%m-%d %H:%M')}."
             )
         else:
             message = (
-                f"Hi {customer_name}, your booking (Ref: {booking_ref}) "
+                f"Hi {customer_name}, your booking (Ref: {clean_ref}) "
                 f"has been successfully updated at {location_name} to {start_time.strftime('%Y-%m-%d %H:%M')} "
                 f"with {staff_name} for {service_name}."
             )
@@ -195,6 +199,8 @@ def send_sms_confirmation_can(booking_id: int):
             staff_name,
             service_name
         ) = row
+        
+        clean_ref = booking_ref[3:] if booking_ref.startswith("REF") else booking_ref
 
         if location_type == "rest":
             message = (
@@ -203,7 +209,7 @@ def send_sms_confirmation_can(booking_id: int):
             )
         else:
             message = (
-                f"Hi {customer_name}, your booking (Ref: {booking_ref}) "
+                f"Hi {customer_name}, your booking (Ref: {clean_ref}) "
                 f"at {location_name} on {start_time.strftime('%Y-%m-%d %H:%M')} "
                 f"with {staff_name} for {service_name} has been cancelled."
             )
@@ -322,7 +328,7 @@ def send_email_confirmation_new_rest(booking_id: int) -> str:
 
         # Send email via SendGrid
         sg = SendGridAPIClient(os.getenv("SENDGRID_API_KEY"))
-        print(f"SENDGRID API KEY: {os.getenv('SENDGRID_API_KEY')}")
+        #print(f"SENDGRID API KEY: {os.getenv('SENDGRID_API_KEY')}")
         response = sg.send(message)
 
         print(f"[EMAIL] Sent to {to_emails}: {email_body}")
