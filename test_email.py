@@ -1,7 +1,7 @@
-from tasks.sms import send_email_confirmation_new_rest, send_email_confirmation_new, send_email_confirmation_mod_rest, send_email_confirmation_mod
+from tasks.sms import send_email_confirmation_new_rest, send_email_confirmation_new, send_email_confirmation_mod_rest, send_email_confirmation_mod, send_email_confirmation_can_rest, send_email_confirmation_can
 
 if __name__ == "__main__":
-    result = send_email_confirmation_mod(booking_id=10374, original_booking_id=10372)
+    result = send_email_confirmation_can(booking_id=10328)
     if result:
         print("✅ Task completed with result:")
     else:
