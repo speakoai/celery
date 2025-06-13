@@ -439,7 +439,7 @@ def send_email_confirmation_new(booking_id: int) -> str:
             f"Service ID: {service_id or 'Not Assigned'}\n\n"
             "Please ensure all arrangements are in place.\n\n"
             "Best regards,\n"
-            "Booking System"
+            "Speako AI Booking System"
         )
 
         # Set up SendGrid email
