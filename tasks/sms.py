@@ -72,7 +72,7 @@ def send_sms_confirmation_new(booking_id: int):
         client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
         client.messages.create(
             body=message,
-            from_="+61489266149",
+            from_=os.getenv("TWILIO_SEND_SMS_NUMBER"),
             to=customer_phone
         )
 
@@ -145,7 +145,7 @@ def send_sms_confirmation_mod(booking_id: int):
         client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
         client.messages.create(
             body=message,
-            from_="+61489266149",
+            from_=os.getenv("TWILIO_SEND_SMS_NUMBER"),
             to=customer_phone
         )
 
@@ -217,7 +217,7 @@ def send_sms_confirmation_can(booking_id: int):
         client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
         client.messages.create(
             body=message,
-            from_="+61489266149",
+            from_=os.getenv("TWILIO_SEND_SMS_NUMBER"),
             to=customer_phone
         )
 
