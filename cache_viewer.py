@@ -334,11 +334,12 @@ def venue_generator():
                         for row in parsed_rows:
                             # Insert into venue_unit
                             cur.execute("""
-                                INSERT INTO venue_unit (tenant_id, name, venue_unit_type, capacity, min_capacity)
-                                VALUES (%s, %s, %s, %s, %s)
+                                INSERT INTO venue_unit (tenant_id, location_id, name, venue_unit_type, capacity, min_capacity)
+                                VALUES (%s, %s, %s, %s, %s, %s)
                                 RETURNING venue_unit_id
                             """, (
                                 tenant_id,
+                                location_id,
                                 row["name"],
                                 row["venue_unit_type"],
                                 int(row["capacity"]),
