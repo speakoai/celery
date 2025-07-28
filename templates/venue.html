@@ -49,7 +49,7 @@
         </label>
         <br>
         <small style="margin-left: 24px; display: block; margin-top: 4px; color: #666;">
-        By selecting this, you will have to manually create duration for each venue/table.
+        This will copy the location's availability schedule and service duration to all venues/tables.
         </small>
     </div>
 
@@ -63,6 +63,7 @@
             <th>Start Time</th>
             <th>End Time</th>
             <th>Is Closed?</th>
+            <th>Service Duration</th>
         </tr>
         {% for row in availabilities %}
             <tr>
@@ -72,6 +73,7 @@
             <td>{{ row.start_time }}</td>
             <td>{{ row.end_time }}</td>
             <td>{{ 'Yes' if row.is_closed else 'No' }}</td>
+            <td>{{ row.service_duration or 'Not specified' }} minutes</td>
             </tr>
         {% endfor %}
         </table>

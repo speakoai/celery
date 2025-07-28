@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <h2>Voice Agent Creator</h2>
+  <p>Create and configure voice agents for your Speako application.</p>
+
+  {% if success_message %}
+    <div style="margin: 20px 0; padding: 15px; background-color: #d4edda; border: 1px solid #c3e6cb; border-radius: 5px; color: #155724;">
+      ✅ {{ success_message }}
+    </div>
+  {% endif %}
+
+  <form method="POST" style="max-width: 600px;">
+    <div style="margin-bottom: 20px;">
+      <label for="agent_name" style="display: block; margin-bottom: 5px; font-weight: bold;">Agent Name:</label>
+      <input type="text" id="agent_name" name="agent_name" required 
+             style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;"
+             placeholder="Enter a name for your voice agent">
+    </div>
+
+    <div style="margin-bottom: 20px;">
+      <label for="agent_voice" style="display: block; margin-bottom: 5px; font-weight: bold;">Voice Type:</label>
+      <select id="agent_voice" name="agent_voice" required 
+              style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+        <option value="">-- Select a voice --</option>
+        <option value="nova">Nova (Female)</option>
+        <option value="alloy">Alloy (Neutral)</option>
+        <option value="echo">Echo (Male)</option>
+        <option value="fable">Fable (Male)</option>
+        <option value="onyx">Onyx (Male)</option>
+        <option value="shimmer">Shimmer (Female)</option>
+      </select>
+    </div>
+
+    <div style="margin-bottom: 20px;">
+      <label for="agent_prompt" style="display: block; margin-bottom: 5px; font-weight: bold;">System Prompt:</label>
+      <textarea id="agent_prompt" name="agent_prompt" rows="6" required
+                style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; resize: vertical;"
+                placeholder="Enter the system prompt that defines how your voice agent should behave...">You are a helpful assistant for Speako, a restaurant management platform. You help customers make reservations and answer questions about the restaurant. Be friendly, professional, and concise in your responses.</textarea>
+    </div>
+
+    <div style="margin-bottom: 20px;">
+      <button type="submit" 
+              style="background-color: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px;">
+        🎤 Create Voice Agent
+      </button>
+    </div>
+  </form>
+
+  <div style="margin-top: 40px; padding: 20px; background-color: #f8f9fa; border-radius: 5px;">
+    <h3>ℹ️ About Voice Agent Creator</h3>
+    <p>This tool allows you to create custom voice agents for your Speako restaurants. Voice agents can:</p>
+    <ul>
+      <li>Handle phone reservations automatically</li>
+      <li>Answer common customer questions</li>
+      <li>Take orders and process payments</li>
+      <li>Provide restaurant information and hours</li>
+    </ul>
+    <p><strong>Note:</strong> This is currently a placeholder interface. Full voice agent functionality will be implemented in future updates.</p>
+  </div>
+{% endblock %}

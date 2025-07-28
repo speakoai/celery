@@ -226,7 +226,7 @@ def venue_generator():
 
                 # Fetch location availability (all types)
                 cur.execute("""
-                    SELECT type, day_of_week, specific_date, start_time, end_time, is_closed
+                    SELECT type, day_of_week, specific_date, start_time, end_time, is_closed, service_duration
                     FROM location_availability
                     WHERE tenant_id = %s AND location_id = %s AND is_active = true
                     ORDER BY type, day_of_week, specific_date, start_time
@@ -324,7 +324,7 @@ def venue_generator():
                             availabilities = cur.fetchall()
                         else:
                             cur.execute("""
-                                SELECT type, day_of_week, specific_date, start_time, end_time, is_closed
+                                SELECT type, day_of_week, specific_date, start_time, end_time, is_closed, service_duration
                                 FROM location_availability
                                 WHERE tenant_id = %s AND location_id = %s AND is_active = true
                                 ORDER BY type, day_of_week, specific_date, start_time
@@ -349,8 +349,8 @@ def venue_generator():
 
                             # Create availability for this unit
                             for avail in availabilities:
-                                # Default to 60 for location availability or if service_duration is NULL
-                                service_duration = avail.get("service_duration", 60) if availability_source == "template" else 60
+                                # Use service_duration from the source, defaulting to 60 if NULL
+                                service_duration = avail.get("service_duration", 60) or 60
                                 cur.execute("""
                                     INSERT INTO venue_availability (
                                         tenant_id, venue_unit_id, location_id, type,
@@ -379,6 +379,25 @@ def venue_generator():
                                     step=4,
                                     selected_location=selected_location,
                                     inserted_units=inserted_units)
+
+# ----------------------------
+# Voice Agent Creator Page
+# ----------------------------
+@app.route("/agent", methods=["GET", "POST"])
+@restrict_ip
+def voice_agent_creator():
+    if request.method == "POST":
+        # Handle form submission for creating voice agents
+        # This is a placeholder for future implementation
+        agent_name = request.form.get("agent_name", "")
+        agent_voice = request.form.get("agent_voice", "")
+        agent_prompt = request.form.get("agent_prompt", "")
+        
+        # For now, just return success message
+        success_message = f"Voice agent '{agent_name}' created successfully!"
+        return render_template("agent.html", success_message=success_message)
+    
+    return render_template("agent.html")
 
 # ----------------------------
 # Helper Function
