@@ -50,6 +50,11 @@ services:
           type: redis
           name: celery-redis
           property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          name: celery-redis
+          type: redis
+          property: connectionString
 
   - type: redis
     name: celery-redis
