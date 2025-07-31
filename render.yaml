@@ -21,7 +21,11 @@ services:
           name: speako-cache
           type: redis
           property: connectionString
-
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          name: celery-redis
+          type: redis
+          property: connectionString
   - type: web
     name: app
     region: virginia
@@ -31,6 +35,11 @@ services:
     autoDeploy: true
     envVars:
       - key: CELERY_BROKER_URL
+        fromService:
+          name: celery-redis
+          type: redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
         fromService:
           name: celery-redis
           type: redis
