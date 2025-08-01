@@ -253,6 +253,9 @@ def gen_availability_venue(tenant_id, location_id, location_tz, affected_date=No
             from dateutil import parser
             dt = parser.parse(affected_date)
             affected_dt = dt.replace(hour=0, minute=0, second=0, microsecond=0)
+            # Ensure affected_dt has the same timezone as location_tz
+            if affected_dt.tzinfo is None:
+                affected_dt = affected_dt.replace(tzinfo=ZoneInfo(location_tz))
             # Compute current midnight in location_tz for chunk calculation
             now_local = datetime.now(ZoneInfo(location_tz))
             current_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
