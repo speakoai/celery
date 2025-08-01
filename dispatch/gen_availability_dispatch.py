@@ -3,7 +3,8 @@ import pytz
 import psycopg2
 import os
 from dotenv import load_dotenv
-from tasks.availability import gen_availability, gen_availability_venue
+#from tasks.availability import gen_availability, gen_availability_venue
+from tasks.availability_gen_regen import gen_availability, gen_availability_venue
 
 # Load .env file if it exists (for local development)
 load_dotenv()

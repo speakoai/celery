@@ -33,5 +33,7 @@ wrapt==1.14.0
 zipp==3.8.0
 psycopg2-binary
 python-dotenv
+python-dateutil
+tzdata
 twilio
 sendgrid
