@@ -140,15 +140,40 @@ def gen_availability(tenant_id, location_id, location_tz, affected_date=None):
                     "open_hours": []
                 }
 
+                # Step 1: Get one-time availability entries for this specific date
                 cur.execute("""
-                    SELECT s.staff_id, s.name, sa.start_time, sa.end_time
+                    SELECT s.staff_id, s.name, sa.start_time, sa.end_time, sa.is_closed
                     FROM staff s
                     JOIN staff_availability sa ON s.tenant_id = sa.tenant_id AND s.staff_id = sa.staff_id
-                    WHERE s.tenant_id = %s AND sa.location_id = %s AND sa.type = 'recurring'
-                    AND sa.day_of_week = %s AND (sa.specific_date IS NULL OR sa.specific_date <> %s)
-                    AND sa.is_active = TRUE
-                """, (tenant_id, location_id, db_day, current_date_str))
-                staff_rows = cur.fetchall()
+                    WHERE s.tenant_id = %s AND sa.location_id = %s AND sa.type = 'one_time'
+                    AND sa.specific_date = %s AND sa.is_active = TRUE
+                """, (tenant_id, location_id, current_date_str))
+                one_time_staff_rows = cur.fetchall()
+                
+                # Get staff IDs that have one-time entries
+                staff_with_one_time = {row[0] for row in one_time_staff_rows}
+                
+                # Step 2: Get recurring availability for staff who don't have one-time entries
+                if staff_with_one_time:
+                    cur.execute("""
+                        SELECT s.staff_id, s.name, sa.start_time, sa.end_time
+                        FROM staff s
+                        JOIN staff_availability sa ON s.tenant_id = sa.tenant_id AND s.staff_id = sa.staff_id
+                        WHERE s.tenant_id = %s AND sa.location_id = %s AND sa.type = 'recurring'
+                        AND sa.day_of_week = %s AND (sa.specific_date IS NULL OR sa.specific_date <> %s)
+                        AND sa.is_active = TRUE
+                        AND s.staff_id NOT IN %s
+                    """, (tenant_id, location_id, db_day, current_date_str, tuple(staff_with_one_time)))
+                else:
+                    cur.execute("""
+                        SELECT s.staff_id, s.name, sa.start_time, sa.end_time
+                        FROM staff s
+                        JOIN staff_availability sa ON s.tenant_id = sa.tenant_id AND s.staff_id = sa.staff_id
+                        WHERE s.tenant_id = %s AND sa.location_id = %s AND sa.type = 'recurring'
+                        AND sa.day_of_week = %s AND (sa.specific_date IS NULL OR sa.specific_date <> %s)
+                        AND sa.is_active = TRUE
+                    """, (tenant_id, location_id, db_day, current_date_str))
+                recurring_staff_rows = cur.fetchall()
 
                 cur.execute("""
                     SELECT staff_id, customer_id, start_time, end_time
@@ -161,7 +186,20 @@ def gen_availability(tenant_id, location_id, location_tz, affected_date=None):
                 bookings = [{"staff_id": r[0], "customer_id": r[1], "start_time": r[2].strftime("%Y-%m-%d %H:%M:%S"), "end_time": r[3].strftime("%Y-%m-%d %H:%M:%S")} for r in booking_rows]
 
                 staff_dict = {}
-                for sid, name, start, end in staff_rows:
+                
+                # Process one-time availability first (highest priority)
+                for sid, name, start, end, is_closed in one_time_staff_rows:
+                    if not is_closed:  # Only add if not closed for the day
+                        staff_dict.setdefault(sid, {
+                            "id": sid,
+                            "name": name,
+                            "service": [svc for svc in staff_services.get(sid, []) if svc in location_services],
+                            "slots": []
+                        })["slots"].append({"start": str(start), "end": str(end)})
+                    # If is_closed = true, staff is completely unavailable (don't add to staff_dict)
+                
+                # Process recurring availability for staff without one-time entries
+                for sid, name, start, end in recurring_staff_rows:
                     staff_dict.setdefault(sid, {
                         "id": sid,
                         "name": name,
@@ -325,15 +363,40 @@ def gen_availability_venue(tenant_id, location_id, location_tz, affected_date=No
                     "open_hours": []
                 }
 
+                # Step 1: Get one-time venue availability entries for this specific date
                 cur.execute("""
-                    SELECT vu.venue_unit_id, vu.name, vu.venue_unit_type, vu.capacity, vu.min_capacity, va.service_duration, va.start_time, va.end_time, va.availability_id
+                    SELECT vu.venue_unit_id, vu.name, vu.venue_unit_type, vu.capacity, vu.min_capacity, va.service_duration, va.start_time, va.end_time, va.availability_id, va.is_closed
                     FROM venue_unit vu
                     JOIN venue_availability va ON vu.tenant_id = va.tenant_id AND vu.venue_unit_id = va.venue_unit_id
-                    WHERE vu.tenant_id = %s AND va.location_id = %s AND va.type = 'recurring'
-                    AND va.day_of_week = %s AND (va.specific_date IS NULL OR va.specific_date <> %s)
-                    AND va.is_active = TRUE
-                """, (tenant_id, location_id, db_day, current_date_str))
-                venue_rows = cur.fetchall()
+                    WHERE vu.tenant_id = %s AND va.location_id = %s AND va.type = 'one_time'
+                    AND va.specific_date = %s AND va.is_active = TRUE
+                """, (tenant_id, location_id, current_date_str))
+                one_time_venue_rows = cur.fetchall()
+                
+                # Get venue unit IDs that have one-time entries
+                venues_with_one_time = {row[0] for row in one_time_venue_rows}
+                
+                # Step 2: Get recurring availability for venues who don't have one-time entries
+                if venues_with_one_time:
+                    cur.execute("""
+                        SELECT vu.venue_unit_id, vu.name, vu.venue_unit_type, vu.capacity, vu.min_capacity, va.service_duration, va.start_time, va.end_time, va.availability_id
+                        FROM venue_unit vu
+                        JOIN venue_availability va ON vu.tenant_id = va.tenant_id AND vu.venue_unit_id = va.venue_unit_id
+                        WHERE vu.tenant_id = %s AND va.location_id = %s AND va.type = 'recurring'
+                        AND va.day_of_week = %s AND (va.specific_date IS NULL OR va.specific_date <> %s)
+                        AND va.is_active = TRUE
+                        AND vu.venue_unit_id NOT IN %s
+                    """, (tenant_id, location_id, db_day, current_date_str, tuple(venues_with_one_time)))
+                else:
+                    cur.execute("""
+                        SELECT vu.venue_unit_id, vu.name, vu.venue_unit_type, vu.capacity, vu.min_capacity, va.service_duration, va.start_time, va.end_time, va.availability_id
+                        FROM venue_unit vu
+                        JOIN venue_availability va ON vu.tenant_id = va.tenant_id AND vu.venue_unit_id = va.venue_unit_id
+                        WHERE vu.tenant_id = %s AND va.location_id = %s AND va.type = 'recurring'
+                        AND va.day_of_week = %s AND (va.specific_date IS NULL OR va.specific_date <> %s)
+                        AND va.is_active = TRUE
+                    """, (tenant_id, location_id, db_day, current_date_str))
+                recurring_venue_rows = cur.fetchall()
 
                 cur.execute("""
                     SELECT venue_unit_id, customer_id, start_time, end_time
@@ -348,7 +411,23 @@ def gen_availability_venue(tenant_id, location_id, location_tz, affected_date=No
                 venue_dict = {}
                 is_dining_table = False
 
-                for vuid, name, venue_unit_type, capacity, min_capacity, service_duration, start, end, va_availability_id in venue_rows:
+                # Process one-time venue availability first (highest priority)
+                for vuid, name, venue_unit_type, capacity, min_capacity, service_duration, start, end, va_availability_id, is_closed in one_time_venue_rows:
+                    if venue_unit_type == "dining_table":
+                        is_dining_table = True
+                    if not is_closed:  # Only add if not closed for the day
+                        venue_dict.setdefault(vuid, {
+                            "id": vuid,
+                            "name": name,
+                            "capacity": capacity,
+                            "min_capacity": min_capacity,
+                            "service": [svc for svc in venue_unit_services.get(vuid, []) if svc in location_services],
+                            "slots": []
+                        })["slots"].append({"start": str(start), "end": str(end), "service_duration": str(service_duration)})
+                    # If is_closed = true, venue is completely unavailable (don't add to venue_dict)
+
+                # Process recurring availability for venues without one-time entries
+                for vuid, name, venue_unit_type, capacity, min_capacity, service_duration, start, end, va_availability_id in recurring_venue_rows:
                     if venue_unit_type == "dining_table":
                         is_dining_table = True
                     venue_dict.setdefault(vuid, {
