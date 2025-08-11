@@ -55,12 +55,13 @@ def add_inputs():
 @require_api_key
 def api_generate_availability():
     """
-    Generate staff availability for a location
+    Generate availability for a location based on business type
     Expected JSON payload:
     {
         "tenant_id": "123",
         "location_id": "456", 
         "location_tz": "America/New_York",
+        "business_type": "rest" | "other",  // mandatory - "rest" for restaurant/venue, "other" for staff
         "affected_date": "2025-08-15"  // optional, for regeneration
     }
     """
@@ -70,7 +71,7 @@ def api_generate_availability():
             return jsonify({'error': 'JSON payload required'}), 400
         
         # Validate required fields
-        required_fields = ['tenant_id', 'location_id', 'location_tz']
+        required_fields = ['tenant_id', 'location_id', 'location_tz', 'business_type']
         missing_fields = [field for field in required_fields if field not in data]
         if missing_fields:
             return jsonify({
@@ -82,17 +83,33 @@ def api_generate_availability():
         tenant_id = data['tenant_id']
         location_id = data['location_id']
         location_tz = data['location_tz']
+        business_type = data['business_type']
         affected_date = data.get('affected_date')  # Optional for regeneration
         
-        # Trigger the celery task
-        task = gen_availability.delay(tenant_id, location_id, location_tz, affected_date)
+        # Validate business_type
+        if business_type not in ['rest', 'other']:
+            return jsonify({
+                'error': 'Invalid business_type',
+                'message': 'business_type must be either "rest" or "other"',
+                'provided': business_type
+            }), 400
+        
+        # Route to appropriate task based on business_type
+        if business_type == 'rest':
+            task = gen_availability_venue.delay(tenant_id, location_id, location_tz, affected_date)
+            task_type = 'venue'
+        else:
+            task = gen_availability.delay(tenant_id, location_id, location_tz, affected_date)
+            task_type = 'staff'
         
         return jsonify({
             'task_id': task.id,
             'status': 'pending',
-            'message': 'Availability generation task started',
+            'message': f'{task_type.title()} availability generation task started',
             'tenant_id': tenant_id,
             'location_id': location_id,
+            'business_type': business_type,
+            'task_type': task_type,
             'is_regeneration': affected_date is not None
         }), 202
         

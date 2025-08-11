@@ -19,16 +19,26 @@ FLASK_SECRET_KEY=your-flask-secret
 
 ## API Endpoints
 
-### 1. Generate Staff Availability
+### 1. Generate Availability (Enhanced with business_type)
 ```bash
 POST /api/availability/generate
 Content-Type: application/json
 X-API-Key: your-api-key-here
 
+# For restaurant/venue availability
 {
   "tenant_id": "123",
   "location_id": "456",
-  "location_tz": "America/New_York"
+  "location_tz": "America/New_York",
+  "business_type": "rest"
+}
+
+# For staff availability  
+{
+  "tenant_id": "123",
+  "location_id": "456",
+  "location_tz": "America/New_York",
+  "business_type": "other"
 }
 
 # For regeneration (specific date)
@@ -36,6 +46,7 @@ X-API-Key: your-api-key-here
   "tenant_id": "123",
   "location_id": "456", 
   "location_tz": "America/New_York",
+  "business_type": "rest",
   "affected_date": "2025-08-15"
 }
 ```
@@ -77,6 +88,7 @@ interface GenerateAvailabilityRequest {
   tenant_id: string;
   location_id: string;
   location_tz: string;
+  business_type: 'rest' | 'other'; // Required - determines which task to run
   affected_date?: string; // Optional for regeneration
 }
 
@@ -86,6 +98,8 @@ interface TaskResponse {
   message: string;
   tenant_id: string;
   location_id: string;
+  business_type: string;
+  task_type: string; // 'venue' or 'staff'
   is_regeneration: boolean;
 }
 
@@ -118,18 +132,20 @@ export class CeleryAPI {
     return response.json();
   }
 
-  async generateStaffAvailability(data: GenerateAvailabilityRequest): Promise<TaskResponse> {
+  async generateAvailability(data: GenerateAvailabilityRequest): Promise<TaskResponse> {
     return this.makeRequest('/api/availability/generate', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   }
 
-  async generateVenueAvailability(data: GenerateAvailabilityRequest): Promise<TaskResponse> {
-    return this.makeRequest('/api/availability/generate-venue', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
+  // Legacy methods for backward compatibility
+  async generateStaffAvailability(data: Omit<GenerateAvailabilityRequest, 'business_type'>): Promise<TaskResponse> {
+    return this.generateAvailability({ ...data, business_type: 'other' });
+  }
+
+  async generateVenueAvailability(data: Omit<GenerateAvailabilityRequest, 'business_type'>): Promise<TaskResponse> {
+    return this.generateAvailability({ ...data, business_type: 'rest' });
   }
 
   async getTaskStatus(taskId: string): Promise<TaskStatus> {
@@ -168,14 +184,15 @@ export default function AvailabilityManager() {
     const celeryAPI = new CeleryAPI();
     
     try {
-      // Start the task
-      const taskResponse = await celeryAPI.generateStaffAvailability({
+      // Start the task (restaurant/venue availability)
+      const taskResponse = await celeryAPI.generateAvailability({
         tenant_id: '123',
         location_id: '456',
-        location_tz: 'America/New_York'
+        location_tz: 'America/New_York',
+        business_type: 'rest' // or 'other' for staff
       });
       
-      setTaskStatus(`Task started: ${taskResponse.task_id}`);
+      setTaskStatus(`Task started: ${taskResponse.task_id} (${taskResponse.task_type})`);
       
       // Wait for completion
       const finalStatus = await celeryAPI.waitForTask(taskResponse.task_id);
@@ -211,25 +228,39 @@ export default function AvailabilityManager() {
 ## cURL Examples
 
 ```bash
-# 1. Generate staff availability
+# 1. Generate availability (restaurant/venue)
 curl -X POST https://your-celery-app.render.com/api/availability/generate \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-api-key-here" \
   -d '{
     "tenant_id": "123",
     "location_id": "456",
-    "location_tz": "America/New_York"
+    "location_tz": "America/New_York",
+    "business_type": "rest"
   }'
 
 # Response:
 # {
 #   "task_id": "abc-123-def",
 #   "status": "pending",
-#   "message": "Availability generation task started",
+#   "message": "Venue availability generation task started",
 #   "tenant_id": "123",
 #   "location_id": "456",
+#   "business_type": "rest",
+#   "task_type": "venue",
 #   "is_regeneration": false
 # }
+
+# 1b. Generate availability (staff)
+curl -X POST https://your-celery-app.render.com/api/availability/generate \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-api-key-here" \
+  -d '{
+    "tenant_id": "123",
+    "location_id": "456",
+    "location_tz": "America/New_York",
+    "business_type": "other"
+  }'
 
 # 2. Check task status
 curl -X GET https://your-celery-app.render.com/api/task/abc-123-def \
@@ -263,7 +294,14 @@ curl -X GET https://your-celery-app.render.com/api/task/abc-123-def \
 // Missing required fields
 {
   "error": "Missing required fields",
-  "missing_fields": ["tenant_id", "location_tz"]
+  "missing_fields": ["business_type"]
+}
+
+// Invalid business_type
+{
+  "error": "Invalid business_type",
+  "message": "business_type must be either \"rest\" or \"other\"",
+  "provided": "invalid_value"
 }
 
 // Task failed
