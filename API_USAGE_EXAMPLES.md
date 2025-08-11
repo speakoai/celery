@@ -33,12 +33,12 @@ X-API-Key: your-api-key-here
   "business_type": "rest"
 }
 
-# For staff availability  
+# For service/staff availability  
 {
   "tenant_id": "123",
   "location_id": "456",
   "location_tz": "America/New_York",
-  "business_type": "other"
+  "business_type": "service"
 }
 
 # For regeneration (specific date)
@@ -88,7 +88,7 @@ interface GenerateAvailabilityRequest {
   tenant_id: string;
   location_id: string;
   location_tz: string;
-  business_type: 'rest' | 'other'; // Required - determines which task to run
+  business_type: 'rest' | 'service'; // Required - determines which task to run
   affected_date?: string; // Optional for regeneration
 }
 
@@ -141,7 +141,7 @@ export class CeleryAPI {
 
   // Legacy methods for backward compatibility
   async generateStaffAvailability(data: Omit<GenerateAvailabilityRequest, 'business_type'>): Promise<TaskResponse> {
-    return this.generateAvailability({ ...data, business_type: 'other' });
+    return this.generateAvailability({ ...data, business_type: 'service' });
   }
 
   async generateVenueAvailability(data: Omit<GenerateAvailabilityRequest, 'business_type'>): Promise<TaskResponse> {
@@ -189,7 +189,7 @@ export default function AvailabilityManager() {
         tenant_id: '123',
         location_id: '456',
         location_tz: 'America/New_York',
-        business_type: 'rest' // or 'other' for staff
+        business_type: 'rest' // or 'service' for staff
       });
       
       setTaskStatus(`Task started: ${taskResponse.task_id} (${taskResponse.task_type})`);
@@ -251,7 +251,7 @@ curl -X POST https://your-celery-app.render.com/api/availability/generate \
 #   "is_regeneration": false
 # }
 
-# 1b. Generate availability (staff)
+# 1b. Generate availability (service/staff)
 curl -X POST https://your-celery-app.render.com/api/availability/generate \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-api-key-here" \
@@ -259,7 +259,7 @@ curl -X POST https://your-celery-app.render.com/api/availability/generate \
     "tenant_id": "123",
     "location_id": "456",
     "location_tz": "America/New_York",
-    "business_type": "other"
+    "business_type": "service"
   }'
 
 # 2. Check task status
@@ -300,7 +300,7 @@ curl -X GET https://your-celery-app.render.com/api/task/abc-123-def \
 // Invalid business_type
 {
   "error": "Invalid business_type",
-  "message": "business_type must be either \"rest\" or \"other\"",
+  "message": "business_type must be either \"rest\" or \"service\"",
   "provided": "invalid_value"
 }
 

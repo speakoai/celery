@@ -61,7 +61,7 @@ def api_generate_availability():
         "tenant_id": "123",
         "location_id": "456", 
         "location_tz": "America/New_York",
-        "business_type": "rest" | "other",  // mandatory - "rest" for restaurant/venue, "other" for staff
+        "business_type": "rest" | "service",  // mandatory - "rest" for restaurant/venue, "service" for staff
         "affected_date": "2025-08-15"  // optional, for regeneration
     }
     """
@@ -87,10 +87,10 @@ def api_generate_availability():
         affected_date = data.get('affected_date')  # Optional for regeneration
         
         # Validate business_type
-        if business_type not in ['rest', 'other']:
+        if business_type not in ['rest', 'service']:
             return jsonify({
                 'error': 'Invalid business_type',
-                'message': 'business_type must be either "rest" or "other"',
+                'message': 'business_type must be either "rest" or "service"',
                 'provided': business_type
             }), 400
         
