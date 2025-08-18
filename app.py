@@ -4,7 +4,11 @@ from functools import wraps
 from flask import Flask, flash, render_template, redirect, request, jsonify
 from tasks.demo_task import add
 from tasks.availability_gen_regen import gen_availability, gen_availability_venue
-from tasks.sms import send_sms_confirmation_new, send_sms_confirmation_mod, send_sms_confirmation_can
+from tasks.sms import (
+    send_sms_confirmation_new, send_sms_confirmation_mod, send_sms_confirmation_can,
+    send_email_confirmation_new, send_email_confirmation_mod_rest, send_email_confirmation_mod,
+    send_email_confirmation_can_rest, send_email_confirmation_can
+)
 from tasks.celery_app import app as celery_app
 
 app = Flask(__name__)
@@ -215,11 +219,13 @@ def api_get_task_status(task_id):
 @require_api_key
 def api_send_sms():
     """
-    Send SMS notification for booking actions
+    Send SMS notification and email notification for booking actions
     Expected JSON payload:
     {
         "booking_id": 123,
-        "action": "new" | "modify" | "cancel"
+        "action": "new" | "modify" | "cancel",
+        "business_type": "service" | "rest",
+        "original_booking_id": 456  // Required only for "modify" action
     }
     """
     try:
@@ -228,7 +234,7 @@ def api_send_sms():
             return jsonify({'error': 'JSON payload required'}), 400
         
         # Validate required fields
-        required_fields = ['booking_id', 'action']
+        required_fields = ['booking_id', 'action', 'business_type']
         missing_fields = [field for field in required_fields if field not in data]
         if missing_fields:
             return jsonify({
@@ -239,6 +245,8 @@ def api_send_sms():
         # Extract parameters
         booking_id = data['booking_id']
         action = data['action']
+        business_type = data['business_type']
+        original_booking_id = data.get('original_booking_id')
         
         # Validate booking_id is an integer
         try:
@@ -259,25 +267,119 @@ def api_send_sms():
                 'provided': action
             }), 400
         
-        # Route to appropriate SMS task based on action
-        if action == 'new':
-            task = send_sms_confirmation_new.delay(booking_id)
-            task_type = 'new booking confirmation'
-        elif action == 'modify':
-            task = send_sms_confirmation_mod.delay(booking_id)
-            task_type = 'booking modification confirmation'
-        else:  # action == 'cancel'
-            task = send_sms_confirmation_can.delay(booking_id)
-            task_type = 'booking cancellation confirmation'
+        # Validate business_type
+        valid_business_types = ['service', 'rest']
+        if business_type not in valid_business_types:
+            return jsonify({
+                'error': 'Invalid business_type',
+                'message': f'business_type must be one of: {", ".join(valid_business_types)}',
+                'provided': business_type
+            }), 400
         
-        return jsonify({
-            'task_id': task.id,
-            'status': 'pending',
-            'message': f'SMS {task_type} task started',
+        # Validate original_booking_id for modify action
+        if action == 'modify':
+            if not original_booking_id:
+                return jsonify({
+                    'error': 'Missing required field for modify action',
+                    'message': 'original_booking_id is required when action is "modify"'
+                }), 400
+            try:
+                original_booking_id = int(original_booking_id)
+            except (ValueError, TypeError):
+                return jsonify({
+                    'error': 'Invalid original_booking_id',
+                    'message': 'original_booking_id must be a valid integer',
+                    'provided': original_booking_id
+                }), 400
+        
+        # Start SMS and Email tasks based on action and business_type
+        tasks = []
+        task_descriptions = []
+        
+        if action == 'new':
+            # SMS task
+            sms_task = send_sms_confirmation_new.delay(booking_id)
+            tasks.append({
+                'task_id': sms_task.id,
+                'type': 'sms',
+                'description': 'new booking SMS confirmation'
+            })
+            
+            # Email task (same for both business types)
+            email_task = send_email_confirmation_new.delay(booking_id)
+            tasks.append({
+                'task_id': email_task.id,
+                'type': 'email',
+                'description': 'new booking email confirmation'
+            })
+            
+            action_description = 'new booking confirmation'
+            
+        elif action == 'modify':
+            # SMS task
+            sms_task = send_sms_confirmation_mod.delay(booking_id)
+            tasks.append({
+                'task_id': sms_task.id,
+                'type': 'sms',
+                'description': 'booking modification SMS confirmation'
+            })
+            
+            # Email task (different based on business type)
+            if business_type == 'rest':
+                email_task = send_email_confirmation_mod_rest.delay(booking_id, original_booking_id)
+                email_description = 'restaurant booking modification email confirmation'
+            else:  # business_type == 'service'
+                email_task = send_email_confirmation_mod.delay(booking_id, original_booking_id)
+                email_description = 'service booking modification email confirmation'
+            
+            tasks.append({
+                'task_id': email_task.id,
+                'type': 'email',
+                'description': email_description
+            })
+            
+            action_description = 'booking modification confirmation'
+            
+        else:  # action == 'cancel'
+            # SMS task
+            sms_task = send_sms_confirmation_can.delay(booking_id)
+            tasks.append({
+                'task_id': sms_task.id,
+                'type': 'sms',
+                'description': 'booking cancellation SMS confirmation'
+            })
+            
+            # Email task (different based on business type)
+            if business_type == 'rest':
+                email_task = send_email_confirmation_can_rest.delay(booking_id)
+                email_description = 'restaurant booking cancellation email confirmation'
+            else:  # business_type == 'service'
+                email_task = send_email_confirmation_can.delay(booking_id)
+                email_description = 'service booking cancellation email confirmation'
+            
+            tasks.append({
+                'task_id': email_task.id,
+                'type': 'email',
+                'description': email_description
+            })
+            
+            action_description = 'booking cancellation confirmation'
+        
+        response = {
+            'message': f'{action_description.title()} tasks started',
             'booking_id': booking_id,
             'action': action,
-            'task_type': task_type
-        }), 202
+            'business_type': business_type,
+            'action_description': action_description,
+            'tasks': tasks,
+            'total_tasks': len(tasks)
+        }
+        
+        # Add original_booking_id to response if applicable
+        if action == 'modify' and original_booking_id:
+            response['original_booking_id'] = original_booking_id
+        
+        return jsonify(response), 202
         
     except Exception as e:
         return jsonify({
