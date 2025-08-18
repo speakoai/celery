@@ -7,7 +7,7 @@ import json
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from html import unescape
-from tasks.availability import gen_availability, gen_availability_venue
+from tasks.availability_gen_regen import gen_availability, gen_availability_venue
 from functools import wraps
 
 load_dotenv()

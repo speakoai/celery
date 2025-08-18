@@ -4,6 +4,7 @@ from functools import wraps
 from flask import Flask, flash, render_template, redirect, request, jsonify
 from tasks.demo_task import add
 from tasks.availability_gen_regen import gen_availability, gen_availability_venue
+from tasks.sms import send_sms_confirmation_new, send_sms_confirmation_mod, send_sms_confirmation_can
 from tasks.celery_app import app as celery_app
 
 app = Flask(__name__)
@@ -207,6 +208,81 @@ def api_get_task_status(task_id):
             'error': 'Internal server error',
             'message': str(e),
             'task_id': task_id
+        }), 500
+
+
+@app.route('/api/sms/send', methods=['POST'])
+@require_api_key
+def api_send_sms():
+    """
+    Send SMS notification for booking actions
+    Expected JSON payload:
+    {
+        "booking_id": 123,
+        "action": "new" | "modify" | "cancel"
+    }
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'JSON payload required'}), 400
+        
+        # Validate required fields
+        required_fields = ['booking_id', 'action']
+        missing_fields = [field for field in required_fields if field not in data]
+        if missing_fields:
+            return jsonify({
+                'error': 'Missing required fields', 
+                'missing_fields': missing_fields
+            }), 400
+        
+        # Extract parameters
+        booking_id = data['booking_id']
+        action = data['action']
+        
+        # Validate booking_id is an integer
+        try:
+            booking_id = int(booking_id)
+        except (ValueError, TypeError):
+            return jsonify({
+                'error': 'Invalid booking_id',
+                'message': 'booking_id must be a valid integer',
+                'provided': booking_id
+            }), 400
+        
+        # Validate action
+        valid_actions = ['new', 'modify', 'cancel']
+        if action not in valid_actions:
+            return jsonify({
+                'error': 'Invalid action',
+                'message': f'action must be one of: {", ".join(valid_actions)}',
+                'provided': action
+            }), 400
+        
+        # Route to appropriate SMS task based on action
+        if action == 'new':
+            task = send_sms_confirmation_new.delay(booking_id)
+            task_type = 'new booking confirmation'
+        elif action == 'modify':
+            task = send_sms_confirmation_mod.delay(booking_id)
+            task_type = 'booking modification confirmation'
+        else:  # action == 'cancel'
+            task = send_sms_confirmation_can.delay(booking_id)
+            task_type = 'booking cancellation confirmation'
+        
+        return jsonify({
+            'task_id': task.id,
+            'status': 'pending',
+            'message': f'SMS {task_type} task started',
+            'booking_id': booking_id,
+            'action': action,
+            'task_type': task_type
+        }), 202
+        
+    except Exception as e:
+        return jsonify({
+            'error': 'Internal server error',
+            'message': str(e)
         }), 500
 
 

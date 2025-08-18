@@ -1,0 +1,60 @@
+{
+  "conversation_config": {
+    "asr": {
+      "quality": "high",
+      "provider": "elevenlabs",
+      "user_input_audio_format": "ulaw_8000"
+    },
+    "tts": {
+      "voice_id": "cjVigY5qzO86Huf0OWal",
+      "agent_output_audio_format": "ulaw_8000"
+    },
+    "agent": {
+      "first_message": "Welcome to Happy Sushi Schofields! What can I do for you today?",
+      "language": "en",
+      "prompt": {
+        "prompt": "You are the booking agent for Happy Sushi",
+        "llm": "gpt-4o",
+        "temperature": 0.6,
+        "tool_ids": [
+          "tool_01jxfjx25afrpv21qmem9ery15",
+          "tool_01jxfjx25ef92b9dsvp139v603",
+          "tool_01jxfjx258fbhbfyqtzw0s6svz",
+          "tool_01jxfjx25df9ts3x7ajg2eetsn",
+          "tool_01jxfjx257e4fam6zb53hdkrdh",
+          "tool_01jxfjx255f5vtf0nax5csmyek",
+          "tool_01jxfjx28afaq94dejefq877nj",
+          "tool_01jxfjx25we0785e9c2cy1xz80",
+          "tool_01jxfjx25tekzv1wx6cw23t21h",
+          "tool_01jxfjx25bff7rqyxjwdwtfx9g"
+        ],
+        "built_in_tools": {
+          "end_call": {
+            "name": "end_call",
+            "description": "end customer calls when conversation is over",
+            "params": {
+              "system_tool_type": "end_call"
+            }
+          }
+        },
+        "knowledge_base": [
+          {
+            "name": "happy-sushi-menu | Notion",
+            "id": "ppK9RiKERIRXSgka56xf",
+            "type": "url"
+          }
+        ],
+        "rag": {
+          "enabled": true,
+          "embedding_model": "e5_mistral_7b_instruct"
+        },
+        "timezone": "Australia/Sydney"
+      }
+    }
+  },
+  "name": "Happy Sushi",
+  "tags": [
+    "restaurants",
+    "Australia/Sydney"
+  ]
+}
