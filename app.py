@@ -6,7 +6,8 @@ from tasks.demo_task import add
 from tasks.availability_gen_regen import gen_availability, gen_availability_venue
 from tasks.sms import (
     send_sms_confirmation_new, send_sms_confirmation_mod, send_sms_confirmation_can,
-    send_email_confirmation_new, send_email_confirmation_mod_rest, send_email_confirmation_mod,
+    send_email_confirmation_new_rest, send_email_confirmation_new, 
+    send_email_confirmation_mod_rest, send_email_confirmation_mod,
     send_email_confirmation_can_rest, send_email_confirmation_can
 )
 from tasks.celery_app import app as celery_app
@@ -305,12 +306,18 @@ def api_send_sms():
                 'description': 'new booking SMS confirmation'
             })
             
-            # Email task (same for both business types)
-            email_task = send_email_confirmation_new.delay(booking_id)
+            # Email task (different based on business type)
+            if business_type == 'rest':
+                email_task = send_email_confirmation_new_rest.delay(booking_id)
+                email_description = 'restaurant new booking email confirmation'
+            else:  # business_type == 'service'
+                email_task = send_email_confirmation_new.delay(booking_id)
+                email_description = 'service new booking email confirmation'
+            
             tasks.append({
                 'task_id': email_task.id,
                 'type': 'email',
-                'description': 'new booking email confirmation'
+                'description': email_description
             })
             
             action_description = 'new booking confirmation'
