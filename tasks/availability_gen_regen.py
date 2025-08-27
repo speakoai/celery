@@ -356,19 +356,27 @@ def gen_availability_venue(tenant_id, location_id, location_tz, affected_date=No
 
         # Preload venue tags for this location
         venue_tags = {}
+        location_zone_tags = []
         cur.execute("""
-            SELECT tag_id, name 
+            SELECT tag_id, name, slug
             FROM venue_tag 
             WHERE tenant_id = %s AND location_id = %s AND is_active = TRUE
+            ORDER BY name
         """, (tenant_id, location_id))
-        for tag_id, tag_name in cur.fetchall():
-            venue_tags[tag_id] = tag_name
+        for tag_id, tag_name, tag_slug in cur.fetchall():
+            venue_tags[tag_id] = tag_name  # Keep for lookup
+            location_zone_tags.append({
+                "id": tag_id,
+                "name": tag_name,
+                "slug": tag_slug
+            })
 
         for chunk_start in range(0, days_range, chunk_size):
             response = {
                 "tenant_id": tenant_id,
                 "location_id": location_id,
                 "services": services,
+                "location_zone_tags": location_zone_tags,
                 "availabilities": []
             }
 
