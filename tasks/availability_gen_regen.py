@@ -438,14 +438,14 @@ def gen_availability_venue(tenant_id, location_id, location_tz, affected_date=No
                     if venue_unit_type == "dining_table":
                         is_dining_table = True
                     if not is_closed:  # Only add if not closed for the day
-                        tag_names = resolve_tag_names(zone_tag_ids, venue_tags)
+                        zone_tags = resolve_tag_names(zone_tag_ids, venue_tags)
                         venue_dict.setdefault(vuid, {
                             "id": vuid,
                             "name": name,
                             "capacity": capacity,
                             "min_capacity": min_capacity,
                             "service": [svc for svc in venue_unit_services.get(vuid, []) if svc in location_services],
-                            "tag_names": tag_names,
+                            "zone_tags": zone_tags,
                             "slots": []
                         })["slots"].append({"start": str(start), "end": str(end), "service_duration": str(service_duration)})
                     # If is_closed = true, venue is completely unavailable (don't add to venue_dict)
@@ -454,14 +454,14 @@ def gen_availability_venue(tenant_id, location_id, location_tz, affected_date=No
                 for vuid, name, venue_unit_type, capacity, min_capacity, service_duration, start, end, va_availability_id, zone_tag_ids in recurring_venue_rows:
                     if venue_unit_type == "dining_table":
                         is_dining_table = True
-                    tag_names = resolve_tag_names(zone_tag_ids, venue_tags)
+                    zone_tags = resolve_tag_names(zone_tag_ids, venue_tags)
                     venue_dict.setdefault(vuid, {
                         "id": vuid,
                         "name": name,
                         "capacity": capacity,
                         "min_capacity": min_capacity,
                         "service": [svc for svc in venue_unit_services.get(vuid, []) if svc in location_services],
-                        "tag_names": tag_names,
+                        "zone_tags": zone_tags,
                         "slots": []
                     })["slots"].append({"start": str(start), "end": str(end), "service_duration": str(service_duration)})
 
