@@ -454,6 +454,7 @@ def gen_availability_venue(tenant_id, location_id, location_tz, affected_date=No
                             "min_capacity": min_capacity,
                             "service": [svc for svc in venue_unit_services.get(vuid, []) if svc in location_services],
                             "zone_tags": zone_tags,
+                            "zone_tag_ids": zone_tag_ids or [],
                             "slots": []
                         })["slots"].append({"start": str(start), "end": str(end), "service_duration": str(service_duration)})
                     # If is_closed = true, venue is completely unavailable (don't add to venue_dict)
@@ -470,6 +471,7 @@ def gen_availability_venue(tenant_id, location_id, location_tz, affected_date=No
                         "min_capacity": min_capacity,
                         "service": [svc for svc in venue_unit_services.get(vuid, []) if svc in location_services],
                         "zone_tags": zone_tags,
+                        "zone_tag_ids": zone_tag_ids or [],
                         "slots": []
                     })["slots"].append({"start": str(start), "end": str(end), "service_duration": str(service_duration)})
 
