@@ -60,14 +60,14 @@ def run_all_jobs():
     for job in jobs:
         try:
             now_local = datetime.now(pytz.timezone(job["location_tz"]))
-            if now_local.hour == 0 and now_local.minute == 0:
+            if now_local.hour == 0 and now_local.minute < 30:
                 print(f"[INFO] Generating availability for tenant {job['tenant_id']} location {job['location_id']} at {now_local}")
                 if job["location_type"] == "rest":
                     gen_availability_venue.delay(job["tenant_id"], job["location_id"], job["location_tz"])
                 else:
                     gen_availability.delay(job["tenant_id"], job["location_id"], job["location_tz"])
             else:
-                print(f"[SKIP] It's not midnight in {job['location_tz']}. Local time is {now_local.strftime('%Y-%m-%d %H:%M:%S')}")
+                print(f"[SKIP] Not within the midnight window (00:00-00:29) in {job['location_tz']}. Local time is {now_local.strftime('%Y-%m-%d %H:%M:%S')}")
         except Exception as e:
             print(f"[ERROR] Failed processing job for location {job.get('location_id')} (Tenant {job.get('tenant_id')}): {e}")
 
