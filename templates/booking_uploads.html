@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <h2>Upload Files</h2>
+  <p>Upload image files directly to the booking uploads folder. You can upload up to 5 files at once.</p>
+
+  {% if error_message %}
+    <div style="margin: 20px 0; padding: 15px; background-color: #f8d7da; border: 1px solid #f5c6cb; border-radius: 5px; color: #721c24;">
+      <strong>❌ Error:</strong> {{ error_message }}
+    </div>
+  {% endif %}
+
+  {% if success_message %}
+    <div style="margin: 20px 0; padding: 15px; background-color: #d4edda; border: 1px solid #c3e6cb; border-radius: 5px; color: #155724;">
+      <strong>✅ {{ success_message }}</strong>
+    </div>
+
+    {% if uploaded_files %}
+      <h3>Uploaded Files</h3>
+      <table border="1" cellpadding="8" cellspacing="0" style="margin-top: 10px; width: 100%; border-collapse: collapse;">
+        <thead style="background-color: #f8f9fa;">
+          <tr>
+            <th>Preview</th>
+            <th>Original Filename</th>
+            <th>Size</th>
+            <th>URL</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for file in uploaded_files %}
+          <tr>
+            <td style="text-align: center;">
+              <img src="{{ file.url }}" alt="Preview" style="max-width: 100px; max-height: 60px; border: 1px solid #ddd;">
+            </td>
+            <td>{{ file.original_filename }}</td>
+            <td>{{ (file.size / 1024 / 1024) | round(2) }} MB</td>
+            <td style="word-break: break-all; max-width: 300px;">
+              <a href="{{ file.url }}" target="_blank" style="color: #007bff; text-decoration: none;">{{ file.url }}</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+
+    <div style="margin-top: 20px;">
+      <a href="/booking_uploads" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px;">
+        Upload More Files
+      </a>
+    </div>
+  {% else %}
+    <form method="POST" enctype="multipart/form-data" style="max-width: 600px;">
+      <div style="margin-bottom: 20px;">
+        <label for="upload_files" style="display: block; margin-bottom: 5px; font-weight: bold;">
+          Select Image Files (Max 5 files):
+        </label>
+        <input type="file" id="upload_files" name="upload_files" multiple accept="image/*" required
+               style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+        <small style="color: #666;">
+          Accepted formats: PNG, JPG, JPEG, GIF, WEBP (Max 5MB per file, up to 5 files total)
+        </small>
+        <div id="file_preview" style="margin-top: 10px;"></div>
+      </div>
+
+      <button type="submit" style="background-color: #28a745; color: white; padding: 12px 24px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px;">
+        Upload Files
+      </button>
+    </form>
+
+    <script>
+      // File preview and validation
+      const fileInput = document.getElementById('upload_files');
+      const filePreview = document.getElementById('file_preview');
+      
+      fileInput.addEventListener('change', function() {
+        const files = Array.from(this.files);
+        filePreview.innerHTML = '';
+        
+        if (files.length === 0) return;
+        
+        // Check file limit
+        if (files.length > 5) {
+          alert('Maximum 5 files allowed');
+          this.value = '';
+          return;
+        }
+        
+        let allValid = true;
+        files.forEach((file, index) => {
+          // Check file size
+          if (file.size > 5 * 1024 * 1024) {
+            alert(`File "${file.name}" is too large. Maximum size is 5MB.`);
+            allValid = false;
+            return;
+          }
+          
+          // Check file type
+          const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp'];
+          if (!allowedTypes.includes(file.type)) {
+            alert(`File "${file.name}" is not a valid image type.`);
+            allValid = false;
+            return;
+          }
+        });
+        
+        if (!allValid) {
+          this.value = '';
+          return;
+        }
+        
+        // Show preview
+        const previewContainer = document.createElement('div');
+        previewContainer.innerHTML = `
+          <div style="margin-top: 15px; padding: 15px; background-color: #f8f9fa; border-radius: 5px;">
+            <h4>Selected Files (${files.length}):</h4>
+            <div id="preview_list"></div>
+          </div>
+        `;
+        filePreview.appendChild(previewContainer);
+        
+        const previewList = document.getElementById('preview_list');
+        files.forEach((file, index) => {
+          const reader = new FileReader();
+          reader.onload = function(e) {
+            const filePreviewItem = document.createElement('div');
+            filePreviewItem.style.cssText = 'display: flex; align-items: center; margin: 10px 0; padding: 10px; border: 1px solid #ddd; border-radius: 4px;';
+            filePreviewItem.innerHTML = `
+              <img src="${e.target.result}" alt="Preview" style="width: 60px; height: 60px; object-fit: cover; border-radius: 4px; margin-right: 15px;">
+              <div>
+                <strong>${file.name}</strong><br>
+                <span style="color: #666;">Size: ${(file.size / 1024 / 1024).toFixed(2)} MB</span>
+              </div>
+            `;
+            previewList.appendChild(filePreviewItem);
+          };
+          reader.readAsDataURL(file);
+        });
+      });
+    </script>
+  {% endif %}
+
+  <div style="margin-top: 40px; padding: 20px; background-color: #f8f9fa; border-radius: 5px;">
+    <h4>About File Upload</h4>
+    <p>This tool allows you to upload image files directly to your R2 storage:</p>
+    <ul>
+      <li>Upload up to 5 image files at once</li>
+      <li>Files are stored in the <code>booking_uploads</code> folder</li>
+      <li>Maximum file size: 5MB per file</li>
+      <li>Supported formats: PNG, JPG, JPEG, GIF, WEBP</li>
+      <li>Files are automatically renamed with timestamps for uniqueness</li>
+    </ul>
+  </div>
+{% endblock %}

@@ -704,6 +704,98 @@ def construct_key(tenant_id, location_id, start_date=None):
         key += f":start_date_{start_date}"
     return key
 
+# Helper function for direct booking uploads
+def upload_file_to_booking_uploads(file):
+    """Upload file directly to booking_uploads folder in R2"""
+    if not r2_client:
+        raise Exception("R2 storage not configured properly")
+    
+    # Validate file
+    if not allowed_image_file(file.filename):
+        raise Exception("Only image files (PNG, JPG, JPEG, GIF, WEBP) are allowed")
+    
+    # Check file size (5MB limit)
+    file.seek(0, 2)  # Seek to end
+    file_size = file.tell()
+    file.seek(0)  # Reset to beginning
+    
+    if file_size > 5 * 1024 * 1024:  # 5MB
+        raise Exception("File size must be less than 5MB")
+    
+    # Generate unique filename
+    file_extension = os.path.splitext(secure_filename(file.filename))[1].lower()
+    timestamp = int(time.time())
+    file_hash = hashlib.md5(f"{file.filename}_{timestamp}".encode()).hexdigest()[:8]
+    unique_filename = f"{timestamp}_{file_hash}_{secure_filename(file.filename)}"
+    
+    # Define R2 path
+    file_key = f"booking_uploads/{unique_filename}"
+    
+    # Get file content
+    file_content = file.read()
+    content_type = file.content_type or 'application/octet-stream'
+    
+    # Upload to R2
+    r2_client.put_object(
+        Bucket=R2_BUCKET_NAME,
+        Key=file_key,
+        Body=file_content,
+        ContentType=content_type,
+        Metadata={
+            'original_filename': file.filename,
+            'upload_timestamp': datetime.now().isoformat()
+        }
+    )
+    
+    # Generate public URL using custom domain
+    file_url = f"https://assets.speako.ai/{file_key}"
+    
+    return {
+        'url': file_url,
+        'key': file_key,
+        'filename': unique_filename,
+        'original_filename': file.filename,
+        'size': len(file_content)
+    }
+
+# ----------------------------
+# Booking Uploads - Direct File Upload to R2
+# ----------------------------
+@app.route("/booking_uploads", methods=["GET", "POST"])
+@restrict_ip
+def booking_uploads():
+    error_message = ""
+    success_message = ""
+    uploaded_files = []
+    
+    if request.method == "POST":
+        try:
+            # Get all uploaded files
+            files = request.files.getlist('upload_files')
+            
+            if not files or all(f.filename == '' for f in files):
+                raise Exception("Please select at least one file to upload")
+            
+            # Filter out empty files and check limit
+            valid_files = [f for f in files if f.filename != '']
+            if len(valid_files) > 5:
+                raise Exception("Maximum 5 files allowed per upload")
+            
+            # Upload each file
+            for file in valid_files:
+                result = upload_file_to_booking_uploads(file)
+                uploaded_files.append(result)
+            
+            success_message = f"Successfully uploaded {len(uploaded_files)} file(s)!"
+            
+        except Exception as e:
+            error_message = str(e)
+    
+    return render_template("booking_uploads.html",
+                         error_message=error_message,
+                         success_message=success_message,
+                         uploaded_files=uploaded_files)
+
 # ----------------------------
 # App Entrypoint for Local Dev (Render uses gunicorn)
 # ----------------------------
