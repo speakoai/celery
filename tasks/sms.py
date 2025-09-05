@@ -8,6 +8,7 @@ import os
 import re
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
+from tasks.email_template_utils import render_booking_confirmation_template
 
 @app.task
 def send_sms_confirmation_new(booking_id: int):
@@ -297,10 +298,10 @@ def send_email_confirmation_new_rest(booking_id: int) -> str:
                 if not fallback_email:
                     print(f"[EMAIL] No valid email recipients or fallback email for booking {booking_id}.")
                     return "failed"
-                to_emails = [fallback_email]
+        print(f"[EMAIL] Will send to: {to_emails}")
 
-        # Construct email message with helping text and systematic data
-        email_body = (
+        # Construct plain text email as fallback
+        plain_text_body = (
             "Dear Host,\n\n"
             "A new booking has been confirmed with the following details:\n\n"
             f"Location: {location_name}\n"
@@ -318,20 +319,49 @@ def send_email_confirmation_new_rest(booking_id: int) -> str:
             "Speako AI Booking System"
         )
 
-        # Set up SendGrid email
-        message = Mail(
-            from_email=os.getenv("SENDGRID_FROM_EMAIL"),
-            to_emails=to_emails,
-            subject=f"New Booking Confirmation (Ref: {booking_ref})",
-            plain_text_content=email_body
+        # Create HTML email template using template file
+        html_template = render_booking_confirmation_template(
+            email_title="New Booking Confirmation",
+            email_message="A new booking has been confirmed with the following details:",
+            location_name=location_name,
+            booking_ref=booking_ref,
+            customer_name=customer_name,
+            customer_phone=customer_phone,
+            party_num=party_num,
+            booking_date=start_time.strftime('%Y-%m-%d'),
+            start_time=start_time.strftime('%H:%M'),
+            end_time=end_time.strftime('%H:%M'),
+            closing_message="Please ensure all arrangements are in place.",
+            venue_unit_name=venue_unit_name,
+            venue_unit_id=venue_unit_id
         )
+
+        if not html_template:
+            print("[EMAIL] Failed to generate HTML template, falling back to plain text only")
+            # Set up SendGrid email with plain text only
+            message = Mail(
+                from_email=os.getenv("SENDGRID_FROM_EMAIL"),
+                to_emails=to_emails,
+                subject=f"New Booking Confirmation (Ref: {booking_ref})",
+                plain_text_content=plain_text_body
+            )
+        else:
+            print("[EMAIL] HTML template generated successfully")
+            # Set up SendGrid email with both HTML and plain text
+            message = Mail(
+                from_email=os.getenv("SENDGRID_FROM_EMAIL"),
+                to_emails=to_emails,
+                subject=f"New Booking Confirmation (Ref: {booking_ref})",
+                html_content=html_template,
+                plain_text_content=plain_text_body
+            )
 
         # Send email via SendGrid
         sg = SendGridAPIClient(os.getenv("SENDGRID_API_KEY"))
-        #print(f"SENDGRID API KEY: {os.getenv('SENDGRID_API_KEY')}")
         response = sg.send(message)
 
-        print(f"[EMAIL] Sent to {to_emails}: {email_body}")
+        print(f"[EMAIL] Sent to {to_emails}: HTML email with booking confirmation")
+        print(f"[EMAIL] SendGrid response status: {response.status_code}")
         return "success"
 
     except Exception as e:
@@ -421,8 +451,8 @@ def send_email_confirmation_new(booking_id: int) -> str:
                     return "failed"
                 to_emails = [fallback_email]
 
-        # Construct email message with helping text and systematic data
-        email_body = (
+        # Construct plain text email as fallback
+        plain_text_body = (
             "Dear Host,\n\n"
             "A new booking has been confirmed with the following details:\n\n"
             f"Location: {location_name}\n"
@@ -442,19 +472,51 @@ def send_email_confirmation_new(booking_id: int) -> str:
             "Speako AI Booking System"
         )
 
-        # Set up SendGrid email
-        message = Mail(
-            from_email=os.getenv("SENDGRID_FROM_EMAIL"),
-            to_emails=to_emails,
-            subject=f"New Booking Confirmation (Ref: {booking_ref})",
-            plain_text_content=email_body
+        # Create HTML email template using template file
+        html_template = render_booking_confirmation_template(
+            email_title="New Booking Confirmation",
+            email_message="A new booking has been confirmed with the following details:",
+            location_name=location_name,
+            booking_ref=booking_ref,
+            customer_name=customer_name,
+            customer_phone=customer_phone,
+            party_num=party_num,
+            booking_date=start_time.strftime('%Y-%m-%d'),
+            start_time=start_time.strftime('%H:%M'),
+            end_time=end_time.strftime('%H:%M'),
+            closing_message="Please ensure all arrangements are in place.",
+            staff_name=staff_name,
+            staff_id=staff_id,
+            service_name=service_name,
+            service_id=service_id
         )
+
+        if not html_template:
+            print("[EMAIL] Failed to generate HTML template, falling back to plain text only")
+            # Set up SendGrid email with plain text only
+            message = Mail(
+                from_email=os.getenv("SENDGRID_FROM_EMAIL"),
+                to_emails=to_emails,
+                subject=f"New Booking Confirmation (Ref: {booking_ref})",
+                plain_text_content=plain_text_body
+            )
+        else:
+            print("[EMAIL] HTML template generated successfully")
+            # Set up SendGrid email with both HTML and plain text
+            message = Mail(
+                from_email=os.getenv("SENDGRID_FROM_EMAIL"),
+                to_emails=to_emails,
+                subject=f"New Booking Confirmation (Ref: {booking_ref})",
+                html_content=html_template,
+                plain_text_content=plain_text_body
+            )
 
         # Send email via SendGrid
         sg = SendGridAPIClient(os.getenv("SENDGRID_API_KEY"))
         response = sg.send(message)
 
-        print(f"[EMAIL] Sent to {to_emails}: {email_body}")
+        print(f"[EMAIL] Sent to {to_emails}: HTML email with booking confirmation")
+        print(f"[EMAIL] SendGrid response status: {response.status_code}")
         return "success"
 
     except Exception as e:
