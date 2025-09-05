@@ -9,6 +9,12 @@ from psycopg2.extras import RealDictCursor
 from html import unescape
 from tasks.availability_gen_regen import gen_availability, gen_availability_venue
 from functools import wraps
+import boto3
+import uuid
+import hashlib
+import re
+import time
+from datetime import datetime
 
 load_dotenv()
 
@@ -17,6 +23,22 @@ app = Flask(__name__)
 # Redis setup
 REDIS_URL = os.getenv("REDIS_URL")
 redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+
+# R2 (Cloudflare) setup
+R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
+R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
+R2_ENDPOINT_URL = os.getenv("R2_ENDPOINT_URL")
+R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME")
+R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID")
+
+# Initialize R2 client
+r2_client = boto3.client(
+    's3',
+    endpoint_url=R2_ENDPOINT_URL,
+    aws_access_key_id=R2_ACCESS_KEY_ID,
+    aws_secret_access_key=R2_SECRET_ACCESS_KEY,
+    region_name='auto'
+) if all([R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT_URL, R2_BUCKET_NAME]) else None
 
 # Allowed IPs configuration
 ALLOWED_IPS = os.getenv("ALLOWED_IPS", "").split(",") if os.getenv("ALLOWED_IPS") else []
@@ -399,6 +421,279 @@ def voice_agent_creator():
         return render_template("agent.html", success_message=success_message)
     
     return render_template("agent.html")
+
+# Helper functions for booking page
+def allowed_image_file(filename):
+    """Check if file is an allowed image type"""
+    allowed_extensions = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in allowed_extensions
+
+def validate_alias(alias):
+    """Validate alias format: alphanumeric + hyphens only"""
+    import re
+    if not alias:
+        return False, "Alias is required"
+    if not re.match(r'^[a-zA-Z0-9-]+$', alias):
+        return False, "Alias can only contain letters, numbers, and hyphens"
+    if len(alias) < 3:
+        return False, "Alias must be at least 3 characters long"
+    if len(alias) > 50:
+        return False, "Alias must be less than 50 characters long"
+    return True, ""
+
+def generate_booking_filename(tenant_id, location_id, file_type, file_extension):
+    """Generate versioned filename for booking page files"""
+    import hashlib
+    import time
+    # Create hash from tenant_id, location_id, file_type, and current timestamp
+    hash_input = f"{tenant_id}_{location_id}_{file_type}_{int(time.time())}"
+    file_hash = hashlib.md5(hash_input.encode()).hexdigest()[:8]
+    return f"{tenant_id}_{location_id}_{file_type}_{file_hash}{file_extension}"
+
+def upload_to_r2(file, tenant_id, location_id, file_type):
+    """Upload file to R2 and return URL"""
+    if not r2_client:
+        raise Exception("R2 storage not configured properly")
+    
+    # Validate file
+    if not allowed_image_file(file.filename):
+        raise Exception("Only image files (PNG, JPG, JPEG, GIF, WEBP) are allowed")
+    
+    # Check file size (5MB limit)
+    file.seek(0, 2)  # Seek to end
+    file_size = file.tell()
+    file.seek(0)  # Reset to beginning
+    
+    if file_size > 5 * 1024 * 1024:  # 5MB
+        raise Exception("File size must be less than 5MB")
+    
+    # Generate filename
+    file_extension = os.path.splitext(secure_filename(file.filename))[1].lower()
+    unique_filename = generate_booking_filename(tenant_id, location_id, file_type, file_extension)
+    
+    # Define R2 path
+    file_key = f"booking_pages/{file_type}s/{unique_filename}"
+    
+    # Get file content
+    file_content = file.read()
+    content_type = file.content_type or 'application/octet-stream'
+    
+    # Upload to R2
+    r2_client.put_object(
+        Bucket=R2_BUCKET_NAME,
+        Key=file_key,
+        Body=file_content,
+        ContentType=content_type,
+        Metadata={
+            'original_filename': file.filename,
+            'upload_timestamp': datetime.now().isoformat(),
+            'tenant_id': str(tenant_id),
+            'location_id': str(location_id),
+            'file_type': file_type
+        }
+    )
+    
+    # Generate public URL using custom domain
+    file_url = f"https://assets.speako.ai/{file_key}"
+    
+    return {
+        'url': file_url,
+        'key': file_key,
+        'filename': unique_filename,
+        'size': len(file_content)
+    }
+
+# ----------------------------
+# Booking Page with File Upload to R2
+# ----------------------------
+@app.route("/booking_page", methods=["GET", "POST"])
+@restrict_ip
+def booking_page():
+    db_url = os.getenv("DATABASE_URL")
+    
+    # Initialize variables
+    locations = []
+    selected_location = None
+    existing_booking_page = None
+    error_message = ""
+    success_message = ""
+    uploaded_files = {}
+    
+    # Determine current step
+    if request.method == "POST":
+        step = request.form.get("step", "1")
+    else:
+        step = "1"
+    
+    with psycopg2.connect(db_url, cursor_factory=RealDictCursor) as conn:
+        with conn.cursor() as cur:
+            # Load all active locations
+            cur.execute("""
+                SELECT tenant_id, location_id, name, location_type
+                FROM locations 
+                WHERE is_active = true 
+                ORDER BY name ASC
+            """)
+            locations = cur.fetchall()
+            
+            # Step 1: Location selection
+            if step == "1":
+                return render_template("booking_page.html", 
+                                     step=1, 
+                                     locations=locations)
+            
+            # Step 2: Show booking page form (create or update)
+            elif step == "2":
+                tenant_id = request.form.get("tenant_id")
+                location_id = request.form.get("location_id")
+                
+                if not tenant_id or not location_id:
+                    error_message = "Please select a location"
+                    return render_template("booking_page.html", 
+                                         step=1, 
+                                         locations=locations,
+                                         error_message=error_message)
+                
+                selected_location = {
+                    "tenant_id": int(tenant_id),
+                    "location_id": int(location_id)
+                }
+                
+                # Get location name
+                location_info = next((loc for loc in locations if 
+                                    loc['tenant_id'] == selected_location['tenant_id'] and 
+                                    loc['location_id'] == selected_location['location_id']), None)
+                if location_info:
+                    selected_location['name'] = location_info['name']
+                
+                # Check if booking page already exists
+                cur.execute("""
+                    SELECT alias, logo_url, banner_url, created_at
+                    FROM booking_page 
+                    WHERE tenant_id = %s AND location_id = %s AND is_active = true
+                """, (tenant_id, location_id))
+                existing_booking_page = cur.fetchone()
+                
+                return render_template("booking_page.html",
+                                     step=2,
+                                     locations=locations,
+                                     selected_location=selected_location,
+                                     existing_booking_page=existing_booking_page)
+            
+            # Step 3: Process form submission and file uploads
+            elif step == "3":
+                tenant_id = int(request.form.get("tenant_id"))
+                location_id = int(request.form.get("location_id"))
+                alias = request.form.get("alias", "").strip()
+                is_update = request.form.get("is_update") == "true"
+                
+                selected_location = {
+                    "tenant_id": tenant_id,
+                    "location_id": location_id
+                }
+                
+                # Get location name
+                location_info = next((loc for loc in locations if 
+                                    loc['tenant_id'] == tenant_id and 
+                                    loc['location_id'] == location_id), None)
+                if location_info:
+                    selected_location['name'] = location_info['name']
+                
+                try:
+                    # For new booking pages, validate alias
+                    if not is_update:
+                        is_valid, validation_error = validate_alias(alias)
+                        if not is_valid:
+                            raise Exception(validation_error)
+                        
+                        # Check if alias already exists
+                        cur.execute("SELECT alias FROM booking_page WHERE LOWER(alias) = LOWER(%s)", (alias,))
+                        if cur.fetchone():
+                            raise Exception("Alias already exists. Please choose a different one.")
+                    
+                    # Process file uploads
+                    logo_result = None
+                    banner_result = None
+                    
+                    if 'logo_file' in request.files and request.files['logo_file'].filename:
+                        logo_result = upload_to_r2(request.files['logo_file'], tenant_id, location_id, 'logo')
+                        uploaded_files['logo'] = logo_result
+                    
+                    if 'banner_file' in request.files and request.files['banner_file'].filename:
+                        banner_result = upload_to_r2(request.files['banner_file'], tenant_id, location_id, 'banner')
+                        uploaded_files['banner'] = banner_result
+                    
+                    # Database operations
+                    if is_update:
+                        # Update existing booking page
+                        update_fields = []
+                        update_values = []
+                        
+                        if logo_result:
+                            update_fields.append("logo_url = %s")
+                            update_values.append(logo_result['url'])
+                        
+                        if banner_result:
+                            update_fields.append("banner_url = %s")
+                            update_values.append(banner_result['url'])
+                        
+                        if update_fields:
+                            update_fields.append("updated_at = CURRENT_TIMESTAMP")
+                            update_values.extend([tenant_id, location_id])
+                            
+                            update_query = f"""
+                                UPDATE booking_page 
+                                SET {', '.join(update_fields)}
+                                WHERE tenant_id = %s AND location_id = %s AND is_active = true
+                            """
+                            cur.execute(update_query, update_values)
+                            
+                        # Get updated booking page
+                        cur.execute("""
+                            SELECT alias, logo_url, banner_url
+                            FROM booking_page 
+                            WHERE tenant_id = %s AND location_id = %s AND is_active = true
+                        """, (tenant_id, location_id))
+                        existing_booking_page = cur.fetchone()
+                        
+                        success_message = "Booking page updated successfully!"
+                        
+                    else:
+                        # Create new booking page
+                        cur.execute("""
+                            INSERT INTO booking_page (
+                                alias, tenant_id, location_id, logo_url, banner_url, is_active
+                            ) VALUES (%s, %s, %s, %s, %s, true)
+                        """, (
+                            alias,
+                            tenant_id, 
+                            location_id,
+                            logo_result['url'] if logo_result else None,
+                            banner_result['url'] if banner_result else None
+                        ))
+                        
+                        existing_booking_page = {
+                            'alias': alias,
+                            'logo_url': logo_result['url'] if logo_result else None,
+                            'banner_url': banner_result['url'] if banner_result else None
+                        }
+                        
+                        success_message = f"Booking page '{alias}' created successfully!"
+                    
+                    conn.commit()
+                    
+                except Exception as e:
+                    conn.rollback()
+                    error_message = str(e)
+                
+                return render_template("booking_page.html",
+                                     step=3,
+                                     locations=locations,
+                                     selected_location=selected_location,
+                                     existing_booking_page=existing_booking_page,
+                                     uploaded_files=uploaded_files,
+                                     error_message=error_message,
+                                     success_message=success_message)
 
 # ----------------------------
 # Helper Function

@@ -1,0 +1,291 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <h2>Booking Page Manager</h2>
+
+  {% if step == 1 %}
+    <h3>Step 1: Select Location</h3>
+    <p>Choose the location for which you want to manage the booking page.</p>
+
+    {% if error_message %}
+      <p style="color: red;"><strong>Error:</strong> {{ error_message }}</p>
+    {% endif %}
+
+    <form method="POST">
+      <input type="hidden" name="step" value="2">
+      <input type="hidden" name="tenant_id" id="tenant_id">
+
+      <div style="margin-bottom: 15px;">
+        <label for="location_select">Choose a location:</label><br>
+        <select id="location_select" name="location_id" required style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+          <option value="">-- Select a location --</option>
+          {% for loc in locations %}
+            <option value="{{ loc.location_id }}" data-tenant-id="{{ loc.tenant_id }}">
+              {{ loc.name }} (Tenant {{ loc.tenant_id }}, Location {{ loc.location_id }})
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <button type="submit" style="background-color: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer;">
+        Next
+      </button>
+    </form>
+
+    <script>
+      const locationSelect = document.getElementById('location_select');
+      const tenantIdInput = document.getElementById('tenant_id');
+
+      locationSelect.addEventListener('change', () => {
+        const selectedOption = locationSelect.options[locationSelect.selectedIndex];
+        const tenantId = selectedOption.getAttribute('data-tenant-id');
+        tenantIdInput.value = tenantId;
+      });
+    </script>
+  {% endif %}
+
+  {% if step == 2 %}
+    <h3>Step 2: Manage Booking Page</h3>
+    <p><strong>Location:</strong> {{ selected_location.name }} (Tenant {{ selected_location.tenant_id }}, Location {{ selected_location.location_id }})</p>
+
+    {% if existing_booking_page %}
+      <div style="margin: 20px 0; padding: 15px; background-color: #f8f9fa; border-radius: 5px;">
+        <h4>Existing Booking Page</h4>
+        <p><strong>Alias:</strong> {{ existing_booking_page.alias }}</p>
+        
+        {% if existing_booking_page.logo_url %}
+          <div style="margin: 10px 0;">
+            <strong>Current Logo:</strong><br>
+            <img src="{{ existing_booking_page.logo_url }}" alt="Current Logo" style="max-width: 200px; max-height: 100px; border: 1px solid #ddd; margin-top: 5px;">
+          </div>
+        {% endif %}
+        
+        {% if existing_booking_page.banner_url %}
+          <div style="margin: 10px 0;">
+            <strong>Current Banner:</strong><br>
+            <img src="{{ existing_booking_page.banner_url }}" alt="Current Banner" style="max-width: 400px; max-height: 150px; border: 1px solid #ddd; margin-top: 5px;">
+          </div>
+        {% endif %}
+      </div>
+
+      <form method="POST" enctype="multipart/form-data" style="max-width: 600px;">
+        <input type="hidden" name="step" value="3">
+        <input type="hidden" name="tenant_id" value="{{ selected_location.tenant_id }}">
+        <input type="hidden" name="location_id" value="{{ selected_location.location_id }}">
+        <input type="hidden" name="is_update" value="true">
+
+        <h4>Update Images</h4>
+        
+        <div style="margin-bottom: 20px;">
+          <label for="logo_file" style="display: block; margin-bottom: 5px; font-weight: bold;">
+            {% if existing_booking_page.logo_url %}Replace Logo:{% else %}Upload Logo:{% endif %}
+          </label>
+          <input type="file" id="logo_file" name="logo_file" accept="image/*" 
+                 style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+          <small style="color: #666;">Accepted formats: PNG, JPG, JPEG, GIF, WEBP (Max 5MB)</small>
+          <div id="logo_preview" style="margin-top: 10px;"></div>
+        </div>
+
+        <div style="margin-bottom: 20px;">
+          <label for="banner_file" style="display: block; margin-bottom: 5px; font-weight: bold;">
+            {% if existing_booking_page.banner_url %}Replace Banner:{% else %}Upload Banner:{% endif %}
+          </label>
+          <input type="file" id="banner_file" name="banner_file" accept="image/*" 
+                 style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+          <small style="color: #666;">Accepted formats: PNG, JPG, JPEG, GIF, WEBP (Max 5MB)</small>
+          <div id="banner_preview" style="margin-top: 10px;"></div>
+        </div>
+
+        <button type="submit" style="background-color: #28a745; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer;">
+          Update Booking Page
+        </button>
+      </form>
+
+    {% else %}
+      <div style="margin: 20px 0; padding: 15px; background-color: #fff3cd; border: 1px solid #ffeaa7; border-radius: 5px;">
+        <h4>No Booking Page Found</h4>
+        <p>This location doesn't have a booking page yet. Create one now!</p>
+      </div>
+
+      <form method="POST" enctype="multipart/form-data" style="max-width: 600px;">
+        <input type="hidden" name="step" value="3">
+        <input type="hidden" name="tenant_id" value="{{ selected_location.tenant_id }}">
+        <input type="hidden" name="location_id" value="{{ selected_location.location_id }}">
+        <input type="hidden" name="is_update" value="false">
+
+        <h4>Create New Booking Page</h4>
+        
+        <div style="margin-bottom: 20px;">
+          <label for="alias" style="display: block; margin-bottom: 5px; font-weight: bold;">Alias (URL identifier):</label>
+          <input type="text" id="alias" name="alias" required 
+                 style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;"
+                 pattern="[a-zA-Z0-9-]+" 
+                 title="Only letters, numbers, and hyphens are allowed"
+                 placeholder="e.g., my-restaurant-booking">
+          <small style="color: #666;">Only letters, numbers, and hyphens allowed. This will be part of your booking page URL.</small>
+        </div>
+        
+        <div style="margin-bottom: 20px;">
+          <label for="logo_file" style="display: block; margin-bottom: 5px; font-weight: bold;">Logo (optional):</label>
+          <input type="file" id="logo_file" name="logo_file" accept="image/*" 
+                 style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+          <small style="color: #666;">Accepted formats: PNG, JPG, JPEG, GIF, WEBP (Max 5MB)</small>
+          <div id="logo_preview" style="margin-top: 10px;"></div>
+        </div>
+
+        <div style="margin-bottom: 20px;">
+          <label for="banner_file" style="display: block; margin-bottom: 5px; font-weight: bold;">Banner (optional):</label>
+          <input type="file" id="banner_file" name="banner_file" accept="image/*" 
+                 style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+          <small style="color: #666;">Accepted formats: PNG, JPG, JPEG, GIF, WEBP (Max 5MB)</small>
+          <div id="banner_preview" style="margin-top: 10px;"></div>
+        </div>
+
+        <button type="submit" style="background-color: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer;">
+          Create Booking Page
+        </button>
+      </form>
+    {% endif %}
+
+    <script>
+      // Image preview functionality
+      function setupImagePreview(inputId, previewId) {
+        const input = document.getElementById(inputId);
+        const preview = document.getElementById(previewId);
+        
+        input.addEventListener('change', function() {
+          const file = this.files[0];
+          if (file) {
+            // Check file size
+            if (file.size > 5 * 1024 * 1024) {
+              alert('File size must be less than 5MB');
+              this.value = '';
+              preview.innerHTML = '';
+              return;
+            }
+            
+            // Check file type
+            const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp'];
+            if (!allowedTypes.includes(file.type)) {
+              alert('Only image files (PNG, JPG, JPEG, GIF, WEBP) are allowed');
+              this.value = '';
+              preview.innerHTML = '';
+              return;
+            }
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+              preview.innerHTML = `
+                <div style="margin-top: 10px;">
+                  <strong>Preview:</strong><br>
+                  <img src="${e.target.result}" alt="Preview" style="max-width: 300px; max-height: 200px; border: 1px solid #ddd; margin-top: 5px;">
+                  <p style="margin: 5px 0; color: #666;">
+                    <strong>File:</strong> ${file.name}<br>
+                    <strong>Size:</strong> ${(file.size / 1024 / 1024).toFixed(2)} MB
+                  </p>
+                </div>
+              `;
+            };
+            reader.readAsDataURL(file);
+          } else {
+            preview.innerHTML = '';
+          }
+        });
+      }
+      
+      setupImagePreview('logo_file', 'logo_preview');
+      setupImagePreview('banner_file', 'banner_preview');
+    </script>
+  {% endif %}
+
+  {% if step == 3 %}
+    <h3>Step 3: Results</h3>
+    <p><strong>Location:</strong> {{ selected_location.name }} (Tenant {{ selected_location.tenant_id }}, Location {{ selected_location.location_id }})</p>
+
+    {% if error_message %}
+      <div style="margin: 20px 0; padding: 15px; background-color: #f8d7da; border: 1px solid #f5c6cb; border-radius: 5px; color: #721c24;">
+        <strong>❌ Error:</strong> {{ error_message }}
+      </div>
+      <a href="/booking_page" style="color: #007bff; text-decoration: none;">← Try Again</a>
+    {% endif %}
+
+    {% if success_message %}
+      <div style="margin: 20px 0; padding: 15px; background-color: #d4edda; border: 1px solid #c3e6cb; border-radius: 5px; color: #155724;">
+        <strong>✅ {{ success_message }}</strong>
+      </div>
+
+      {% if existing_booking_page %}
+        <h4>Booking Page Details</h4>
+        <table border="1" cellpadding="6" cellspacing="0" style="margin-top: 10px;">
+          <tr>
+            <th>Property</th>
+            <th>Value</th>
+          </tr>
+          <tr>
+            <td><strong>Alias</strong></td>
+            <td>{{ existing_booking_page.alias }}</td>
+          </tr>
+          {% if existing_booking_page.logo_url %}
+          <tr>
+            <td><strong>Logo URL</strong></td>
+            <td style="word-break: break-all;">{{ existing_booking_page.logo_url }}</td>
+          </tr>
+          {% endif %}
+          {% if existing_booking_page.banner_url %}
+          <tr>
+            <td><strong>Banner URL</strong></td>
+            <td style="word-break: break-all;">{{ existing_booking_page.banner_url }}</td>
+          </tr>
+          {% endif %}
+        </table>
+
+        {% if existing_booking_page.logo_url or existing_booking_page.banner_url %}
+          <h4>Current Images</h4>
+          <div style="margin-top: 10px;">
+            {% if existing_booking_page.logo_url %}
+              <div style="margin-bottom: 15px;">
+                <strong>Logo:</strong><br>
+                <img src="{{ existing_booking_page.logo_url }}" alt="Logo" style="max-width: 200px; max-height: 100px; border: 1px solid #ddd; margin-top: 5px;">
+              </div>
+            {% endif %}
+            {% if existing_booking_page.banner_url %}
+              <div style="margin-bottom: 15px;">
+                <strong>Banner:</strong><br>
+                <img src="{{ existing_booking_page.banner_url }}" alt="Banner" style="max-width: 400px; max-height: 150px; border: 1px solid #ddd; margin-top: 5px;">
+              </div>
+            {% endif %}
+          </div>
+        {% endif %}
+
+        {% if uploaded_files %}
+          <h4>Newly Uploaded Files</h4>
+          {% if uploaded_files.logo %}
+            <p><strong>Logo:</strong> {{ uploaded_files.logo.filename }} ({{ (uploaded_files.logo.size / 1024 / 1024) | round(2) }} MB)</p>
+          {% endif %}
+          {% if uploaded_files.banner %}
+            <p><strong>Banner:</strong> {{ uploaded_files.banner.filename }} ({{ (uploaded_files.banner.size / 1024 / 1024) | round(2) }} MB)</p>
+          {% endif %}
+        {% endif %}
+      {% endif %}
+
+      <div style="margin-top: 20px;">
+        <a href="/booking_page" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px;">
+          Manage Another Location
+        </a>
+      </div>
+    {% endif %}
+  {% endif %}
+
+  {% if step == 1 %}
+    <div style="margin-top: 40px; padding: 20px; background-color: #f8f9fa; border-radius: 5px;">
+      <h4>About Booking Page Manager</h4>
+      <p>This tool allows you to manage booking page assets for your locations:</p>
+      <ul>
+        <li>Upload logo and banner images to Cloudflare R2 storage</li>
+        <li>Create new booking pages with unique aliases</li>
+        <li>Update existing booking page images</li>
+        <li>All images are automatically versioned and stored securely</li>
+      </ul>
+    </div>
+  {% endif %}
+{% endblock %}
