@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{email_title}}</title>
+    <!--[if mso]>
+    <noscript>
+        <xml>
+            <o:OfficeDocumentSettings>
+                <o:PixelsPerInch>96</o:PixelsPerInch>
+            </o:OfficeDocumentSettings>
+        </xml>
+    </noscript>
+    <![endif]-->
+    <style>
+        /* Reset styles for email clients */
+        body, table, td, p, a, li, blockquote {
+            -webkit-text-size-adjust: 100%;
+            -ms-text-size-adjust: 100%;
+        }
+        table, td {
+            border-collapse: collapse;
+        }
+        img {
+            border: 0;
+            outline: none;
+            text-decoration: none;
+            -ms-interpolation-mode: bicubic;
+        }
+        
+        /* Main styles */
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fa;
+            color: #333333;
+            line-height: 1.6;
+        }
+        
+        .email-container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            padding: 30px 20px;
+            text-align: center;
+        }
+        
+        {{#is_modification}}
+        .header {
+            background: linear-gradient(135deg, #ffc107 0%, #fd7e14 100%);
+        }
+        {{/is_modification}}
+        
+        {{#is_cancellation}}
+        .header {
+            background: linear-gradient(135deg, #dc3545 0%, #e83e8c 100%);
+        }
+        {{/is_cancellation}}
+        
+        .header h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 600;
+            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+        }
+        
+        .content {
+            padding: 40px 30px;
+        }
+        
+        .greeting {
+            font-size: 20px;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 20px;
+        }
+        
+        .message {
+            font-size: 16px;
+            color: #495057;
+            margin-bottom: 30px;
+            line-height: 1.7;
+        }
+        
+        .booking-details {
+            background-color: #f8f9fa;
+            border-radius: 12px;
+            padding: 25px;
+            margin: 25px 0;
+            border-left: 5px solid #28a745;
+        }
+        
+        {{#is_modification}}
+        .booking-details {
+            border-left-color: #ffc107;
+        }
+        {{/is_modification}}
+        
+        {{#is_cancellation}}
+        .booking-details {
+            border-left-color: #dc3545;
+        }
+        {{/is_cancellation}}
+        
+        .booking-details h2 {
+            margin: 0 0 20px 0;
+            font-size: 20px;
+            color: #2c3e50;
+            font-weight: 600;
+        }
+        
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            padding: 8px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .detail-row:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+        }
+        
+        .detail-label {
+            font-weight: 600;
+            color: #6c757d;
+            font-size: 15px;
+            min-width: 140px;
+        }
+        
+        .detail-value {
+            font-weight: 500;
+            color: #212529;
+            font-size: 15px;
+            text-align: right;
+            flex: 1;
+        }
+        
+        .highlight {
+            background-color: #e3f2fd;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            color: #0277bd;
+        }
+        
+        .datetime-section {
+            background-color: #e8f5e8;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        
+        .datetime-section h3 {
+            margin: 0 0 15px 0;
+            color: #2e7d32;
+            font-size: 18px;
+            font-weight: 600;
+        }
+        
+        .datetime-info {
+            font-size: 16px;
+            font-weight: 500;
+            color: #1b5e20;
+        }
+        
+        {{#party_section}}
+        .party-info {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 15px 0;
+            text-align: center;
+        }
+        
+        .party-info .party-count {
+            font-size: 24px;
+            font-weight: 600;
+            color: #856404;
+            margin: 0;
+        }
+        
+        .party-info .party-label {
+            font-size: 14px;
+            color: #856404;
+            margin: 5px 0 0 0;
+        }
+        {{/party_section}}
+        
+        .closing-message {
+            font-size: 16px;
+            color: #495057;
+            margin: 30px 0 20px 0;
+            line-height: 1.7;
+            text-align: center;
+            font-weight: 500;
+        }
+        
+        .footer {
+            background-color: #f8f9fa;
+            padding: 25px 30px;
+            text-align: center;
+            border-top: 1px solid #e9ecef;
+        }
+        
+        .footer p {
+            margin: 0;
+            font-size: 14px;
+            color: #6c757d;
+            line-height: 1.5;
+        }
+        
+        .company-name {
+            font-weight: 600;
+            color: #28a745;
+        }
+        
+        /* Mobile responsiveness */
+        @media only screen and (max-width: 600px) {
+            .email-container {
+                width: 100% !important;
+                margin: 0 !important;
+                border-radius: 0 !important;
+            }
+            
+            .content {
+                padding: 25px 20px !important;
+            }
+            
+            .header {
+                padding: 25px 20px !important;
+            }
+            
+            .header h1 {
+                font-size: 24px !important;
+            }
+            
+            .booking-details {
+                padding: 20px 15px !important;
+            }
+            
+            .detail-row {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            
+            .detail-label {
+                margin-bottom: 5px;
+                min-width: auto;
+            }
+            
+            .detail-value {
+                text-align: left;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        <!-- Header Section -->
+        <div class="header">
+            <h1>{{email_title}}</h1>
+        </div>
+        
+        <!-- Content Section -->
+        <div class="content">
+            <div class="greeting">
+                Dear {{customer_name}},
+            </div>
+            
+            <div class="message">
+                {{email_message}}
+            </div>
+            
+            <!-- Date and Time Section -->
+            <div class="datetime-section">
+                <h3>📅 When</h3>
+                <div class="datetime-info">
+                    <strong>{{booking_date}}</strong> at <strong>{{start_time}}</strong>
+                </div>
+            </div>
+            
+            <!-- Booking Details -->
+            <div class="booking-details">
+                <h2>Your Booking Details</h2>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Location:</span>
+                    <span class="detail-value"><strong>{{location_name}}</strong></span>
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Booking Reference:</span>
+                    <span class="detail-value highlight">{{booking_ref}}</span>
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Date:</span>
+                    <span class="detail-value">{{booking_date}}</span>
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Time:</span>
+                    <span class="detail-value">{{start_time}}</span>
+                </div>
+                
+                {{#party_section}}
+                <div class="detail-row">
+                    <span class="detail-label">Party Size:</span>
+                    <span class="detail-value">{{party_num}} people</span>
+                </div>
+                {{/party_section}}
+                
+                {{#venue_section}}
+                <div class="detail-row">
+                    <span class="detail-label">Table/Area:</span>
+                    <span class="detail-value">{{zone_names}}</span>
+                </div>
+                {{/venue_section}}
+                
+                {{#staff_section}}
+                <div class="detail-row">
+                    <span class="detail-label">Staff Member:</span>
+                    <span class="detail-value">{{staff_name}}</span>
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Service:</span>
+                    <span class="detail-value">{{service_name}}</span>
+                </div>
+                {{/staff_section}}
+            </div>
+            
+            {{#party_section}}
+            <!-- Party Information -->
+            <div class="party-info">
+                <p class="party-count">{{party_num}}</p>
+                <p class="party-label">People in your party</p>
+            </div>
+            {{/party_section}}
+            
+            <div class="closing-message">
+                {{closing_message}}
+            </div>
+        </div>
+        
+        <!-- Footer Section -->
+        <div class="footer">
+            <p>
+                Thank you for choosing us!<br>
+                <span class="company-name">Speako AI Booking System</span>
+            </p>
+        </div>
+    </div>
+</body>
+</html>

@@ -216,7 +216,7 @@ def api_get_task_status(task_id):
         }), 500
 
 
-@app.route('/api/sms/send', methods=['POST'])
+@app.route('/api/booking/notifications/send', methods=['POST'])
 @require_api_key
 def api_send_sms():
     """
@@ -226,6 +226,7 @@ def api_send_sms():
         "booking_id": 123,
         "action": "new" | "modify" | "cancel",
         "business_type": "service" | "rest",
+        "notify_customer": true | false,  // Optional, defaults to true
         "original_booking_id": 456  // Required only for "modify" action
     }
     """
@@ -247,6 +248,7 @@ def api_send_sms():
         booking_id = data['booking_id']
         action = data['action']
         business_type = data['business_type']
+        notify_customer = data.get('notify_customer', True)  # Default to True if not provided
         original_booking_id = data.get('original_booking_id')
         
         # Validate booking_id is an integer
@@ -257,6 +259,14 @@ def api_send_sms():
                 'error': 'Invalid booking_id',
                 'message': 'booking_id must be a valid integer',
                 'provided': booking_id
+            }), 400
+        
+        # Validate notify_customer is a boolean
+        if not isinstance(notify_customer, bool):
+            return jsonify({
+                'error': 'Invalid notify_customer',
+                'message': 'notify_customer must be a boolean value (true or false)',
+                'provided': notify_customer
             }), 400
         
         # Validate action
@@ -298,13 +308,14 @@ def api_send_sms():
         task_descriptions = []
         
         if action == 'new':
-            # SMS task
-            sms_task = send_sms_confirmation_new.delay(booking_id)
-            tasks.append({
-                'task_id': sms_task.id,
-                'type': 'sms',
-                'description': 'new booking SMS confirmation'
-            })
+            # SMS task (only if notify_customer is True)
+            if notify_customer:
+                sms_task = send_sms_confirmation_new.delay(booking_id)
+                tasks.append({
+                    'task_id': sms_task.id,
+                    'type': 'sms',
+                    'description': 'new booking SMS confirmation'
+                })
             
             # Email task (different based on business type)
             if business_type == 'rest':
@@ -323,13 +334,14 @@ def api_send_sms():
             action_description = 'new booking confirmation'
             
         elif action == 'modify':
-            # SMS task
-            sms_task = send_sms_confirmation_mod.delay(booking_id)
-            tasks.append({
-                'task_id': sms_task.id,
-                'type': 'sms',
-                'description': 'booking modification SMS confirmation'
-            })
+            # SMS task (only if notify_customer is True)
+            if notify_customer:
+                sms_task = send_sms_confirmation_mod.delay(booking_id)
+                tasks.append({
+                    'task_id': sms_task.id,
+                    'type': 'sms',
+                    'description': 'booking modification SMS confirmation'
+                })
             
             # Email task (different based on business type)
             if business_type == 'rest':
@@ -347,14 +359,15 @@ def api_send_sms():
             
             action_description = 'booking modification confirmation'
             
-        else:  # action == 'cancel'
-            # SMS task
-            sms_task = send_sms_confirmation_can.delay(booking_id)
-            tasks.append({
-                'task_id': sms_task.id,
-                'type': 'sms',
-                'description': 'booking cancellation SMS confirmation'
-            })
+        elif action == 'cancel':
+            # SMS task (only if notify_customer is True)
+            if notify_customer:
+                sms_task = send_sms_confirmation_can.delay(booking_id)
+                tasks.append({
+                    'task_id': sms_task.id,
+                    'type': 'sms',
+                    'description': 'booking cancellation SMS confirmation'
+                })
             
             # Email task (different based on business type)
             if business_type == 'rest':
@@ -371,12 +384,23 @@ def api_send_sms():
             })
             
             action_description = 'booking cancellation confirmation'
+            
+        else:
+            # This should never happen due to validation above, but added for safety
+            return jsonify({
+                'error': 'Undefined action',
+                'message': f'No action is defined for "{action}". No SMS or email notifications have been sent.',
+                'booking_id': booking_id,
+                'action': action,
+                'valid_actions': ['new', 'modify', 'cancel']
+            }), 400
         
         response = {
             'message': f'{action_description.title()} tasks started',
             'booking_id': booking_id,
             'action': action,
             'business_type': business_type,
+            'notify_customer': notify_customer,
             'action_description': action_description,
             'tasks': tasks,
             'total_tasks': len(tasks)

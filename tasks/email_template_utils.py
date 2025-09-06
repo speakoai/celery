@@ -5,6 +5,41 @@ Email template utilities for rendering HTML email templates.
 
 import os
 import re
+from datetime import datetime
+
+def format_time_12hour(time_obj) -> str:
+    """
+    Format time object to 12-hour format with am/pm.
+    
+    Args:
+        time_obj: datetime object or time string
+    
+    Returns:
+        str: Formatted time (e.g., "3:30pm", "9:30am")
+    """
+    if isinstance(time_obj, str):
+        # If it's already a string, try to parse it
+        try:
+            time_obj = datetime.strptime(time_obj, '%H:%M').time()
+        except:
+            return time_obj  # Return as-is if parsing fails
+    
+    if hasattr(time_obj, 'time'):
+        # It's a datetime object, extract time
+        time_obj = time_obj.time()
+    
+    # Format to 12-hour with am/pm
+    hour = time_obj.hour
+    minute = time_obj.minute
+    
+    if hour == 0:
+        return f"12:{minute:02d}am"
+    elif hour < 12:
+        return f"{hour}:{minute:02d}am"
+    elif hour == 12:
+        return f"12:{minute:02d}pm"
+    else:
+        return f"{hour-12}:{minute:02d}pm"
 
 def load_email_template(template_name: str) -> str:
     """
@@ -114,6 +149,25 @@ def render_booking_confirmation_template(**kwargs) -> str:
         else:
             template = re.sub(r'{{#is_cancellation}}.*?{{/is_cancellation}}', '', template, flags=re.DOTALL)
         
+        # Handle branding elements
+        if kwargs.get('banner_url'):
+            template = template.replace('{{#banner_url}}', '')
+            template = template.replace('{{/banner_url}}', '')
+            # Remove the no-banner section
+            template = re.sub(r'{{\^banner_url}}.*?{{/banner_url}}', '', template, flags=re.DOTALL)
+        else:
+            # Remove the banner section
+            template = re.sub(r'{{#banner_url}}.*?{{/banner_url}}', '', template, flags=re.DOTALL)
+            # Show the no-banner section
+            template = template.replace('{{^banner_url}}', '')
+            template = template.replace('{{/banner_url}}', '')
+        
+        if kwargs.get('logo_url'):
+            template = template.replace('{{#logo_url}}', '')
+            template = template.replace('{{/logo_url}}', '')
+        else:
+            template = re.sub(r'{{#logo_url}}.*?{{/logo_url}}', '', template, flags=re.DOTALL)
+        
         # Clean up any remaining placeholder sections
         template = re.sub(r'{{#\w+}}', '', template)
         template = re.sub(r'{{/\w+}}', '', template)
@@ -125,6 +179,126 @@ def render_booking_confirmation_template(**kwargs) -> str:
         
     except Exception as e:
         print(f"[EMAIL_TEMPLATE] Error rendering template: {e}")
+        return ""
+
+def render_customer_booking_confirmation_template(**kwargs) -> str:
+    """
+    Render the customer booking confirmation email template with provided data.
+    This template is specifically designed for customer-facing emails.
+    
+    Args:
+        **kwargs: Template variables including:
+            - email_title: Title of the email
+            - email_message: Main message text
+            - location_name: Name of the location
+            - booking_ref: Booking reference number
+            - customer_name: Customer's name
+            - customer_phone: Customer's phone number
+            - party_num: Number of people in the party
+            - booking_date: Date of the booking
+            - start_time: Start time
+            - end_time: End time
+            - closing_message: Closing message
+            - zone_names: Zone/table names (for restaurants)
+            - venue_unit_name: Table/venue name (optional, deprecated - use zone_names)
+            - venue_unit_id: Table/venue ID (optional)
+            - staff_name: Staff name (optional, for services)
+            - staff_id: Staff ID (optional, for services)
+            - service_name: Service name (optional, for services)
+            - service_id: Service ID (optional, for services)
+            - is_modification: Boolean indicating if this is a modification email
+            - is_cancellation: Boolean indicating if this is a cancellation email
+    
+    Returns:
+        str: Rendered HTML template, or empty string if template loading fails
+    """
+    try:
+        # Load the customer template
+        template = load_email_template('customer_booking_confirmation.html')
+        
+        if not template:
+            return ""
+        
+        # Replace all placeholders with provided values
+        for key, value in kwargs.items():
+            placeholder = f"{{{{{key}}}}}"
+            
+            # Convert None values to empty string or appropriate default
+            if value is None:
+                if key in ['zone_names', 'venue_unit_name', 'staff_name', 'service_name']:
+                    value = 'Not Assigned'
+                elif key in ['venue_unit_id', 'staff_id', 'service_id']:
+                    value = 'Not Assigned'
+                else:
+                    value = ''
+            
+            # Convert to string
+            template = template.replace(placeholder, str(value))
+        
+        # Handle optional sections based on presence of venue/staff data
+        if kwargs.get('zone_names') or kwargs.get('venue_unit_name') or kwargs.get('venue_unit_id'):
+            # This is a restaurant booking - show venue section and party size, hide staff section
+            template = template.replace('{{#venue_section}}', '')
+            template = template.replace('{{/venue_section}}', '')
+            template = template.replace('{{#party_section}}', '')
+            template = template.replace('{{/party_section}}', '')
+            template = re.sub(r'{{#staff_section}}.*?{{/staff_section}}', '', template, flags=re.DOTALL)
+        elif kwargs.get('staff_name') or kwargs.get('service_name'):
+            # This is a service booking - show staff section, hide venue section and party size
+            template = template.replace('{{#staff_section}}', '')
+            template = template.replace('{{/staff_section}}', '')
+            template = re.sub(r'{{#venue_section}}.*?{{/venue_section}}', '', template, flags=re.DOTALL)
+            template = re.sub(r'{{#party_section}}.*?{{/party_section}}', '', template, flags=re.DOTALL)
+        else:
+            # No specific venue or staff info - hide all optional sections
+            template = re.sub(r'{{#venue_section}}.*?{{/venue_section}}', '', template, flags=re.DOTALL)
+            template = re.sub(r'{{#staff_section}}.*?{{/staff_section}}', '', template, flags=re.DOTALL)
+            template = re.sub(r'{{#party_section}}.*?{{/party_section}}', '', template, flags=re.DOTALL)
+        
+        # Handle modification styling
+        if kwargs.get('is_modification'):
+            template = template.replace('{{#is_modification}}', '')
+            template = template.replace('{{/is_modification}}', '')
+        else:
+            template = re.sub(r'{{#is_modification}}.*?{{/is_modification}}', '', template, flags=re.DOTALL)
+        
+        # Handle cancellation styling
+        if kwargs.get('is_cancellation'):
+            template = template.replace('{{#is_cancellation}}', '')
+            template = template.replace('{{/is_cancellation}}', '')
+        else:
+            template = re.sub(r'{{#is_cancellation}}.*?{{/is_cancellation}}', '', template, flags=re.DOTALL)
+        
+        # Handle branding elements
+        if kwargs.get('banner_url'):
+            template = template.replace('{{#banner_url}}', '')
+            template = template.replace('{{/banner_url}}', '')
+            # Remove the no-banner section
+            template = re.sub(r'{{\^banner_url}}.*?{{/banner_url}}', '', template, flags=re.DOTALL)
+        else:
+            # Remove the banner section
+            template = re.sub(r'{{#banner_url}}.*?{{/banner_url}}', '', template, flags=re.DOTALL)
+            # Show the no-banner section
+            template = template.replace('{{^banner_url}}', '')
+            template = template.replace('{{/banner_url}}', '')
+        
+        if kwargs.get('logo_url'):
+            template = template.replace('{{#logo_url}}', '')
+            template = template.replace('{{/logo_url}}', '')
+        else:
+            template = re.sub(r'{{#logo_url}}.*?{{/logo_url}}', '', template, flags=re.DOTALL)
+        
+        # Clean up any remaining placeholder sections
+        template = re.sub(r'{{#\w+}}', '', template)
+        template = re.sub(r'{{/\w+}}', '', template)
+        
+        # Clean up any remaining placeholders that weren't provided
+        template = re.sub(r'{{[^}]+}}', '', template)
+        
+        return template
+        
+    except Exception as e:
+        print(f"[EMAIL_TEMPLATE] Error rendering customer template: {e}")
         return ""
 
 def render_template_with_data(template_name: str, **kwargs) -> str:

@@ -8,7 +8,7 @@ import os
 import re
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
-from tasks.email_template_utils import render_booking_confirmation_template
+from tasks.email_template_utils import render_booking_confirmation_template, render_customer_booking_confirmation_template, format_time_12hour
 
 @app.task
 def send_sms_confirmation_new(booking_id: int):
@@ -1294,6 +1294,760 @@ def send_email_confirmation_can(booking_id: int) -> str:
         print(f"[EMAIL] Error: {e}")
         if hasattr(e, 'body'):
             print(f"[EMAIL] SendGrid Response: {e.body}")
+        return "failed"
+    finally:
+        if 'cur' in locals():
+            cur.close()
+        if 'conn' in locals():
+            conn.close()
+
+@app.task
+def send_email_confirmation_customer_new(booking_id: int) -> str:
+    """
+    Send booking confirmation email to customer (not merchant).
+    Email recipient priority:
+    1. Check bookings.customer_email
+    2. If empty/null, check if customer_id exists
+    3. If customer_id exists, query customers.email
+    4. If both are empty/null, skip sending
+    """
+    try:
+        # Connect to database
+        conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+        cur = conn.cursor()
+
+        # First query: Get booking details and check for direct customer email
+        cur.execute("""
+            SELECT 
+                b.tenant_id,
+                b.customer_name,
+                b.customer_email,
+                b.customer_id,
+                b.start_time,
+                b.end_time,
+                b.booking_ref,
+                b.party_num,
+                b.customer_phone,
+                b.staff_id,
+                b.service_id,
+                b.venue_unit_id,
+                l.name AS location_name,
+                l.location_type,
+                s.name AS staff_name,
+                sv.name AS service_name,
+                vu.zone_tag_ids
+            FROM bookings b
+            JOIN locations l
+              ON b.tenant_id = l.tenant_id AND b.location_id = l.location_id
+            LEFT JOIN staff s
+              ON b.tenant_id = s.tenant_id AND b.staff_id = s.staff_id
+            LEFT JOIN services sv
+              ON b.tenant_id = sv.tenant_id AND b.service_id = sv.service_id
+            LEFT JOIN venue_unit vu
+              ON b.tenant_id = vu.tenant_id AND b.venue_unit_id = vu.venue_unit_id
+            WHERE b.booking_id = %s
+        """, (booking_id,))
+        
+        row = cur.fetchone()
+
+        if not row:
+            print(f"[CUSTOMER_EMAIL] Booking {booking_id} not found.")
+            return "failed"
+
+        (
+            tenant_id,
+            customer_name,
+            customer_email,
+            customer_id,
+            start_time,
+            end_time,
+            booking_ref,
+            party_num,
+            customer_phone,
+            staff_id,
+            service_id,
+            venue_unit_id,
+            location_name,
+            location_type,
+            staff_name,
+            service_name,
+            zone_tag_ids
+        ) = row
+
+        # Get zone information for restaurant bookings
+        zone_names = []
+        if location_type == "rest" and zone_tag_ids:
+            # Query venue_tag table to get zone names
+            zone_ids_tuple = tuple(zone_tag_ids)
+            if zone_ids_tuple:
+                cur.execute("""
+                    SELECT name 
+                    FROM venue_tag 
+                    WHERE tenant_id = %s AND tag_id = ANY(%s)
+                    ORDER BY name
+                """, (tenant_id, zone_tag_ids))
+                
+                zone_results = cur.fetchall()
+                zone_names = [zone[0] for zone in zone_results]
+
+        # Determine recipient email with fallback logic
+        recipient_email = None
+        
+        # Priority 1: Check customer_email field in bookings
+        if customer_email and customer_email.strip() and re.match(EMAIL_REGEX, customer_email.strip()):
+            recipient_email = customer_email.strip()
+            print(f"[CUSTOMER_EMAIL] Using customer_email from booking: {recipient_email}")
+        
+        # Priority 2: Check customers table if customer_id exists
+        elif customer_id:
+            cur.execute("""
+                SELECT email 
+                FROM customers 
+                WHERE tenant_id = %s AND customer_id = %s AND email IS NOT NULL AND email != ''
+            """, (tenant_id, customer_id))
+            
+            customer_row = cur.fetchone()
+            if customer_row and customer_row[0]:
+                customer_table_email = customer_row[0].strip()
+                if re.match(EMAIL_REGEX, customer_table_email):
+                    recipient_email = customer_table_email
+                    print(f"[CUSTOMER_EMAIL] Using email from customers table: {recipient_email}")
+                else:
+                    print(f"[CUSTOMER_EMAIL] Invalid email in customers table: {customer_table_email}")
+        
+        # If no valid email found, skip sending
+        if not recipient_email:
+            print(f"[CUSTOMER_EMAIL] No valid customer email found for booking {booking_id}. Skipping email send.")
+            return "skipped"
+
+        # Prepare email content based on location type
+        if location_type == "rest":
+            # Restaurant booking - use zone names as table information
+            table_info_text = ""
+            if zone_names:
+                zone_text = ", ".join(zone_names)
+                table_info_text = f"Table: {zone_text}\n"
+
+            # Format start time to 12-hour format
+            start_time_formatted = format_time_12hour(start_time)
+
+            plain_text_body = (
+                f"Dear {customer_name},\n\n"
+                "Your booking has been confirmed! Here are your booking details:\n\n"
+                f"Location: {location_name}\n"
+                f"Booking Reference: {booking_ref}\n"
+                f"Date: {start_time.strftime('%Y-%m-%d')}\n"
+                f"Time: {start_time_formatted}\n"
+                f"Party Size: {party_num} people\n"
+                f"{table_info_text}"
+                "\nWe look forward to welcoming you!\n\n"
+                "Best regards,\n"
+                f"{location_name}"
+            )
+
+            html_template = render_customer_booking_confirmation_template(
+                email_title="Your Booking is Confirmed! 🎉",
+                email_message="Great news! Your reservation has been successfully confirmed.",
+                location_name=location_name,
+                booking_ref=booking_ref,
+                customer_name=customer_name,
+                customer_phone=customer_phone,
+                party_num=party_num,
+                booking_date=start_time.strftime('%Y-%m-%d'),
+                start_time=start_time_formatted,
+                closing_message="We can't wait to see you! Please arrive on time for your reservation.",
+                zone_names=zone_names
+            )
+        else:
+            # Service booking
+            # Format start time to 12-hour format
+            start_time_formatted = format_time_12hour(start_time)
+
+            plain_text_body = (
+                f"Dear {customer_name},\n\n"
+                "Your appointment has been confirmed! Here are your booking details:\n\n"
+                f"Location: {location_name}\n"
+                f"Booking Reference: {booking_ref}\n"
+                f"Date: {start_time.strftime('%Y-%m-%d')}\n"
+                f"Time: {start_time_formatted}\n"
+                f"Staff Member: {staff_name or 'To be assigned'}\n"
+                f"Service: {service_name or 'General service'}\n\n"
+                "We look forward to serving you!\n\n"
+                "Best regards,\n"
+                f"{location_name}"
+            )
+
+            html_template = render_customer_booking_confirmation_template(
+                email_title="Your Appointment is Confirmed! ✅",
+                email_message="Excellent! Your appointment has been successfully booked.",
+                location_name=location_name,
+                booking_ref=booking_ref,
+                customer_name=customer_name,
+                customer_phone=customer_phone,
+                party_num=party_num,
+                booking_date=start_time.strftime('%Y-%m-%d'),
+                start_time=start_time_formatted,
+                closing_message="We're excited to serve you! Please arrive a few minutes early.",
+                staff_name=staff_name,
+                staff_id=staff_id,
+                service_name=service_name,
+                service_id=service_id
+            )
+
+        # Create and send email
+        if not html_template:
+            print("[CUSTOMER_EMAIL] Failed to generate HTML template, falling back to plain text only")
+            message = Mail(
+                from_email=os.getenv("SENDGRID_FROM_EMAIL"),
+                to_emails=[recipient_email],
+                subject=f"Booking Confirmation for {location_name} (Ref: {booking_ref})",
+                plain_text_content=plain_text_body
+            )
+        else:
+            print("[CUSTOMER_EMAIL] HTML template generated successfully")
+            message = Mail(
+                from_email=os.getenv("SENDGRID_FROM_EMAIL"),
+                to_emails=[recipient_email],
+                subject=f"Booking Confirmation for {location_name} (Ref: {booking_ref})",
+                html_content=html_template,
+                plain_text_content=plain_text_body
+            )
+
+        # Send email via SendGrid
+        sg = SendGridAPIClient(os.getenv("SENDGRID_API_KEY"))
+        response = sg.send(message)
+
+        print(f"[CUSTOMER_EMAIL] Sent to {recipient_email}: Customer booking confirmation email")
+        print(f"[CUSTOMER_EMAIL] SendGrid response status: {response.status_code}")
+        return "success"
+
+    except Exception as e:
+        print(f"[CUSTOMER_EMAIL] Error: {e}")
+        if hasattr(e, 'body'):
+            print(f"[CUSTOMER_EMAIL] SendGrid Response: {e.body}")
+        return "failed"
+    finally:
+        if 'cur' in locals():
+            cur.close()
+        if 'conn' in locals():
+            conn.close()
+
+@app.task
+def send_email_confirmation_customer_mod(booking_id: int, original_booking_id: int) -> str:
+    """
+    Send booking modification confirmation email to customer (not merchant).
+    Email recipient priority:
+    1. Check bookings.customer_email
+    2. If empty/null, check if customer_id exists
+    3. If customer_id exists, query customers.email
+    4. If both are empty/null, skip sending
+    """
+    try:
+        # Connect to database
+        conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+        cur = conn.cursor()
+
+        # First query: Get new booking details and check for direct customer email
+        cur.execute("""
+            SELECT 
+                b.tenant_id,
+                b.customer_name,
+                b.customer_email,
+                b.customer_id,
+                b.start_time,
+                b.end_time,
+                b.booking_ref,
+                b.party_num,
+                b.customer_phone,
+                b.staff_id,
+                b.service_id,
+                b.venue_unit_id,
+                l.name AS location_name,
+                l.location_type,
+                s.name AS staff_name,
+                sv.name AS service_name,
+                vu.zone_tag_ids
+            FROM bookings b
+            JOIN locations l
+              ON b.tenant_id = l.tenant_id AND b.location_id = l.location_id
+            LEFT JOIN staff s
+              ON b.tenant_id = s.tenant_id AND b.staff_id = s.staff_id
+            LEFT JOIN services sv
+              ON b.tenant_id = sv.tenant_id AND b.service_id = sv.service_id
+            LEFT JOIN venue_unit vu
+              ON b.tenant_id = vu.tenant_id AND b.venue_unit_id = vu.venue_unit_id
+            WHERE b.booking_id = %s AND b.status = 'confirmed'
+        """, (booking_id,))
+        
+        new_booking = cur.fetchone()
+
+        if not new_booking:
+            print(f"[CUSTOMER_EMAIL] Confirmed booking {booking_id} not found or not in 'confirmed' status.")
+            return "failed"
+
+        (
+            tenant_id,
+            customer_name,
+            customer_email,
+            customer_id,
+            start_time,
+            end_time,
+            booking_ref,
+            party_num,
+            customer_phone,
+            staff_id,
+            service_id,
+            venue_unit_id,
+            location_name,
+            location_type,
+            staff_name,
+            service_name,
+            zone_tag_ids
+        ) = new_booking
+
+        # Get zone information for restaurant bookings
+        zone_names = []
+        if location_type == "rest" and zone_tag_ids:
+            # Query venue_tag table to get zone names
+            zone_ids_tuple = tuple(zone_tag_ids)
+            if zone_ids_tuple:
+                cur.execute("""
+                    SELECT name 
+                    FROM venue_tag 
+                    WHERE tenant_id = %s AND tag_id = ANY(%s)
+                    ORDER BY name
+                """, (tenant_id, zone_tag_ids))
+                
+                zone_results = cur.fetchall()
+                zone_names = [zone[0] for zone in zone_results]
+
+        # Fetch original booking details for context
+        cur.execute("""
+            SELECT 
+                b.start_time,
+                b.end_time,
+                b.party_num,
+                b.staff_id,
+                b.service_id,
+                b.venue_unit_id,
+                s.name AS staff_name,
+                sv.name AS service_name,
+                vu.name AS venue_unit_name
+            FROM bookings b
+            LEFT JOIN staff s
+              ON b.tenant_id = s.tenant_id AND b.staff_id = s.staff_id
+            LEFT JOIN services sv
+              ON b.tenant_id = sv.tenant_id AND b.service_id = sv.service_id
+            LEFT JOIN venue_unit vu
+              ON b.tenant_id = vu.tenant_id AND b.venue_unit_id = vu.venue_unit_id
+            WHERE b.booking_id = %s AND b.status = 'modified'
+        """, (original_booking_id,))
+        
+        original_booking = cur.fetchone()
+
+        # Determine recipient email with fallback logic
+        recipient_email = None
+        
+        # Priority 1: Check customer_email field in bookings
+        if customer_email and customer_email.strip() and re.match(EMAIL_REGEX, customer_email.strip()):
+            recipient_email = customer_email.strip()
+            print(f"[CUSTOMER_EMAIL] Using customer_email from booking: {recipient_email}")
+        
+        # Priority 2: Check customers table if customer_id exists
+        elif customer_id:
+            cur.execute("""
+                SELECT email 
+                FROM customers 
+                WHERE tenant_id = %s AND customer_id = %s AND email IS NOT NULL AND email != ''
+            """, (tenant_id, customer_id))
+            
+            customer_row = cur.fetchone()
+            if customer_row and customer_row[0]:
+                customer_table_email = customer_row[0].strip()
+                if re.match(EMAIL_REGEX, customer_table_email):
+                    recipient_email = customer_table_email
+                    print(f"[CUSTOMER_EMAIL] Using email from customers table: {recipient_email}")
+                else:
+                    print(f"[CUSTOMER_EMAIL] Invalid email in customers table: {customer_table_email}")
+        
+        # If no valid email found, skip sending
+        if not recipient_email:
+            print(f"[CUSTOMER_EMAIL] No valid customer email found for booking {booking_id}. Skipping email send.")
+            return "skipped"
+
+        # Prepare original booking context for email
+        original_details_message = ""
+        if original_booking:
+            (
+                orig_start_time,
+                orig_end_time,
+                orig_party_num,
+                orig_staff_id,
+                orig_service_id,
+                orig_venue_unit_id,
+                orig_staff_name,
+                orig_service_name,
+                orig_venue_unit_name
+            ) = original_booking
+
+            # Format original start time to 12-hour format
+            orig_start_time_formatted = format_time_12hour(orig_start_time)
+
+            if location_type == "rest":
+                original_details_message = (
+                    f"Your original booking was scheduled for {orig_start_time.strftime('%Y-%m-%d')} "
+                    f"at {orig_start_time_formatted} "
+                    f"for {orig_party_num} people."
+                )
+            else:
+                original_details_message = (
+                    f"Your original appointment was scheduled for {orig_start_time.strftime('%Y-%m-%d')} "
+                    f"at {orig_start_time_formatted} "
+                    f"with {orig_staff_name or 'staff member'} for {orig_service_name or 'service'}."
+                )
+
+        # Prepare email content based on location type
+        if location_type == "rest":
+            # Restaurant booking modification - use zone names as table information
+            table_info_text = ""
+            if zone_names:
+                zone_text = ", ".join(zone_names)
+                table_info_text = f"Table: {zone_text}\n"
+
+            # Format start time to 12-hour format
+            start_time_formatted = format_time_12hour(start_time)
+
+            plain_text_body = (
+                f"Dear {customer_name},\n\n"
+                "Your booking has been successfully updated! Here are your new booking details:\n\n"
+                f"Location: {location_name}\n"
+                f"Booking Reference: {booking_ref}\n"
+                f"Date: {start_time.strftime('%Y-%m-%d')}\n"
+                f"Time: {start_time_formatted}\n"
+                f"Party Size: {party_num} people\n"
+                f"{table_info_text}"
+                f"\n{original_details_message}\n\n"
+                "We look forward to welcoming you at your updated time!\n\n"
+                "Best regards,\n"
+                f"{location_name}"
+            )
+
+            html_template = render_customer_booking_confirmation_template(
+                email_title="Your Booking Has Been Updated! 📝",
+                email_message="Your reservation has been successfully modified with the new details below.",
+                location_name=location_name,
+                booking_ref=booking_ref,
+                customer_name=customer_name,
+                customer_phone=customer_phone,
+                party_num=party_num,
+                booking_date=start_time.strftime('%Y-%m-%d'),
+                start_time=start_time_formatted,
+                closing_message="We're excited to see you at your updated time!",
+                zone_names=zone_names,
+                is_modification=True
+            )
+        else:
+            # Service booking modification
+            # Format start time to 12-hour format
+            start_time_formatted = format_time_12hour(start_time)
+
+            plain_text_body = (
+                f"Dear {customer_name},\n\n"
+                "Your appointment has been successfully updated! Here are your new booking details:\n\n"
+                f"Location: {location_name}\n"
+                f"Booking Reference: {booking_ref}\n"
+                f"Date: {start_time.strftime('%Y-%m-%d')}\n"
+                f"Time: {start_time_formatted}\n"
+                f"Staff Member: {staff_name or 'To be assigned'}\n"
+                f"Service: {service_name or 'General service'}\n\n"
+                f"{original_details_message}\n\n"
+                "We look forward to serving you at your updated appointment time!\n\n"
+                "Best regards,\n"
+                f"{location_name}"
+            )
+
+            html_template = render_customer_booking_confirmation_template(
+                email_title="Your Appointment Has Been Updated! 🔄",
+                email_message="Great news! Your appointment has been successfully rescheduled.",
+                location_name=location_name,
+                booking_ref=booking_ref,
+                customer_name=customer_name,
+                customer_phone=customer_phone,
+                party_num=party_num,
+                booking_date=start_time.strftime('%Y-%m-%d'),
+                start_time=start_time_formatted,
+                closing_message="We're looking forward to serving you at your new appointment time!",
+                staff_name=staff_name,
+                staff_id=staff_id,
+                service_name=service_name,
+                service_id=service_id,
+                is_modification=True
+            )
+
+        # Create and send email
+        if not html_template:
+            print("[CUSTOMER_EMAIL] Failed to generate HTML template, falling back to plain text only")
+            message = Mail(
+                from_email=os.getenv("SENDGRID_FROM_EMAIL"),
+                to_emails=[recipient_email],
+                subject=f"Booking Update for {location_name} (Ref: {booking_ref})",
+                plain_text_content=plain_text_body
+            )
+        else:
+            print("[CUSTOMER_EMAIL] HTML template generated successfully")
+            message = Mail(
+                from_email=os.getenv("SENDGRID_FROM_EMAIL"),
+                to_emails=[recipient_email],
+                subject=f"Booking Update for {location_name} (Ref: {booking_ref})",
+                html_content=html_template,
+                plain_text_content=plain_text_body
+            )
+
+        # Send email via SendGrid
+        sg = SendGridAPIClient(os.getenv("SENDGRID_API_KEY"))
+        response = sg.send(message)
+
+        print(f"[CUSTOMER_EMAIL] Sent to {recipient_email}: Customer booking modification confirmation email")
+        print(f"[CUSTOMER_EMAIL] SendGrid response status: {response.status_code}")
+        return "success"
+
+    except Exception as e:
+        print(f"[CUSTOMER_EMAIL] Error: {e}")
+        if hasattr(e, 'body'):
+            print(f"[CUSTOMER_EMAIL] SendGrid Response: {e.body}")
+        return "failed"
+    finally:
+        if 'cur' in locals():
+            cur.close()
+        if 'conn' in locals():
+            conn.close()
+
+@app.task
+def send_email_confirmation_customer_can(booking_id: int) -> str:
+    """
+    Send booking cancellation confirmation email to customer (not merchant).
+    Email recipient priority:
+    1. Check bookings.customer_email
+    2. If empty/null, check if customer_id exists
+    3. If customer_id exists, query customers.email
+    4. If both are empty/null, skip sending
+    """
+    try:
+        # Connect to database
+        conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+        cur = conn.cursor()
+
+        # Query: Get cancelled booking details and check for direct customer email
+        cur.execute("""
+            SELECT 
+                b.tenant_id,
+                b.customer_name,
+                b.customer_email,
+                b.customer_id,
+                b.start_time,
+                b.end_time,
+                b.booking_ref,
+                b.party_num,
+                b.customer_phone,
+                b.staff_id,
+                b.service_id,
+                b.venue_unit_id,
+                l.name AS location_name,
+                l.location_type,
+                s.name AS staff_name,
+                sv.name AS service_name,
+                vu.zone_tag_ids
+            FROM bookings b
+            JOIN locations l
+              ON b.tenant_id = l.tenant_id AND b.location_id = l.location_id
+            LEFT JOIN staff s
+              ON b.tenant_id = s.tenant_id AND b.staff_id = s.staff_id
+            LEFT JOIN services sv
+              ON b.tenant_id = sv.tenant_id AND b.service_id = sv.service_id
+            LEFT JOIN venue_unit vu
+              ON b.tenant_id = vu.tenant_id AND b.venue_unit_id = vu.venue_unit_id
+            WHERE b.booking_id = %s AND b.status = 'cancelled'
+        """, (booking_id,))
+        
+        row = cur.fetchone()
+
+        if not row:
+            print(f"[CUSTOMER_EMAIL] Cancelled booking {booking_id} not found or not in 'cancelled' status.")
+            return "failed"
+
+        (
+            tenant_id,
+            customer_name,
+            customer_email,
+            customer_id,
+            start_time,
+            end_time,
+            booking_ref,
+            party_num,
+            customer_phone,
+            staff_id,
+            service_id,
+            venue_unit_id,
+            location_name,
+            location_type,
+            staff_name,
+            service_name,
+            zone_tag_ids
+        ) = row
+
+        # Get zone information for restaurant bookings
+        zone_names = []
+        if location_type == "rest" and zone_tag_ids:
+            # Query venue_tag table to get zone names
+            zone_ids_tuple = tuple(zone_tag_ids)
+            if zone_ids_tuple:
+                cur.execute("""
+                    SELECT name 
+                    FROM venue_tag 
+                    WHERE tenant_id = %s AND tag_id = ANY(%s)
+                    ORDER BY name
+                """, (tenant_id, zone_tag_ids))
+                
+                zone_results = cur.fetchall()
+                zone_names = [zone[0] for zone in zone_results]
+
+        # Determine recipient email with fallback logic
+        recipient_email = None
+        
+        # Priority 1: Check customer_email field in bookings
+        if customer_email and customer_email.strip() and re.match(EMAIL_REGEX, customer_email.strip()):
+            recipient_email = customer_email.strip()
+            print(f"[CUSTOMER_EMAIL] Using customer_email from booking: {recipient_email}")
+        
+        # Priority 2: Check customers table if customer_id exists
+        elif customer_id:
+            cur.execute("""
+                SELECT email 
+                FROM customers 
+                WHERE tenant_id = %s AND customer_id = %s AND email IS NOT NULL AND email != ''
+            """, (tenant_id, customer_id))
+            
+            customer_row = cur.fetchone()
+            if customer_row and customer_row[0]:
+                customer_table_email = customer_row[0].strip()
+                if re.match(EMAIL_REGEX, customer_table_email):
+                    recipient_email = customer_table_email
+                    print(f"[CUSTOMER_EMAIL] Using email from customers table: {recipient_email}")
+                else:
+                    print(f"[CUSTOMER_EMAIL] Invalid email in customers table: {customer_table_email}")
+        
+        # If no valid email found, skip sending
+        if not recipient_email:
+            print(f"[CUSTOMER_EMAIL] No valid customer email found for booking {booking_id}. Skipping email send.")
+            return "skipped"
+
+        # Prepare email content based on location type
+        if location_type == "rest":
+            # Restaurant booking cancellation - use zone names as table information
+            table_info_text = ""
+            if zone_names:
+                zone_text = ", ".join(zone_names)
+                table_info_text = f"Table: {zone_text}\n"
+
+            # Format start time to 12-hour format
+            start_time_formatted = format_time_12hour(start_time)
+
+            plain_text_body = (
+                f"Dear {customer_name},\n\n"
+                "Your booking has been cancelled. Here are the details of the cancelled booking:\n\n"
+                f"Location: {location_name}\n"
+                f"Booking Reference: {booking_ref}\n"
+                f"Date: {start_time.strftime('%Y-%m-%d')}\n"
+                f"Time: {start_time_formatted}\n"
+                f"Party Size: {party_num} people\n"
+                f"{table_info_text}"
+                "\nIf you'd like to make a new reservation, please contact us.\n\n"
+                "Best regards,\n"
+                f"{location_name}"
+            )
+
+            html_template = render_customer_booking_confirmation_template(
+                email_title="Your Booking Has Been Cancelled",
+                email_message="This email confirms that your reservation has been cancelled.",
+                location_name=location_name,
+                booking_ref=booking_ref,
+                customer_name=customer_name,
+                customer_phone=customer_phone,
+                party_num=party_num,
+                booking_date=start_time.strftime('%Y-%m-%d'),
+                start_time=start_time_formatted,
+                closing_message="We hope to welcome you again in the future. Feel free to contact us for new reservations.",
+                zone_names=zone_names,
+                is_cancellation=True
+            )
+        else:
+            # Service booking cancellation
+            # Format start time to 12-hour format
+            start_time_formatted = format_time_12hour(start_time)
+
+            plain_text_body = (
+                f"Dear {customer_name},\n\n"
+                "Your appointment has been cancelled. Here are the details of the cancelled appointment:\n\n"
+                f"Location: {location_name}\n"
+                f"Booking Reference: {booking_ref}\n"
+                f"Date: {start_time.strftime('%Y-%m-%d')}\n"
+                f"Time: {start_time_formatted}\n"
+                f"Staff Member: {staff_name or 'Not specified'}\n"
+                f"Service: {service_name or 'General service'}\n\n"
+                "If you'd like to schedule a new appointment, please contact us.\n\n"
+                "Best regards,\n"
+                f"{location_name}"
+            )
+
+            html_template = render_customer_booking_confirmation_template(
+                email_title="Your Appointment Has Been Cancelled",
+                email_message="This email confirms that your appointment has been cancelled.",
+                location_name=location_name,
+                booking_ref=booking_ref,
+                customer_name=customer_name,
+                customer_phone=customer_phone,
+                party_num=party_num,
+                booking_date=start_time.strftime('%Y-%m-%d'),
+                start_time=start_time_formatted,
+                closing_message="We hope to serve you again in the future. Feel free to contact us for new appointments.",
+                staff_name=staff_name,
+                staff_id=staff_id,
+                service_name=service_name,
+                service_id=service_id,
+                is_cancellation=True
+            )
+
+        # Create and send email
+        if not html_template:
+            print("[CUSTOMER_EMAIL] Failed to generate HTML template, falling back to plain text only")
+            message = Mail(
+                from_email=os.getenv("SENDGRID_FROM_EMAIL"),
+                to_emails=[recipient_email],
+                subject=f"Booking Cancellation for {location_name} (Ref: {booking_ref})",
+                plain_text_content=plain_text_body
+            )
+        else:
+            print("[CUSTOMER_EMAIL] HTML template generated successfully")
+            message = Mail(
+                from_email=os.getenv("SENDGRID_FROM_EMAIL"),
+                to_emails=[recipient_email],
+                subject=f"Booking Cancellation for {location_name} (Ref: {booking_ref})",
+                html_content=html_template,
+                plain_text_content=plain_text_body
+            )
+
+        # Send email via SendGrid
+        sg = SendGridAPIClient(os.getenv("SENDGRID_API_KEY"))
+        response = sg.send(message)
+
+        print(f"[CUSTOMER_EMAIL] Sent to {recipient_email}: Customer booking cancellation confirmation email")
+        print(f"[CUSTOMER_EMAIL] SendGrid response status: {response.status_code}")
+        return "success"
+
+    except Exception as e:
+        print(f"[CUSTOMER_EMAIL] Error: {e}")
+        if hasattr(e, 'body'):
+            print(f"[CUSTOMER_EMAIL] SendGrid Response: {e.body}")
         return "failed"
     finally:
         if 'cur' in locals():
