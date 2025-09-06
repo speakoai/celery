@@ -191,15 +191,6 @@
             margin: 5px 0 0 0;
         }
         
-        .closing-message {
-            font-size: 16px;
-            color: #495057;
-            margin: 30px 0 20px 0;
-            line-height: 1.7;
-            text-align: center;
-            font-weight: 500;
-        }
-        
         .footer {
             background-color: #f8f9fa;
             padding: 25px 30px;
@@ -217,6 +208,39 @@
         .company-name {
             font-weight: 600;
             color: #28a745;
+        }
+        
+        /* Logo and Banner styles */
+        .logo-section {
+            text-align: center;
+            padding: 20px 30px 10px 30px;
+            background-color: #ffffff;
+        }
+        
+        .logo-section img {
+            max-width: 200px;
+            max-height: 100px;
+            height: auto;
+            width: auto;
+            border: none;
+            outline: none;
+            display: block;
+            margin: 0 auto;
+        }
+        
+        .banner-section {
+            text-align: center;
+            background-color: #ffffff;
+            overflow: hidden;
+        }
+        
+        .banner-section img {
+            width: 100%;
+            max-height: 150px;
+            object-fit: cover;
+            border: none;
+            outline: none;
+            display: block;
         }
         
         /* Mobile responsiveness */
@@ -256,11 +280,38 @@
             .detail-value {
                 text-align: left;
             }
+            
+            .logo-section {
+                padding: 15px 20px 10px 20px !important;
+            }
+            
+            .logo-section img {
+                max-width: 150px !important;
+                max-height: 75px !important;
+            }
+            
+            .banner-section img {
+                max-height: 100px !important;
+            }
         }
     </style>
 </head>
 <body>
     <div class="email-container">
+        <!-- Logo Section -->
+        {{#logo_section}}
+        <div class="logo-section">
+            <img src="{{logo_url}}" alt="{{location_name}} Logo">
+        </div>
+        {{/logo_section}}
+        
+        <!-- Banner Section -->
+        {{#banner_section}}
+        <div class="banner-section">
+            <img src="{{banner_url}}" alt="{{location_name}} Banner">
+        </div>
+        {{/banner_section}}
+        
         <!-- Header Section -->
         <div class="header{{#is_modification}} modification{{/is_modification}}{{#is_cancellation}} cancellation{{/is_cancellation}}">
             <h1>{{email_title}}</h1>
@@ -294,7 +345,7 @@
                 </div>
                 
                 <div class="detail-row">
-                    <span class="detail-label">Booking Reference:</span>
+                    <span class="detail-label">Booking Ref.:</span>
                     <span class="detail-value highlight">{{booking_ref}}</span>
                 </div>
                 
@@ -343,9 +394,71 @@
             </div>
             {{/party_section}}
             
-            <div class="closing-message">
-                {{closing_message}}
+            <!-- Manage Booking Section -->
+            {{#manage_booking_section}}
+            <div class="manage-booking-section" style="text-align: center; margin: 30px 0; padding: 0;">
+                <a href="{{manage_booking_url}}" 
+                   style="display: inline-block; 
+                          background: linear-gradient(135deg, {{button_color_start}} 0%, {{button_color_end}} 100%); 
+                          color: #ffffff !important; 
+                          text-decoration: none; 
+                          padding: 14px 28px; 
+                          border-radius: 8px; 
+                          font-size: 16px; 
+                          font-weight: 600; 
+                          font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                          border: none; 
+                          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+                          transition: all 0.3s ease;
+                          text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+                          letter-spacing: 0.5px;">
+                    Manage Booking
+                </a>
             </div>
+            {{/manage_booking_section}}
+            
+            <!-- Original Booking Details (for modifications) -->
+            {{#original_booking_section}}
+            <div class="booking-details" style="background-color: #f8f9fa; border-left: 3px solid #dee2e6; margin-top: 25px; opacity: 0.85;">
+                <h2 style="font-size: 16px; color: #6c757d; margin-bottom: 15px;">📋 Original Booking Details</h2>
+                
+                <div class="detail-row">
+                    <span class="detail-label" style="color: #6c757d; font-size: 14px;">Date:</span>
+                    <span class="detail-value" style="color: #6c757d; font-size: 14px;">{{original_booking_date}}</span>
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label" style="color: #6c757d; font-size: 14px;">Time:</span>
+                    <span class="detail-value" style="color: #6c757d; font-size: 14px;">{{original_start_time}}</span>
+                </div>
+                
+                {{#party_section}}
+                <div class="detail-row">
+                    <span class="detail-label" style="color: #6c757d; font-size: 14px;">Party Size:</span>
+                    <span class="detail-value" style="color: #6c757d; font-size: 14px;">{{original_party_num}} people</span>
+                </div>
+                {{/party_section}}
+                
+                {{#venue_section}}
+                <div class="detail-row">
+                    <span class="detail-label" style="color: #6c757d; font-size: 14px;">Table/Area:</span>
+                    <span class="detail-value" style="color: #6c757d; font-size: 14px;">{{original_zone_names}}</span>
+                </div>
+                {{/venue_section}}
+                
+                {{#staff_section}}
+                <div class="detail-row">
+                    <span class="detail-label" style="color: #6c757d; font-size: 14px;">Staff Member:</span>
+                    <span class="detail-value" style="color: #6c757d; font-size: 14px;">{{original_staff_name}}</span>
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label" style="color: #6c757d; font-size: 14px;">Service:</span>
+                    <span class="detail-value" style="color: #6c757d; font-size: 14px;">{{original_service_name}}</span>
+                </div>
+                {{/staff_section}}
+            </div>
+            {{/original_booking_section}}
         </div>
         
         <!-- Footer Section -->

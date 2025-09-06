@@ -149,24 +149,20 @@ def render_booking_confirmation_template(**kwargs) -> str:
         else:
             template = re.sub(r'{{#is_cancellation}}.*?{{/is_cancellation}}', '', template, flags=re.DOTALL)
         
-        # Handle branding elements
-        if kwargs.get('banner_url'):
-            template = template.replace('{{#banner_url}}', '')
-            template = template.replace('{{/banner_url}}', '')
-            # Remove the no-banner section
-            template = re.sub(r'{{\^banner_url}}.*?{{/banner_url}}', '', template, flags=re.DOTALL)
+        # Handle original booking section (for modifications)
+        if kwargs.get('is_modification') and (kwargs.get('original_booking_date') or kwargs.get('original_start_time')):
+            template = template.replace('{{#original_booking_section}}', '')
+            template = template.replace('{{/original_booking_section}}', '')
         else:
-            # Remove the banner section
-            template = re.sub(r'{{#banner_url}}.*?{{/banner_url}}', '', template, flags=re.DOTALL)
-            # Show the no-banner section
-            template = template.replace('{{^banner_url}}', '')
-            template = template.replace('{{/banner_url}}', '')
+            template = re.sub(r'{{#original_booking_section}}.*?{{/original_booking_section}}', '', template, flags=re.DOTALL)
         
-        if kwargs.get('logo_url'):
-            template = template.replace('{{#logo_url}}', '')
-            template = template.replace('{{/logo_url}}', '')
+        # Handle manage booking section
+        booking_page_alias = kwargs.get('booking_page_alias')
+        if booking_page_alias and booking_page_alias.strip():
+            template = template.replace('{{#manage_booking_section}}', '')
+            template = template.replace('{{/manage_booking_section}}', '')
         else:
-            template = re.sub(r'{{#logo_url}}.*?{{/logo_url}}', '', template, flags=re.DOTALL)
+            template = re.sub(r'{{#manage_booking_section}}.*?{{/manage_booking_section}}', '', template, flags=re.DOTALL)
         
         # Clean up any remaining placeholder sections
         template = re.sub(r'{{#\w+}}', '', template)
@@ -208,6 +204,15 @@ def render_customer_booking_confirmation_template(**kwargs) -> str:
             - service_id: Service ID (optional, for services)
             - is_modification: Boolean indicating if this is a modification email
             - is_cancellation: Boolean indicating if this is a cancellation email
+            - logo_url: URL of the location's logo (optional)
+            - banner_url: URL of the location's banner (optional)
+            - original_booking_date: Original booking date (for modifications)
+            - original_start_time: Original start time (for modifications)
+            - original_party_num: Original party size (for modifications)
+            - original_staff_name: Original staff name (for modifications)
+            - original_service_name: Original service name (for modifications)
+            - original_zone_names: Original zone/table names (for modifications)
+            - booking_page_alias: Booking page alias for manage booking URL (optional)
     
     Returns:
         str: Rendered HTML template, or empty string if template loading fails
@@ -229,11 +234,50 @@ def render_customer_booking_confirmation_template(**kwargs) -> str:
                     value = 'Not Assigned'
                 elif key in ['venue_unit_id', 'staff_id', 'service_id']:
                     value = 'Not Assigned'
+                elif key in ['logo_url', 'banner_url']:
+                    value = ''
                 else:
                     value = ''
             
+            # Handle zone_names special case - convert list to string
+            if key == 'zone_names' and isinstance(value, list):
+                if value:
+                    value = ', '.join(str(zone) for zone in value)
+                else:
+                    value = 'Not Assigned'
+            
+            # Handle original_zone_names special case - convert list to string
+            if key == 'original_zone_names' and isinstance(value, list):
+                if value:
+                    value = ', '.join(str(zone) for zone in value)
+                else:
+                    value = 'Not Assigned'
+            
             # Convert to string
             template = template.replace(placeholder, str(value))
+        
+        # Handle manage booking URL construction
+        booking_page_alias = kwargs.get('booking_page_alias')
+        booking_access_token = kwargs.get('booking_access_token')
+        
+        if booking_page_alias and booking_page_alias.strip():
+            if booking_access_token and booking_access_token.strip():
+                # Construct URL with token parameter
+                manage_booking_url = f"https://speako.ai/en-US/customer/booking/{booking_page_alias.strip()}/view?token={booking_access_token.strip()}"
+            else:
+                # Fallback URL without token
+                manage_booking_url = f"https://speako.ai/en-US/customer/booking/{booking_page_alias.strip()}/view"
+            template = template.replace('{{manage_booking_url}}', manage_booking_url)
+        else:
+            template = template.replace('{{manage_booking_url}}', '')
+        
+        # Handle button color defaults
+        if 'button_color_start' not in kwargs or not kwargs.get('button_color_start'):
+            # Default to green gradient for new bookings
+            template = template.replace('{{button_color_start}}', '#28a745')
+        if 'button_color_end' not in kwargs or not kwargs.get('button_color_end'):
+            # Default to green gradient for new bookings
+            template = template.replace('{{button_color_end}}', '#20c997')
         
         # Handle optional sections based on presence of venue/staff data
         if kwargs.get('zone_names') or kwargs.get('venue_unit_name') or kwargs.get('venue_unit_id'):
@@ -255,6 +299,20 @@ def render_customer_booking_confirmation_template(**kwargs) -> str:
             template = re.sub(r'{{#staff_section}}.*?{{/staff_section}}', '', template, flags=re.DOTALL)
             template = re.sub(r'{{#party_section}}.*?{{/party_section}}', '', template, flags=re.DOTALL)
         
+        # Handle logo section
+        if kwargs.get('logo_url') and kwargs.get('logo_url').strip():
+            template = template.replace('{{#logo_section}}', '')
+            template = template.replace('{{/logo_section}}', '')
+        else:
+            template = re.sub(r'{{#logo_section}}.*?{{/logo_section}}', '', template, flags=re.DOTALL)
+        
+        # Handle banner section
+        if kwargs.get('banner_url') and kwargs.get('banner_url').strip():
+            template = template.replace('{{#banner_section}}', '')
+            template = template.replace('{{/banner_section}}', '')
+        else:
+            template = re.sub(r'{{#banner_section}}.*?{{/banner_section}}', '', template, flags=re.DOTALL)
+        
         # Handle modification styling
         if kwargs.get('is_modification'):
             template = template.replace('{{#is_modification}}', '')
@@ -269,24 +327,20 @@ def render_customer_booking_confirmation_template(**kwargs) -> str:
         else:
             template = re.sub(r'{{#is_cancellation}}.*?{{/is_cancellation}}', '', template, flags=re.DOTALL)
         
-        # Handle branding elements
-        if kwargs.get('banner_url'):
-            template = template.replace('{{#banner_url}}', '')
-            template = template.replace('{{/banner_url}}', '')
-            # Remove the no-banner section
-            template = re.sub(r'{{\^banner_url}}.*?{{/banner_url}}', '', template, flags=re.DOTALL)
+        # Handle original booking section (for modifications)
+        if kwargs.get('is_modification') and (kwargs.get('original_booking_date') or kwargs.get('original_start_time')):
+            template = template.replace('{{#original_booking_section}}', '')
+            template = template.replace('{{/original_booking_section}}', '')
         else:
-            # Remove the banner section
-            template = re.sub(r'{{#banner_url}}.*?{{/banner_url}}', '', template, flags=re.DOTALL)
-            # Show the no-banner section
-            template = template.replace('{{^banner_url}}', '')
-            template = template.replace('{{/banner_url}}', '')
+            template = re.sub(r'{{#original_booking_section}}.*?{{/original_booking_section}}', '', template, flags=re.DOTALL)
         
-        if kwargs.get('logo_url'):
-            template = template.replace('{{#logo_url}}', '')
-            template = template.replace('{{/logo_url}}', '')
+        # Handle manage booking section
+        booking_page_alias = kwargs.get('booking_page_alias')
+        if booking_page_alias and booking_page_alias.strip():
+            template = template.replace('{{#manage_booking_section}}', '')
+            template = template.replace('{{/manage_booking_section}}', '')
         else:
-            template = re.sub(r'{{#logo_url}}.*?{{/logo_url}}', '', template, flags=re.DOTALL)
+            template = re.sub(r'{{#manage_booking_section}}.*?{{/manage_booking_section}}', '', template, flags=re.DOTALL)
         
         # Clean up any remaining placeholder sections
         template = re.sub(r'{{#\w+}}', '', template)

@@ -1320,6 +1320,7 @@ def send_email_confirmation_customer_new(booking_id: int) -> str:
         cur.execute("""
             SELECT 
                 b.tenant_id,
+                b.location_id,
                 b.customer_name,
                 b.customer_email,
                 b.customer_id,
@@ -1335,7 +1336,10 @@ def send_email_confirmation_customer_new(booking_id: int) -> str:
                 l.location_type,
                 s.name AS staff_name,
                 sv.name AS service_name,
-                vu.zone_tag_ids
+                vu.zone_tag_ids,
+                bp.logo_url,
+                bp.banner_url,
+                bp.alias
             FROM bookings b
             JOIN locations l
               ON b.tenant_id = l.tenant_id AND b.location_id = l.location_id
@@ -1345,6 +1349,8 @@ def send_email_confirmation_customer_new(booking_id: int) -> str:
               ON b.tenant_id = sv.tenant_id AND b.service_id = sv.service_id
             LEFT JOIN venue_unit vu
               ON b.tenant_id = vu.tenant_id AND b.venue_unit_id = vu.venue_unit_id
+            LEFT JOIN booking_page bp
+              ON b.tenant_id = bp.tenant_id AND b.location_id = bp.location_id AND bp.is_active = true
             WHERE b.booking_id = %s
         """, (booking_id,))
         
@@ -1356,6 +1362,7 @@ def send_email_confirmation_customer_new(booking_id: int) -> str:
 
         (
             tenant_id,
+            location_id,
             customer_name,
             customer_email,
             customer_id,
@@ -1371,8 +1378,25 @@ def send_email_confirmation_customer_new(booking_id: int) -> str:
             location_type,
             staff_name,
             service_name,
-            zone_tag_ids
+            zone_tag_ids,
+            logo_url,
+            banner_url,
+            booking_page_alias
         ) = row
+
+        # Get booking access token for manage booking URL
+        booking_access_token = None
+        cur.execute("""
+            SELECT token_id 
+            FROM booking_access_tokens 
+            WHERE tenant_id = %s AND booking_id = %s AND purpose = 'view'
+            ORDER BY created_at DESC
+            LIMIT 1
+        """, (tenant_id, booking_id))
+        
+        token_row = cur.fetchone()
+        if token_row:
+            booking_access_token = str(token_row[0])
 
         # Get zone information for restaurant bookings
         zone_names = []
@@ -1446,7 +1470,7 @@ def send_email_confirmation_customer_new(booking_id: int) -> str:
             )
 
             html_template = render_customer_booking_confirmation_template(
-                email_title="Your Booking is Confirmed! 🎉",
+                email_title="Your Booking is Confirmed!",
                 email_message="Great news! Your reservation has been successfully confirmed.",
                 location_name=location_name,
                 booking_ref=booking_ref,
@@ -1456,7 +1480,13 @@ def send_email_confirmation_customer_new(booking_id: int) -> str:
                 booking_date=start_time.strftime('%Y-%m-%d'),
                 start_time=start_time_formatted,
                 closing_message="We can't wait to see you! Please arrive on time for your reservation.",
-                zone_names=zone_names
+                zone_names=zone_names,
+                logo_url=logo_url,
+                banner_url=banner_url,
+                booking_page_alias=booking_page_alias,
+                booking_access_token=booking_access_token,
+                button_color_start="#28a745",
+                button_color_end="#20c997"
             )
         else:
             # Service booking
@@ -1478,7 +1508,7 @@ def send_email_confirmation_customer_new(booking_id: int) -> str:
             )
 
             html_template = render_customer_booking_confirmation_template(
-                email_title="Your Appointment is Confirmed! ✅",
+                email_title="Your Appointment is Confirmed!",
                 email_message="Excellent! Your appointment has been successfully booked.",
                 location_name=location_name,
                 booking_ref=booking_ref,
@@ -1491,7 +1521,13 @@ def send_email_confirmation_customer_new(booking_id: int) -> str:
                 staff_name=staff_name,
                 staff_id=staff_id,
                 service_name=service_name,
-                service_id=service_id
+                service_id=service_id,
+                logo_url=logo_url,
+                banner_url=banner_url,
+                booking_page_alias=booking_page_alias,
+                booking_access_token=booking_access_token,
+                button_color_start="#28a745",
+                button_color_end="#20c997"
             )
 
         # Create and send email
@@ -1551,6 +1587,7 @@ def send_email_confirmation_customer_mod(booking_id: int, original_booking_id: i
         cur.execute("""
             SELECT 
                 b.tenant_id,
+                b.location_id,
                 b.customer_name,
                 b.customer_email,
                 b.customer_id,
@@ -1566,7 +1603,10 @@ def send_email_confirmation_customer_mod(booking_id: int, original_booking_id: i
                 l.location_type,
                 s.name AS staff_name,
                 sv.name AS service_name,
-                vu.zone_tag_ids
+                vu.zone_tag_ids,
+                bp.logo_url,
+                bp.banner_url,
+                bp.alias
             FROM bookings b
             JOIN locations l
               ON b.tenant_id = l.tenant_id AND b.location_id = l.location_id
@@ -1576,6 +1616,8 @@ def send_email_confirmation_customer_mod(booking_id: int, original_booking_id: i
               ON b.tenant_id = sv.tenant_id AND b.service_id = sv.service_id
             LEFT JOIN venue_unit vu
               ON b.tenant_id = vu.tenant_id AND b.venue_unit_id = vu.venue_unit_id
+            LEFT JOIN booking_page bp
+              ON b.tenant_id = bp.tenant_id AND b.location_id = bp.location_id AND bp.is_active = true
             WHERE b.booking_id = %s AND b.status = 'confirmed'
         """, (booking_id,))
         
@@ -1587,6 +1629,7 @@ def send_email_confirmation_customer_mod(booking_id: int, original_booking_id: i
 
         (
             tenant_id,
+            location_id,
             customer_name,
             customer_email,
             customer_id,
@@ -1602,8 +1645,25 @@ def send_email_confirmation_customer_mod(booking_id: int, original_booking_id: i
             location_type,
             staff_name,
             service_name,
-            zone_tag_ids
+            zone_tag_ids,
+            logo_url,
+            banner_url,
+            booking_page_alias
         ) = new_booking
+
+        # Get booking access token for manage booking URL
+        booking_access_token = None
+        cur.execute("""
+            SELECT token_id 
+            FROM booking_access_tokens 
+            WHERE tenant_id = %s AND booking_id = %s AND purpose = 'view'
+            ORDER BY created_at DESC
+            LIMIT 1
+        """, (tenant_id, booking_id))
+        
+        token_row = cur.fetchone()
+        if token_row:
+            booking_access_token = str(token_row[0])
 
         # Get zone information for restaurant bookings
         zone_names = []
@@ -1677,6 +1737,13 @@ def send_email_confirmation_customer_mod(booking_id: int, original_booking_id: i
 
         # Prepare original booking context for email
         original_details_message = ""
+        orig_booking_date = None
+        orig_start_time_formatted = None
+        orig_party_num = None
+        orig_zone_names = []
+        orig_staff_name = None
+        orig_service_name = None
+        
         if original_booking:
             (
                 orig_start_time,
@@ -1690,8 +1757,36 @@ def send_email_confirmation_customer_mod(booking_id: int, original_booking_id: i
                 orig_venue_unit_name
             ) = original_booking
 
-            # Format original start time to 12-hour format
+            # Set original booking variables for template
+            orig_booking_date = orig_start_time.strftime('%Y-%m-%d')
             orig_start_time_formatted = format_time_12hour(orig_start_time)
+            # orig_party_num is already set from the tuple
+            orig_staff_name = orig_staff_name  # From tuple
+            orig_service_name = orig_service_name  # From tuple
+            
+            # Get original zone information for restaurant bookings
+            if location_type == "rest" and orig_venue_unit_id:
+                # Query venue_unit to get zone_tag_ids for original booking
+                cur.execute("""
+                    SELECT zone_tag_ids 
+                    FROM venue_unit
+                    WHERE tenant_id = %s AND venue_unit_id = %s
+                """, (tenant_id, orig_venue_unit_id))
+                
+                orig_venue_unit = cur.fetchone()
+                if orig_venue_unit and orig_venue_unit[0]:
+                    orig_zone_tag_ids = orig_venue_unit[0]
+                    
+                    # Get zone names
+                    cur.execute("""
+                        SELECT name 
+                        FROM venue_tag 
+                        WHERE tenant_id = %s AND tag_id = ANY(%s)
+                        ORDER BY name
+                    """, (tenant_id, orig_zone_tag_ids))
+                    
+                    orig_zone_results = cur.fetchall()
+                    orig_zone_names = [zone[0] for zone in orig_zone_results]
 
             if location_type == "rest":
                 original_details_message = (
@@ -1733,7 +1828,7 @@ def send_email_confirmation_customer_mod(booking_id: int, original_booking_id: i
             )
 
             html_template = render_customer_booking_confirmation_template(
-                email_title="Your Booking Has Been Updated! 📝",
+                email_title="Your Booking Has Been Updated!",
                 email_message="Your reservation has been successfully modified with the new details below.",
                 location_name=location_name,
                 booking_ref=booking_ref,
@@ -1744,7 +1839,19 @@ def send_email_confirmation_customer_mod(booking_id: int, original_booking_id: i
                 start_time=start_time_formatted,
                 closing_message="We're excited to see you at your updated time!",
                 zone_names=zone_names,
-                is_modification=True
+                logo_url=logo_url,
+                banner_url=banner_url,
+                is_modification=True,
+                original_booking_date=orig_booking_date,
+                original_start_time=orig_start_time_formatted,
+                original_party_num=orig_party_num,
+                original_zone_names=orig_zone_names,
+                original_staff_name=orig_staff_name,
+                original_service_name=orig_service_name,
+                booking_page_alias=booking_page_alias,
+                booking_access_token=booking_access_token,
+                button_color_start="#ffc107",
+                button_color_end="#fd7e14"
             )
         else:
             # Service booking modification
@@ -1767,7 +1874,7 @@ def send_email_confirmation_customer_mod(booking_id: int, original_booking_id: i
             )
 
             html_template = render_customer_booking_confirmation_template(
-                email_title="Your Appointment Has Been Updated! 🔄",
+                email_title="Your Appointment Has Been Updated!",
                 email_message="Great news! Your appointment has been successfully rescheduled.",
                 location_name=location_name,
                 booking_ref=booking_ref,
@@ -1781,7 +1888,19 @@ def send_email_confirmation_customer_mod(booking_id: int, original_booking_id: i
                 staff_id=staff_id,
                 service_name=service_name,
                 service_id=service_id,
-                is_modification=True
+                logo_url=logo_url,
+                banner_url=banner_url,
+                is_modification=True,
+                original_booking_date=orig_booking_date,
+                original_start_time=orig_start_time_formatted,
+                original_party_num=orig_party_num,
+                original_zone_names=orig_zone_names,
+                original_staff_name=orig_staff_name,
+                original_service_name=orig_service_name,
+                booking_page_alias=booking_page_alias,
+                booking_access_token=booking_access_token,
+                button_color_start="#ffc107",
+                button_color_end="#fd7e14"
             )
 
         # Create and send email
@@ -1841,6 +1960,7 @@ def send_email_confirmation_customer_can(booking_id: int) -> str:
         cur.execute("""
             SELECT 
                 b.tenant_id,
+                b.location_id,
                 b.customer_name,
                 b.customer_email,
                 b.customer_id,
@@ -1856,7 +1976,10 @@ def send_email_confirmation_customer_can(booking_id: int) -> str:
                 l.location_type,
                 s.name AS staff_name,
                 sv.name AS service_name,
-                vu.zone_tag_ids
+                vu.zone_tag_ids,
+                bp.logo_url,
+                bp.banner_url,
+                bp.alias
             FROM bookings b
             JOIN locations l
               ON b.tenant_id = l.tenant_id AND b.location_id = l.location_id
@@ -1866,6 +1989,8 @@ def send_email_confirmation_customer_can(booking_id: int) -> str:
               ON b.tenant_id = sv.tenant_id AND b.service_id = sv.service_id
             LEFT JOIN venue_unit vu
               ON b.tenant_id = vu.tenant_id AND b.venue_unit_id = vu.venue_unit_id
+            LEFT JOIN booking_page bp
+              ON b.tenant_id = bp.tenant_id AND b.location_id = bp.location_id AND bp.is_active = true
             WHERE b.booking_id = %s AND b.status = 'cancelled'
         """, (booking_id,))
         
@@ -1877,6 +2002,7 @@ def send_email_confirmation_customer_can(booking_id: int) -> str:
 
         (
             tenant_id,
+            location_id,
             customer_name,
             customer_email,
             customer_id,
@@ -1892,8 +2018,25 @@ def send_email_confirmation_customer_can(booking_id: int) -> str:
             location_type,
             staff_name,
             service_name,
-            zone_tag_ids
+            zone_tag_ids,
+            logo_url,
+            banner_url,
+            booking_page_alias
         ) = row
+
+        # Get booking access token for manage booking URL
+        booking_access_token = None
+        cur.execute("""
+            SELECT token_id 
+            FROM booking_access_tokens 
+            WHERE tenant_id = %s AND booking_id = %s AND purpose = 'view'
+            ORDER BY created_at DESC
+            LIMIT 1
+        """, (tenant_id, booking_id))
+        
+        token_row = cur.fetchone()
+        if token_row:
+            booking_access_token = str(token_row[0])
 
         # Get zone information for restaurant bookings
         zone_names = []
@@ -1978,7 +2121,13 @@ def send_email_confirmation_customer_can(booking_id: int) -> str:
                 start_time=start_time_formatted,
                 closing_message="We hope to welcome you again in the future. Feel free to contact us for new reservations.",
                 zone_names=zone_names,
-                is_cancellation=True
+                logo_url=logo_url,
+                banner_url=banner_url,
+                is_cancellation=True,
+                booking_page_alias=booking_page_alias,
+                booking_access_token=booking_access_token,
+                button_color_start="#dc3545",
+                button_color_end="#e83e8c"
             )
         else:
             # Service booking cancellation
@@ -2014,7 +2163,13 @@ def send_email_confirmation_customer_can(booking_id: int) -> str:
                 staff_id=staff_id,
                 service_name=service_name,
                 service_id=service_id,
-                is_cancellation=True
+                logo_url=logo_url,
+                banner_url=banner_url,
+                is_cancellation=True,
+                booking_page_alias=booking_page_alias,
+                booking_access_token=booking_access_token,
+                button_color_start="#dc3545",
+                button_color_end="#e83e8c"
             )
 
         # Create and send email
