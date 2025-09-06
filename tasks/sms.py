@@ -620,7 +620,7 @@ def send_email_confirmation_mod_rest(booking_id: int, original_booking_id: int) 
                     return "failed"
                 to_emails = [fallback_email]
 
-        # Construct email message with new and original booking details
+        # Construct plain text email as fallback
         new_booking_details = (
             f"Location: {new_location_name}\n"
             f"Booking Ref.: {new_booking_ref}\n"
@@ -659,9 +659,9 @@ def send_email_confirmation_mod_rest(booking_id: int, original_booking_id: int) 
                 f"Table/Venue ID: {orig_venue_unit_id or 'Not Assigned'}"
             )
 
-            email_body = (
+            plain_text_body = (
                 "Dear Host,\n\n"
-                "A new booking has been confirmed with the following details:\n\n"
+                "A booking has been modified. Here are the updated details:\n\n"
                 f"{new_booking_details}\n\n"
                 "The original booking was modified, with the following details:\n\n"
                 f"{original_booking_details}\n\n"
@@ -669,30 +669,78 @@ def send_email_confirmation_mod_rest(booking_id: int, original_booking_id: int) 
                 "Best regards,\n"
                 "Speako AI Booking System"
             )
+
+            # Create email message with original booking context
+            email_message_with_original = (
+                "<div style='background-color: #f8f9fa; padding: 15px; border-left: 4px solid #6c757d; margin: 15px 0; font-size: 16px; color: #495057; border-radius: 8px;'>"
+                "<strong style='color: #212529; font-size: 17px;'>📋 Original Booking Details:</strong><br>"
+                f"<span style='font-weight: 600;'>Date:</span> {orig_start_time.strftime('%Y-%m-%d')} | "
+                f"<span style='font-weight: 600;'>Time:</span> {orig_start_time.strftime('%H:%M')} - {orig_end_time.strftime('%H:%M')}<br>"
+                f"<span style='font-weight: 600;'>Party Size:</span> {orig_party_num} | "
+                f"<span style='font-weight: 600;'>Table:</span> {orig_venue_unit_name or 'Not Assigned'}"
+                "</div>"
+            )
         else:
-            email_body = (
+            plain_text_body = (
                 "Dear Host,\n\n"
-                "A new booking has been confirmed with the following details:\n\n"
+                "A booking has been modified. Here are the updated details:\n\n"
                 f"{new_booking_details}\n\n"
                 f"No original booking was found for ID {original_booking_id}.\n\n"
-                "Please ensure all arrangements are in place.\n\n"
+                "Please ensure all arrangements are updated accordingly.\n\n"
                 "Best regards,\n"
                 "Speako AI Booking System"
             )
 
-        # Set up SendGrid email
-        message = Mail(
-            from_email=os.getenv("SENDGRID_FROM_EMAIL"),
-            to_emails=to_emails,
-            subject=f"Booking Modification Confirmation (Ref: {new_booking_ref})",
-            plain_text_content=email_body
+            email_message_with_original = (
+                "<div style='background-color: #f8f9fa; padding: 10px; border-left: 4px solid #6c757d; margin: 10px 0; font-size: 16px; color: #495057; border-radius: 8px;'>"
+                f"<strong style='font-size: 17px;'>⚠️ Note:</strong> Original booking details not available (ID: {original_booking_id})"
+                "</div>"
+            )
+
+        # Create HTML email template using template file
+        html_template = render_booking_confirmation_template(
+            email_title="Booking Modification Confirmation",
+            email_message=email_message_with_original,
+            location_name=new_location_name,
+            booking_ref=new_booking_ref,
+            customer_name=new_customer_name,
+            customer_phone=new_customer_phone,
+            party_num=new_party_num,
+            booking_date=new_start_time.strftime('%Y-%m-%d'),
+            start_time=new_start_time.strftime('%H:%M'),
+            end_time=new_end_time.strftime('%H:%M'),
+            closing_message="Please ensure all arrangements are updated accordingly.",
+            venue_unit_name=new_venue_unit_name,
+            venue_unit_id=new_venue_unit_id,
+            is_modification=True
         )
+
+        if not html_template:
+            print("[EMAIL] Failed to generate HTML template, falling back to plain text only")
+            # Set up SendGrid email with plain text only
+            message = Mail(
+                from_email=os.getenv("SENDGRID_FROM_EMAIL"),
+                to_emails=to_emails,
+                subject=f"Booking Modification Confirmation (Ref: {new_booking_ref})",
+                plain_text_content=plain_text_body
+            )
+        else:
+            print("[EMAIL] HTML template generated successfully")
+            # Set up SendGrid email with both HTML and plain text
+            message = Mail(
+                from_email=os.getenv("SENDGRID_FROM_EMAIL"),
+                to_emails=to_emails,
+                subject=f"Booking Modification Confirmation (Ref: {new_booking_ref})",
+                html_content=html_template,
+                plain_text_content=plain_text_body
+            )
 
         # Send email via SendGrid
         sg = SendGridAPIClient(os.getenv("SENDGRID_API_KEY"))
         response = sg.send(message)
 
-        print(f"[EMAIL] Sent to {to_emails}: {email_body}")
+        print(f"[EMAIL] Sent to {to_emails}: HTML email with booking modification confirmation")
+        print(f"[EMAIL] SendGrid response status: {response.status_code}")
         return "success"
 
     except Exception as e:
@@ -806,7 +854,7 @@ def send_email_confirmation_mod(booking_id: int, original_booking_id: int) -> st
                     return "failed"
                 to_emails = [fallback_email]
 
-        # Construct email message with new and original booking details
+        # Construct plain text email as fallback
         new_booking_details = (
             f"Location: {new_location_name}\n"
             f"Booking Ref.: {new_booking_ref}\n"
@@ -851,9 +899,9 @@ def send_email_confirmation_mod(booking_id: int, original_booking_id: int) -> st
                 f"Service ID: {orig_service_id or 'Not Assigned'}"
             )
 
-            email_body = (
+            plain_text_body = (
                 "Dear Host,\n\n"
-                "A new booking has been confirmed with the following details:\n\n"
+                "A booking has been modified. Here are the updated details:\n\n"
                 f"{new_booking_details}\n\n"
                 "The original booking was modified, with the following details:\n\n"
                 f"{original_booking_details}\n\n"
@@ -861,30 +909,81 @@ def send_email_confirmation_mod(booking_id: int, original_booking_id: int) -> st
                 "Best regards,\n"
                 "Speako AI Booking System"
             )
+
+            # Create email message with original booking context
+            email_message_with_original = (
+                "<div style='background-color: #f8f9fa; padding: 15px; border-left: 4px solid #6c757d; margin: 15px 0; font-size: 16px; color: #495057; border-radius: 8px;'>"
+                "<strong style='color: #212529; font-size: 17px;'>📋 Original Booking Details:</strong><br>"
+                f"<span style='font-weight: 600;'>Date:</span> {orig_start_time.strftime('%Y-%m-%d')} | "
+                f"<span style='font-weight: 600;'>Time:</span> {orig_start_time.strftime('%H:%M')} - {orig_end_time.strftime('%H:%M')}<br>"
+                f"<span style='font-weight: 600;'>Party Size:</span> {orig_party_num} | "
+                f"<span style='font-weight: 600;'>Staff:</span> {orig_staff_name or 'Not Assigned'}<br>"
+                f"<span style='font-weight: 600;'>Service:</span> {orig_service_name or 'Not Assigned'}"
+                "</div>"
+            )
         else:
-            email_body = (
+            plain_text_body = (
                 "Dear Host,\n\n"
-                "A new booking has been confirmed with the following details:\n\n"
+                "A booking has been modified. Here are the updated details:\n\n"
                 f"{new_booking_details}\n\n"
                 f"No original booking was found for ID {original_booking_id}.\n\n"
-                "Please ensure all arrangements are in place.\n\n"
+                "Please ensure all arrangements are updated accordingly.\n\n"
                 "Best regards,\n"
                 "Speako AI Booking System"
             )
 
-        # Set up SendGrid email
-        message = Mail(
-            from_email=os.getenv("SENDGRID_FROM_EMAIL"),
-            to_emails=to_emails,
-            subject=f"Booking Modification Confirmation (Ref: {new_booking_ref})",
-            plain_text_content=email_body
+            email_message_with_original = (
+                "<div style='background-color: #f8f9fa; padding: 10px; border-left: 4px solid #6c757d; margin: 10px 0; font-size: 16px; color: #495057; border-radius: 8px;'>"
+                f"<strong style='font-size: 17px;'>⚠️ Note:</strong> Original booking details not available (ID: {original_booking_id})"
+                "</div>"
+            )
+
+        # Create HTML email template using template file
+        html_template = render_booking_confirmation_template(
+            email_title="Booking Modification Confirmation",
+            email_message=email_message_with_original,
+            location_name=new_location_name,
+            booking_ref=new_booking_ref,
+            customer_name=new_customer_name,
+            customer_phone=new_customer_phone,
+            party_num=new_party_num,
+            booking_date=new_start_time.strftime('%Y-%m-%d'),
+            start_time=new_start_time.strftime('%H:%M'),
+            end_time=new_end_time.strftime('%H:%M'),
+            closing_message="Please ensure all arrangements are updated accordingly.",
+            staff_name=new_staff_name,
+            staff_id=new_staff_id,
+            service_name=new_service_name,
+            service_id=new_service_id,
+            is_modification=True
         )
+
+        if not html_template:
+            print("[EMAIL] Failed to generate HTML template, falling back to plain text only")
+            # Set up SendGrid email with plain text only
+            message = Mail(
+                from_email=os.getenv("SENDGRID_FROM_EMAIL"),
+                to_emails=to_emails,
+                subject=f"Booking Modification Confirmation (Ref: {new_booking_ref})",
+                plain_text_content=plain_text_body
+            )
+        else:
+            print("[EMAIL] HTML template generated successfully")
+            # Set up SendGrid email with both HTML and plain text
+            message = Mail(
+                from_email=os.getenv("SENDGRID_FROM_EMAIL"),
+                to_emails=to_emails,
+                subject=f"Booking Modification Confirmation (Ref: {new_booking_ref})",
+                html_content=html_template,
+                plain_text_content=plain_text_body
+            )
 
         # Send email via SendGrid
         sg = SendGridAPIClient(os.getenv("SENDGRID_API_KEY"))
         response = sg.send(message)
 
-        print(f"[EMAIL] Sent to {to_emails}: {email_body}")
+        print(f"[EMAIL] Sent to {to_emails}: HTML email with booking modification confirmation")
+        print(f"[EMAIL] SendGrid response status: {response.status_code}")
         return "success"
 
     except Exception as e:
@@ -970,7 +1069,7 @@ def send_email_confirmation_can_rest(booking_id: int) -> str:
                 to_emails = [fallback_email]
 
         # Construct email message with cancelled booking details
-        email_body = (
+        plain_text_body = (
             "Dear Host,\n\n"
             "A booking has been cancelled with the following details:\n\n"
             f"Location: {location_name}\n"
@@ -988,19 +1087,50 @@ def send_email_confirmation_can_rest(booking_id: int) -> str:
             "Speako AI Booking System"
         )
 
-        # Set up SendGrid email
-        message = Mail(
-            from_email=os.getenv("SENDGRID_FROM_EMAIL"),
-            to_emails=to_emails,
-            subject=f"Booking Cancellation Notification (Ref: {booking_ref})",
-            plain_text_content=email_body
+        # Create HTML email template using template file
+        html_template = render_booking_confirmation_template(
+            email_title="Booking Cancellation Notification",
+            email_message="A booking has been cancelled with the following details:",
+            location_name=location_name,
+            booking_ref=booking_ref,
+            customer_name=customer_name,
+            customer_phone=customer_phone,
+            party_num=party_num,
+            booking_date=start_time.strftime('%Y-%m-%d'),
+            start_time=start_time.strftime('%H:%M'),
+            end_time=end_time.strftime('%H:%M'),
+            closing_message="Please update your records accordingly.",
+            venue_unit_name=venue_unit_name,
+            venue_unit_id=venue_unit_id,
+            is_cancellation=True
         )
+
+        if not html_template:
+            print("[EMAIL] Failed to generate HTML template, falling back to plain text only")
+            # Set up SendGrid email with plain text only
+            message = Mail(
+                from_email=os.getenv("SENDGRID_FROM_EMAIL"),
+                to_emails=to_emails,
+                subject=f"Booking Cancellation Notification (Ref: {booking_ref})",
+                plain_text_content=plain_text_body
+            )
+        else:
+            print("[EMAIL] HTML template generated successfully")
+            # Set up SendGrid email with both HTML and plain text
+            message = Mail(
+                from_email=os.getenv("SENDGRID_FROM_EMAIL"),
+                to_emails=to_emails,
+                subject=f"Booking Cancellation Notification (Ref: {booking_ref})",
+                html_content=html_template,
+                plain_text_content=plain_text_body
+            )
 
         # Send email via SendGrid
         sg = SendGridAPIClient(os.getenv("SENDGRID_API_KEY"))
         response = sg.send(message)
 
-        print(f"[EMAIL] Sent to {to_emails}: {email_body}")
+        print(f"[EMAIL] Sent to {to_emails}: HTML email with booking cancellation notification")
+        print(f"[EMAIL] SendGrid response status: {response.status_code}")
         return "success"
 
     except Exception as e:
@@ -1092,7 +1222,7 @@ def send_email_confirmation_can(booking_id: int) -> str:
                 to_emails = [fallback_email]
 
         # Construct email message with cancelled booking details
-        email_body = (
+        plain_text_body = (
             "Dear Host,\n\n"
             "A booking has been cancelled with the following details:\n\n"
             f"Location: {location_name}\n"
@@ -1112,19 +1242,52 @@ def send_email_confirmation_can(booking_id: int) -> str:
             "Speako AI Booking System"
         )
 
-        # Set up SendGrid email
-        message = Mail(
-            from_email=os.getenv("SENDGRID_FROM_EMAIL"),
-            to_emails=to_emails,
-            subject=f"Booking Cancellation Notification (Ref: {booking_ref})",
-            plain_text_content=email_body
+        # Create HTML email template using template file
+        html_template = render_booking_confirmation_template(
+            email_title="Booking Cancellation Notification",
+            email_message="A booking has been cancelled with the following details:",
+            location_name=location_name,
+            booking_ref=booking_ref,
+            customer_name=customer_name,
+            customer_phone=customer_phone,
+            party_num=party_num,
+            booking_date=start_time.strftime('%Y-%m-%d'),
+            start_time=start_time.strftime('%H:%M'),
+            end_time=end_time.strftime('%H:%M'),
+            closing_message="Please update your records accordingly.",
+            staff_name=staff_name,
+            staff_id=staff_id,
+            service_name=service_name,
+            service_id=service_id,
+            is_cancellation=True
         )
+
+        if not html_template:
+            print("[EMAIL] Failed to generate HTML template, falling back to plain text only")
+            # Set up SendGrid email with plain text only
+            message = Mail(
+                from_email=os.getenv("SENDGRID_FROM_EMAIL"),
+                to_emails=to_emails,
+                subject=f"Booking Cancellation Notification (Ref: {booking_ref})",
+                plain_text_content=plain_text_body
+            )
+        else:
+            print("[EMAIL] HTML template generated successfully")
+            # Set up SendGrid email with both HTML and plain text
+            message = Mail(
+                from_email=os.getenv("SENDGRID_FROM_EMAIL"),
+                to_emails=to_emails,
+                subject=f"Booking Cancellation Notification (Ref: {booking_ref})",
+                html_content=html_template,
+                plain_text_content=plain_text_body
+            )
 
         # Send email via SendGrid
         sg = SendGridAPIClient(os.getenv("SENDGRID_API_KEY"))
         response = sg.send(message)
 
-        print(f"[EMAIL] Sent to {to_emails}: {email_body}")
+        print(f"[EMAIL] Sent to {to_emails}: HTML email with booking cancellation notification")
+        print(f"[EMAIL] SendGrid response status: {response.status_code}")
         return "success"
 
     except Exception as e:

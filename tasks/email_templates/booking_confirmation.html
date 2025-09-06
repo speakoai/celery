@@ -53,6 +53,38 @@
             color: white;
         }
         
+        .header.modification {
+            background: linear-gradient(135deg, #d4a574 0%, #b8860b 100%);
+            border-top: 5px solid #8b6914;
+            box-shadow: 0 4px 15px rgba(212, 165, 116, 0.3);
+        }
+        
+        .header.modification h1 {
+            color: #2d1810;
+            text-shadow: 1px 1px 2px rgba(139, 105, 20, 0.3);
+        }
+        
+        .header.modification .logo-text {
+            color: #2d1810;
+            text-shadow: 1px 1px 2px rgba(139, 105, 20, 0.3);
+        }
+        
+        .header.cancellation {
+            background: linear-gradient(135deg, #f8d7da 0%, #dc3545 100%);
+            border-top: 5px solid #a71e2a;
+            box-shadow: 0 4px 15px rgba(220, 53, 69, 0.3);
+        }
+        
+        .header.cancellation h1 {
+            color: #721c24;
+            text-shadow: 1px 1px 2px rgba(167, 30, 42, 0.3);
+        }
+        
+        .header.cancellation .logo-text {
+            color: #721c24;
+            text-shadow: 1px 1px 2px rgba(167, 30, 42, 0.3);
+        }
+        
         .header h1 {
             margin: 0;
             font-size: 28px;
@@ -351,7 +383,7 @@
 <body>
     <div class="email-container">
         <!-- Header -->
-        <div class="header">
+        <div class="header{{#is_modification}} modification{{/is_modification}}{{#is_cancellation}} cancellation{{/is_cancellation}}">
             <div class="logo">
                 <table style="margin: 0 auto; border-collapse: collapse;">
                     <tr>
@@ -414,6 +446,11 @@
                 <div class="staff-details">Staff ID: {{staff_id}} | Service ID: {{service_id}}</div>
             </div>
             {{/staff_section}}
+            
+            <!-- Original Booking Information (for modifications) -->
+            <div style="margin: 20px 0; text-align: center;">
+                {{email_message}}
+            </div>
         </div>
         
         <!-- Footer -->

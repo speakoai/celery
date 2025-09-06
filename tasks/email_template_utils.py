@@ -100,6 +100,20 @@ def render_booking_confirmation_template(**kwargs) -> str:
             template = re.sub(r'{{#staff_section}}.*?{{/staff_section}}', '', template, flags=re.DOTALL)
             template = re.sub(r'{{#party_section}}.*?{{/party_section}}', '', template, flags=re.DOTALL)
         
+        # Handle modification styling
+        if kwargs.get('is_modification'):
+            template = template.replace('{{#is_modification}}', '')
+            template = template.replace('{{/is_modification}}', '')
+        else:
+            template = re.sub(r'{{#is_modification}}.*?{{/is_modification}}', '', template, flags=re.DOTALL)
+        
+        # Handle cancellation styling
+        if kwargs.get('is_cancellation'):
+            template = template.replace('{{#is_cancellation}}', '')
+            template = template.replace('{{/is_cancellation}}', '')
+        else:
+            template = re.sub(r'{{#is_cancellation}}.*?{{/is_cancellation}}', '', template, flags=re.DOTALL)
+        
         # Clean up any remaining placeholder sections
         template = re.sub(r'{{#\w+}}', '', template)
         template = re.sub(r'{{/\w+}}', '', template)
