@@ -55,17 +55,13 @@
             text-align: center;
         }
         
-        {{#is_modification}}
-        .header {
+        .header.modification {
             background: linear-gradient(135deg, #ffc107 0%, #fd7e14 100%);
         }
-        {{/is_modification}}
         
-        {{#is_cancellation}}
-        .header {
+        .header.cancellation {
             background: linear-gradient(135deg, #dc3545 0%, #e83e8c 100%);
         }
-        {{/is_cancellation}}
         
         .header h1 {
             margin: 0;
@@ -100,17 +96,13 @@
             border-left: 5px solid #28a745;
         }
         
-        {{#is_modification}}
-        .booking-details {
+        .booking-details.modification {
             border-left-color: #ffc107;
         }
-        {{/is_modification}}
         
-        {{#is_cancellation}}
-        .booking-details {
+        .booking-details.cancellation {
             border-left-color: #dc3545;
         }
-        {{/is_cancellation}}
         
         .booking-details h2 {
             margin: 0 0 20px 0;
@@ -177,7 +169,6 @@
             color: #1b5e20;
         }
         
-        {{#party_section}}
         .party-info {
             background-color: #fff3cd;
             border: 1px solid #ffeaa7;
@@ -199,7 +190,6 @@
             color: #856404;
             margin: 5px 0 0 0;
         }
-        {{/party_section}}
         
         .closing-message {
             font-size: 16px;
@@ -272,7 +262,7 @@
 <body>
     <div class="email-container">
         <!-- Header Section -->
-        <div class="header">
+        <div class="header{{#is_modification}} modification{{/is_modification}}{{#is_cancellation}} cancellation{{/is_cancellation}}">
             <h1>{{email_title}}</h1>
         </div>
         
@@ -295,7 +285,7 @@
             </div>
             
             <!-- Booking Details -->
-            <div class="booking-details">
+            <div class="booking-details{{#is_modification}} modification{{/is_modification}}{{#is_cancellation}} cancellation{{/is_cancellation}}">
                 <h2>Your Booking Details</h2>
                 
                 <div class="detail-row">
