@@ -531,7 +531,7 @@ def send_email_confirmation_mod_rest_test(booking_id: int, original_booking_id: 
         
         html_template = render_booking_confirmation_template(
             email_title="Booking Modification Confirmation",
-            email_message=email_message_with_original,
+            email_message_mod=email_message_with_original,
             location_name=new_location_name,
             booking_ref=new_booking_ref,
             customer_name=new_customer_name,
@@ -784,7 +784,7 @@ def send_email_confirmation_mod_test(booking_id: int, original_booking_id: int) 
         # Create HTML email template using template file
         html_template = render_booking_confirmation_template(
             email_title="Booking Modification Confirmation",
-            email_message=email_message_with_original,
+            email_message_mod=email_message_with_original,
             location_name=new_location_name,
             booking_ref=new_booking_ref,
             customer_name=new_customer_name,

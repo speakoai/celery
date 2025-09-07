@@ -323,7 +323,7 @@ def send_email_confirmation_new_rest(booking_id: int) -> str:
         # Create HTML email template using template file
         html_template = render_booking_confirmation_template(
             email_title="New Booking Confirmation",
-            email_message="A new booking has been confirmed with the following details:",
+            email_message="",
             location_name=location_name,
             booking_ref=booking_ref,
             customer_name=customer_name,
@@ -476,7 +476,7 @@ def send_email_confirmation_new(booking_id: int) -> str:
         # Create HTML email template using template file
         html_template = render_booking_confirmation_template(
             email_title="New Booking Confirmation",
-            email_message="A new booking has been confirmed with the following details:",
+            email_message="",
             location_name=location_name,
             booking_ref=booking_ref,
             customer_name=customer_name,
@@ -701,7 +701,7 @@ def send_email_confirmation_mod_rest(booking_id: int, original_booking_id: int) 
         # Create HTML email template using template file
         html_template = render_booking_confirmation_template(
             email_title="Booking Modification Confirmation",
-            email_message=email_message_with_original,
+            email_message_mod=email_message_with_original,
             location_name=new_location_name,
             booking_ref=new_booking_ref,
             customer_name=new_customer_name,
@@ -942,7 +942,7 @@ def send_email_confirmation_mod(booking_id: int, original_booking_id: int) -> st
         # Create HTML email template using template file
         html_template = render_booking_confirmation_template(
             email_title="Booking Modification Confirmation",
-            email_message=email_message_with_original,
+            email_message_mod=email_message_with_original,
             location_name=new_location_name,
             booking_ref=new_booking_ref,
             customer_name=new_customer_name,
@@ -1091,7 +1091,7 @@ def send_email_confirmation_can_rest(booking_id: int) -> str:
         # Create HTML email template using template file
         html_template = render_booking_confirmation_template(
             email_title="Booking Cancellation Notification",
-            email_message="A booking has been cancelled with the following details:",
+            email_message="",
             location_name=location_name,
             booking_ref=booking_ref,
             customer_name=customer_name,
@@ -1246,7 +1246,7 @@ def send_email_confirmation_can(booking_id: int) -> str:
         # Create HTML email template using template file
         html_template = render_booking_confirmation_template(
             email_title="Booking Cancellation Notification",
-            email_message="A booking has been cancelled with the following details:",
+            email_message="",
             location_name=location_name,
             booking_ref=booking_ref,
             customer_name=customer_name,
