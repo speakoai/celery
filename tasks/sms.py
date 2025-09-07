@@ -7,9 +7,54 @@ from twilio.rest import Client
 import psycopg2
 import os
 import re
+import requests
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 from tasks.email_template_utils import render_booking_confirmation_template, render_customer_booking_confirmation_template, format_time_12hour
+
+def create_tiny_url(long_url: str) -> str:
+    """
+    Create a shortened URL using TinyURL API.
+    Returns the original URL if shortening fails.
+    """
+    try:
+        api_token = os.getenv("TINYURL_API_TOKEN")
+        if not api_token:
+            print("[TinyURL] API token not found, returning original URL")
+            return long_url
+        
+        headers = {
+            "Authorization": f"Bearer {api_token}",
+            "Content-Type": "application/json"
+        }
+        
+        data = {
+            "url": long_url
+        }
+        
+        response = requests.post(
+            "https://api.tinyurl.com/create",
+            headers=headers,
+            json=data,
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            tiny_url = result.get("data", {}).get("tiny_url")
+            if tiny_url:
+                print(f"[TinyURL] Successfully shortened URL: {long_url} -> {tiny_url}")
+                return tiny_url
+            else:
+                print(f"[TinyURL] No tiny_url in response, returning original URL")
+                return long_url
+        else:
+            print(f"[TinyURL] API error {response.status_code}: {response.text}")
+            return long_url
+            
+    except Exception as e:
+        print(f"[TinyURL] Error creating short URL: {e}")
+        return long_url
 
 @app.task
 def send_sms_confirmation_new(booking_id: int):
@@ -20,6 +65,7 @@ def send_sms_confirmation_new(booking_id: int):
 
         cur.execute("""
             SELECT 
+                b.tenant_id,
                 b.customer_name,
                 b.start_time,
                 b.booking_ref,
@@ -28,7 +74,8 @@ def send_sms_confirmation_new(booking_id: int):
                 l.name AS location_name,
                 l.location_type,
                 s.name AS staff_name,
-                sv.name AS service_name
+                sv.name AS service_name,
+                bp.alias AS booking_page_alias
             FROM bookings b
             JOIN locations l
               ON b.tenant_id = l.tenant_id AND b.location_id = l.location_id
@@ -36,6 +83,8 @@ def send_sms_confirmation_new(booking_id: int):
               ON b.tenant_id = s.tenant_id AND b.staff_id = s.staff_id
             LEFT JOIN services sv
               ON b.tenant_id = sv.tenant_id AND b.service_id = sv.service_id
+            LEFT JOIN booking_page bp
+              ON b.tenant_id = bp.tenant_id AND b.location_id = bp.location_id AND bp.is_active = true
             WHERE b.booking_id = %s
         """, (booking_id,))
         
@@ -46,6 +95,7 @@ def send_sms_confirmation_new(booking_id: int):
             return
 
         (
+            tenant_id,
             customer_name,
             start_time,
             booking_ref,
@@ -54,8 +104,33 @@ def send_sms_confirmation_new(booking_id: int):
             location_name,
             location_type,
             staff_name,
-            service_name
+            service_name,
+            booking_page_alias
         ) = row
+        
+        # Get booking access token for manage booking URL
+        booking_access_token = None
+        cur.execute("""
+            SELECT token_id 
+            FROM booking_access_tokens 
+            WHERE tenant_id = %s AND booking_id = %s AND purpose = 'view'
+            ORDER BY created_at DESC
+            LIMIT 1
+        """, (tenant_id, booking_id))
+        
+        token_row = cur.fetchone()
+        if token_row:
+            booking_access_token = str(token_row[0])
+
+        # Construct manage booking URL
+        manage_booking_url = ""
+        if booking_page_alias and booking_page_alias.strip():
+            if booking_access_token and booking_access_token.strip():
+                # Construct URL with token parameter
+                manage_booking_url = f"https://speako.ai/en-US/customer/booking/{booking_page_alias.strip()}/view?token={booking_access_token.strip()}"
+            else:
+                # Fallback URL without token
+                manage_booking_url = f"https://speako.ai/en-US/customer/booking/{booking_page_alias.strip()}/view"
         
         clean_ref = booking_ref[3:] if booking_ref.startswith("REF") else booking_ref
 
@@ -71,6 +146,12 @@ def send_sms_confirmation_new(booking_id: int):
                 f"with {staff_name} for {service_name}."
             )
 
+        # Append manage booking link if available
+        if manage_booking_url:
+            # Create shortened URL for SMS
+            tiny_url = create_tiny_url(manage_booking_url)
+            message += f" Manage your booking: {tiny_url}"
+
         client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
         client.messages.create(
             body=message,
@@ -82,6 +163,11 @@ def send_sms_confirmation_new(booking_id: int):
 
     except Exception as e:
         print(f"[SMS] Error: {e}")
+    finally:
+        if 'cur' in locals():
+            cur.close()
+        if 'conn' in locals():
+            conn.close()
 
 
 @app.task
@@ -93,6 +179,7 @@ def send_sms_confirmation_mod(booking_id: int):
 
         cur.execute("""
             SELECT 
+                b.tenant_id,
                 b.customer_name,
                 b.start_time,
                 b.booking_ref,
@@ -101,7 +188,8 @@ def send_sms_confirmation_mod(booking_id: int):
                 l.name AS location_name,
                 l.location_type,
                 s.name AS staff_name,
-                sv.name AS service_name
+                sv.name AS service_name,
+                bp.alias AS booking_page_alias
             FROM bookings b
             JOIN locations l
               ON b.tenant_id = l.tenant_id AND b.location_id = l.location_id
@@ -109,6 +197,8 @@ def send_sms_confirmation_mod(booking_id: int):
               ON b.tenant_id = s.tenant_id AND b.staff_id = s.staff_id
             LEFT JOIN services sv
               ON b.tenant_id = sv.tenant_id AND b.service_id = sv.service_id
+            LEFT JOIN booking_page bp
+              ON b.tenant_id = bp.tenant_id AND b.location_id = bp.location_id AND bp.is_active = true
             WHERE b.booking_id = %s
         """, (booking_id,))
         
@@ -119,6 +209,7 @@ def send_sms_confirmation_mod(booking_id: int):
             return
 
         (
+            tenant_id,
             customer_name,
             start_time,
             booking_ref,
@@ -127,8 +218,33 @@ def send_sms_confirmation_mod(booking_id: int):
             location_name,
             location_type,
             staff_name,
-            service_name
+            service_name,
+            booking_page_alias
         ) = row
+        
+        # Get booking access token for manage booking URL
+        booking_access_token = None
+        cur.execute("""
+            SELECT token_id 
+            FROM booking_access_tokens 
+            WHERE tenant_id = %s AND booking_id = %s AND purpose = 'view'
+            ORDER BY created_at DESC
+            LIMIT 1
+        """, (tenant_id, booking_id))
+        
+        token_row = cur.fetchone()
+        if token_row:
+            booking_access_token = str(token_row[0])
+
+        # Construct manage booking URL
+        manage_booking_url = ""
+        if booking_page_alias and booking_page_alias.strip():
+            if booking_access_token and booking_access_token.strip():
+                # Construct URL with token parameter
+                manage_booking_url = f"https://speako.ai/en-US/customer/booking/{booking_page_alias.strip()}/view?token={booking_access_token.strip()}"
+            else:
+                # Fallback URL without token
+                manage_booking_url = f"https://speako.ai/en-US/customer/booking/{booking_page_alias.strip()}/view"
         
         clean_ref = booking_ref[3:] if booking_ref.startswith("REF") else booking_ref
 
@@ -144,6 +260,12 @@ def send_sms_confirmation_mod(booking_id: int):
                 f"with {staff_name} for {service_name}."
             )
 
+        # Append manage booking link if available
+        if manage_booking_url:
+            # Create shortened URL for SMS
+            tiny_url = create_tiny_url(manage_booking_url)
+            message += f" Manage your booking: {tiny_url}"
+
         client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
         client.messages.create(
             body=message,
@@ -155,6 +277,11 @@ def send_sms_confirmation_mod(booking_id: int):
 
     except Exception as e:
         print(f"[SMS] Error: {e}")
+    finally:
+        if 'cur' in locals():
+            cur.close()
+        if 'conn' in locals():
+            conn.close()
         
 @app.task
 def send_sms_confirmation_can(booking_id: int):
@@ -165,6 +292,7 @@ def send_sms_confirmation_can(booking_id: int):
 
         cur.execute("""
             SELECT 
+                b.tenant_id,
                 b.customer_name,
                 b.start_time,
                 b.booking_ref,
@@ -173,7 +301,8 @@ def send_sms_confirmation_can(booking_id: int):
                 l.name AS location_name,
                 l.location_type,
                 s.name AS staff_name,
-                sv.name AS service_name
+                sv.name AS service_name,
+                bp.alias AS booking_page_alias
             FROM bookings b
             JOIN locations l
               ON b.tenant_id = l.tenant_id AND b.location_id = l.location_id
@@ -181,6 +310,8 @@ def send_sms_confirmation_can(booking_id: int):
               ON b.tenant_id = s.tenant_id AND b.staff_id = s.staff_id
             LEFT JOIN services sv
               ON b.tenant_id = sv.tenant_id AND b.service_id = sv.service_id
+            LEFT JOIN booking_page bp
+              ON b.tenant_id = bp.tenant_id AND b.location_id = bp.location_id AND bp.is_active = true
             WHERE b.booking_id = %s
         """, (booking_id,))
         
@@ -191,6 +322,7 @@ def send_sms_confirmation_can(booking_id: int):
             return
 
         (
+            tenant_id,
             customer_name,
             start_time,
             booking_ref,
@@ -199,8 +331,33 @@ def send_sms_confirmation_can(booking_id: int):
             location_name,
             location_type,
             staff_name,
-            service_name
+            service_name,
+            booking_page_alias
         ) = row
+        
+        # Get booking access token for manage booking URL
+        booking_access_token = None
+        cur.execute("""
+            SELECT token_id 
+            FROM booking_access_tokens 
+            WHERE tenant_id = %s AND booking_id = %s AND purpose = 'view'
+            ORDER BY created_at DESC
+            LIMIT 1
+        """, (tenant_id, booking_id))
+        
+        token_row = cur.fetchone()
+        if token_row:
+            booking_access_token = str(token_row[0])
+
+        # Construct manage booking URL
+        manage_booking_url = ""
+        if booking_page_alias and booking_page_alias.strip():
+            if booking_access_token and booking_access_token.strip():
+                # Construct URL with token parameter
+                manage_booking_url = f"https://speako.ai/en-US/customer/booking/{booking_page_alias.strip()}/view?token={booking_access_token.strip()}"
+            else:
+                # Fallback URL without token
+                manage_booking_url = f"https://speako.ai/en-US/customer/booking/{booking_page_alias.strip()}/view"
         
         clean_ref = booking_ref[3:] if booking_ref.startswith("REF") else booking_ref
 
@@ -216,6 +373,12 @@ def send_sms_confirmation_can(booking_id: int):
                 f"with {staff_name} for {service_name} has been cancelled."
             )
 
+        # Append manage booking link if available
+        if manage_booking_url:
+            # Create shortened URL for SMS
+            tiny_url = create_tiny_url(manage_booking_url)
+            message += f" View details: {tiny_url}"
+
         client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
         client.messages.create(
             body=message,
@@ -227,6 +390,11 @@ def send_sms_confirmation_can(booking_id: int):
 
     except Exception as e:
         print(f"[SMS] Error: {e}")
+    finally:
+        if 'cur' in locals():
+            cur.close()
+        if 'conn' in locals():
+            conn.close()
 
 # Simple email validation regex
 EMAIL_REGEX = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
