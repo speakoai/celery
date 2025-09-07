@@ -156,6 +156,38 @@ def render_booking_confirmation_template(**kwargs) -> str:
         else:
             template = re.sub(r'{{#original_booking_section}}.*?{{/original_booking_section}}', '', template, flags=re.DOTALL)
         
+        # Handle location information section
+        location_address = kwargs.get('location_address')
+        location_phone = kwargs.get('location_phone')
+        location_website = kwargs.get('location_website')
+        
+        if location_address or location_phone or location_website:
+            # Show location info section
+            template = template.replace('{{#location_info_section}}', '')
+            template = template.replace('{{/location_info_section}}', '')
+            
+            # Handle individual location fields
+            if location_phone and location_phone.strip():
+                template = template.replace('{{#location_phone}}', '')
+                template = template.replace('{{/location_phone}}', '')
+            else:
+                template = re.sub(r'{{#location_phone}}.*?{{/location_phone}}', '', template, flags=re.DOTALL)
+            
+            if location_address and location_address.strip():
+                template = template.replace('{{#location_address}}', '')
+                template = template.replace('{{/location_address}}', '')
+            else:
+                template = re.sub(r'{{#location_address}}.*?{{/location_address}}', '', template, flags=re.DOTALL)
+            
+            if location_website and location_website.strip():
+                template = template.replace('{{#location_website}}', '')
+                template = template.replace('{{/location_website}}', '')
+            else:
+                template = re.sub(r'{{#location_website}}.*?{{/location_website}}', '', template, flags=re.DOTALL)
+        else:
+            # Hide entire location info section if no data
+            template = re.sub(r'{{#location_info_section}}.*?{{/location_info_section}}', '', template, flags=re.DOTALL)
+        
         # Handle manage booking section
         booking_page_alias = kwargs.get('booking_page_alias')
         if booking_page_alias and booking_page_alias.strip():
@@ -213,6 +245,9 @@ def render_customer_booking_confirmation_template(**kwargs) -> str:
             - original_service_name: Original service name (for modifications)
             - original_zone_names: Original zone/table names (for modifications)
             - booking_page_alias: Booking page alias for manage booking URL (optional)
+            - location_address: Physical address of the location (optional)
+            - location_phone: Phone number with country code (optional, will be clickable tel: link)
+            - location_website: Website URL of the location (optional, will be clickable link)
     
     Returns:
         str: Rendered HTML template, or empty string if template loading fails
@@ -333,6 +368,38 @@ def render_customer_booking_confirmation_template(**kwargs) -> str:
             template = template.replace('{{/original_booking_section}}', '')
         else:
             template = re.sub(r'{{#original_booking_section}}.*?{{/original_booking_section}}', '', template, flags=re.DOTALL)
+        
+        # Handle location information section
+        location_address = kwargs.get('location_address')
+        location_phone = kwargs.get('location_phone')
+        location_website = kwargs.get('location_website')
+        
+        if location_address or location_phone or location_website:
+            # Show location info section
+            template = template.replace('{{#location_info_section}}', '')
+            template = template.replace('{{/location_info_section}}', '')
+            
+            # Handle individual location fields
+            if location_phone and location_phone.strip():
+                template = template.replace('{{#location_phone}}', '')
+                template = template.replace('{{/location_phone}}', '')
+            else:
+                template = re.sub(r'{{#location_phone}}.*?{{/location_phone}}', '', template, flags=re.DOTALL)
+            
+            if location_address and location_address.strip():
+                template = template.replace('{{#location_address}}', '')
+                template = template.replace('{{/location_address}}', '')
+            else:
+                template = re.sub(r'{{#location_address}}.*?{{/location_address}}', '', template, flags=re.DOTALL)
+            
+            if location_website and location_website.strip():
+                template = template.replace('{{#location_website}}', '')
+                template = template.replace('{{/location_website}}', '')
+            else:
+                template = re.sub(r'{{#location_website}}.*?{{/location_website}}', '', template, flags=re.DOTALL)
+        else:
+            # Hide entire location info section if no data
+            template = re.sub(r'{{#location_info_section}}.*?{{/location_info_section}}', '', template, flags=re.DOTALL)
         
         # Handle manage booking section
         booking_page_alias = kwargs.get('booking_page_alias')

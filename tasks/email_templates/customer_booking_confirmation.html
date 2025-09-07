@@ -394,6 +394,40 @@
             </div>
             {{/party_section}}
             
+            <!-- Location Information Section -->
+            {{#location_info_section}}
+            <div class="booking-details{{#is_modification}} modification{{/is_modification}}{{#is_cancellation}} cancellation{{/is_cancellation}}">
+                <h3 style="margin: 0 0 15px 0; color: #2c3e50; font-size: 18px; font-weight: 600;">📍 Location Information</h3>
+                <div class="location-details" style="line-height: 1.8;">
+                    {{#location_phone}}
+                    <div class="location-item" style="margin-bottom: 8px;">
+                        <span style="font-weight: 600; color: #495057; display: inline-block; min-width: 80px;">Tel:</span>
+                        <span style="color: #212529;"><a href="tel:{{location_phone}}">{{location_phone}}</a></span>
+                    </div>
+                    {{/location_phone}}
+                    {{#location_address}}
+                    <div class="location-item" style="margin-bottom: 8px;">
+                        <span style="font-weight: 600; color: #495057; display: inline-block; min-width: 80px;">
+                            Address:
+                        </span>
+                        <span style="color: #212529;">
+                            {{location_address}}
+                        </span>
+                        <a href="https://www.google.com/maps/dir/?api=1&destination={{location_address}}" target="_blank">
+                            Get Directions
+                        </a>
+                    </div>
+                    {{/location_address}}
+                    {{#location_website}}
+                    <div class="location-item" style="margin-bottom: 8px;">
+                        <span style="font-weight: 600; color: #495057; display: inline-block; min-width: 80px;">Website:</span>
+                        <span style="color: #212529;"><a href="{{location_website}}">{{location_website}}</a></span>
+                    </div>
+                    {{/location_website}}
+                </div>
+            </div>
+            {{/location_info_section}}
+            
             <!-- Manage Booking Section -->
             {{#manage_booking_section}}
             <div class="manage-booking-section" style="text-align: center; margin: 30px 0; padding: 0;">

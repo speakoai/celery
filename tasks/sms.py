@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
+import urllib.parse
 from tasks.celery_app import app
 from twilio.rest import Client
 import psycopg2
@@ -1339,7 +1340,10 @@ def send_email_confirmation_customer_new(booking_id: int) -> str:
                 vu.zone_tag_ids,
                 bp.logo_url,
                 bp.banner_url,
-                bp.alias
+                bp.alias,
+                li.address AS location_address,
+                li.phone_with_country_code AS location_phone,
+                li.website_url AS location_website
             FROM bookings b
             JOIN locations l
               ON b.tenant_id = l.tenant_id AND b.location_id = l.location_id
@@ -1351,6 +1355,8 @@ def send_email_confirmation_customer_new(booking_id: int) -> str:
               ON b.tenant_id = vu.tenant_id AND b.venue_unit_id = vu.venue_unit_id
             LEFT JOIN booking_page bp
               ON b.tenant_id = bp.tenant_id AND b.location_id = bp.location_id AND bp.is_active = true
+            LEFT JOIN location_info li
+              ON b.tenant_id = li.tenant_id AND b.location_id = li.location_id
             WHERE b.booking_id = %s
         """, (booking_id,))
         
@@ -1381,7 +1387,10 @@ def send_email_confirmation_customer_new(booking_id: int) -> str:
             zone_tag_ids,
             logo_url,
             banner_url,
-            booking_page_alias
+            booking_page_alias,
+            location_address,
+            location_phone,
+            location_website
         ) = row
 
         # Get booking access token for manage booking URL
@@ -1455,6 +1464,17 @@ def send_email_confirmation_customer_new(booking_id: int) -> str:
             # Format start time to 12-hour format
             start_time_formatted = format_time_12hour(start_time)
 
+            # Prepare location information section
+            location_info_text = ""
+            if location_address or location_phone or location_website:
+                location_info_text = "\nLocation Information:\n"
+                if location_phone:
+                    location_info_text += f"Tel: {location_phone}\n"
+                if location_address:
+                    location_info_text += f"Address: {location_address}\n"
+                if location_website:
+                    location_info_text += f"Website: {location_website}\n"
+
             plain_text_body = (
                 f"Dear {customer_name},\n\n"
                 "Your booking has been confirmed! Here are your booking details:\n\n"
@@ -1464,6 +1484,7 @@ def send_email_confirmation_customer_new(booking_id: int) -> str:
                 f"Time: {start_time_formatted}\n"
                 f"Party Size: {party_num} people\n"
                 f"{table_info_text}"
+                f"{location_info_text}"
                 "\nWe look forward to welcoming you!\n\n"
                 "Best regards,\n"
                 f"{location_name}"
@@ -1485,6 +1506,9 @@ def send_email_confirmation_customer_new(booking_id: int) -> str:
                 banner_url=banner_url,
                 booking_page_alias=booking_page_alias,
                 booking_access_token=booking_access_token,
+                location_address=location_address,
+                location_phone=location_phone,
+                location_website=location_website,
                 button_color_start="#28a745",
                 button_color_end="#20c997"
             )
@@ -1492,6 +1516,17 @@ def send_email_confirmation_customer_new(booking_id: int) -> str:
             # Service booking
             # Format start time to 12-hour format
             start_time_formatted = format_time_12hour(start_time)
+
+            # Prepare location information section
+            location_info_text = ""
+            if location_address or location_phone or location_website:
+                location_info_text = "\nLocation Information:\n"
+                if location_phone:
+                    location_info_text += f"Tel: {location_phone}\n"
+                if location_address:
+                    location_info_text += f"Address: {location_address}\n"
+                if location_website:
+                    location_info_text += f"Website: {location_website}\n"
 
             plain_text_body = (
                 f"Dear {customer_name},\n\n"
@@ -1501,8 +1536,9 @@ def send_email_confirmation_customer_new(booking_id: int) -> str:
                 f"Date: {start_time.strftime('%Y-%m-%d')}\n"
                 f"Time: {start_time_formatted}\n"
                 f"Staff Member: {staff_name or 'To be assigned'}\n"
-                f"Service: {service_name or 'General service'}\n\n"
-                "We look forward to serving you!\n\n"
+                f"Service: {service_name or 'General service'}\n"
+                f"{location_info_text}"
+                "\nWe look forward to serving you!\n\n"
                 "Best regards,\n"
                 f"{location_name}"
             )
@@ -1526,6 +1562,9 @@ def send_email_confirmation_customer_new(booking_id: int) -> str:
                 banner_url=banner_url,
                 booking_page_alias=booking_page_alias,
                 booking_access_token=booking_access_token,
+                location_address=location_address,
+                location_phone=location_phone,
+                location_website=location_website,
                 button_color_start="#28a745",
                 button_color_end="#20c997"
             )
@@ -1606,7 +1645,10 @@ def send_email_confirmation_customer_mod(booking_id: int, original_booking_id: i
                 vu.zone_tag_ids,
                 bp.logo_url,
                 bp.banner_url,
-                bp.alias
+                bp.alias,
+                li.address,
+                li.phone_with_country_code,
+                li.website_url
             FROM bookings b
             JOIN locations l
               ON b.tenant_id = l.tenant_id AND b.location_id = l.location_id
@@ -1618,6 +1660,8 @@ def send_email_confirmation_customer_mod(booking_id: int, original_booking_id: i
               ON b.tenant_id = vu.tenant_id AND b.venue_unit_id = vu.venue_unit_id
             LEFT JOIN booking_page bp
               ON b.tenant_id = bp.tenant_id AND b.location_id = bp.location_id AND bp.is_active = true
+            LEFT JOIN location_info li
+              ON b.tenant_id = li.tenant_id AND b.location_id = li.location_id
             WHERE b.booking_id = %s AND b.status = 'confirmed'
         """, (booking_id,))
         
@@ -1648,7 +1692,10 @@ def send_email_confirmation_customer_mod(booking_id: int, original_booking_id: i
             zone_tag_ids,
             logo_url,
             banner_url,
-            booking_page_alias
+            booking_page_alias,
+            location_address,
+            location_phone,
+            location_website
         ) = new_booking
 
         # Get booking access token for manage booking URL
@@ -1812,6 +1859,17 @@ def send_email_confirmation_customer_mod(booking_id: int, original_booking_id: i
             # Format start time to 12-hour format
             start_time_formatted = format_time_12hour(start_time)
 
+            # Prepare location information section
+            location_info_text = ""
+            if location_address or location_phone or location_website:
+                location_info_text = "\nLocation Information:\n"
+                if location_address:
+                    location_info_text += f"Address: {location_address}\n"
+                if location_phone:
+                    location_info_text += f"Phone: {location_phone}\n"
+                if location_website:
+                    location_info_text += f"Website: {location_website}\n"
+
             plain_text_body = (
                 f"Dear {customer_name},\n\n"
                 "Your booking has been successfully updated! Here are your new booking details:\n\n"
@@ -1821,6 +1879,7 @@ def send_email_confirmation_customer_mod(booking_id: int, original_booking_id: i
                 f"Time: {start_time_formatted}\n"
                 f"Party Size: {party_num} people\n"
                 f"{table_info_text}"
+                f"{location_info_text}"
                 f"\n{original_details_message}\n\n"
                 "We look forward to welcoming you at your updated time!\n\n"
                 "Best regards,\n"
@@ -1850,13 +1909,26 @@ def send_email_confirmation_customer_mod(booking_id: int, original_booking_id: i
                 original_service_name=orig_service_name,
                 booking_page_alias=booking_page_alias,
                 booking_access_token=booking_access_token,
+                location_address=location_address,
+                location_phone=location_phone,
+                location_website=location_website,
                 button_color_start="#ffc107",
                 button_color_end="#fd7e14"
             )
         else:
-            # Service booking modification
             # Format start time to 12-hour format
             start_time_formatted = format_time_12hour(start_time)
+
+            # Prepare location information section
+            location_info_text = ""
+            if location_address or location_phone or location_website:
+                location_info_text = "\nLocation Information:\n"
+                if location_address:
+                    location_info_text += f"Address: {location_address}\n"
+                if location_phone:
+                    location_info_text += f"Phone: {location_phone}\n"
+                if location_website:
+                    location_info_text += f"Website: {location_website}\n"
 
             plain_text_body = (
                 f"Dear {customer_name},\n\n"
@@ -1866,8 +1938,9 @@ def send_email_confirmation_customer_mod(booking_id: int, original_booking_id: i
                 f"Date: {start_time.strftime('%Y-%m-%d')}\n"
                 f"Time: {start_time_formatted}\n"
                 f"Staff Member: {staff_name or 'To be assigned'}\n"
-                f"Service: {service_name or 'General service'}\n\n"
-                f"{original_details_message}\n\n"
+                f"Service: {service_name or 'General service'}\n"
+                f"{location_info_text}"
+                f"\n{original_details_message}\n\n"
                 "We look forward to serving you at your updated appointment time!\n\n"
                 "Best regards,\n"
                 f"{location_name}"
@@ -1899,6 +1972,9 @@ def send_email_confirmation_customer_mod(booking_id: int, original_booking_id: i
                 original_service_name=orig_service_name,
                 booking_page_alias=booking_page_alias,
                 booking_access_token=booking_access_token,
+                location_address=location_address,
+                location_phone=location_phone,
+                location_website=location_website,
                 button_color_start="#ffc107",
                 button_color_end="#fd7e14"
             )
@@ -1979,7 +2055,10 @@ def send_email_confirmation_customer_can(booking_id: int) -> str:
                 vu.zone_tag_ids,
                 bp.logo_url,
                 bp.banner_url,
-                bp.alias
+                bp.alias,
+                li.address AS location_address,
+                li.phone_with_country_code AS location_phone,
+                li.website_url AS location_website
             FROM bookings b
             JOIN locations l
               ON b.tenant_id = l.tenant_id AND b.location_id = l.location_id
@@ -1991,6 +2070,8 @@ def send_email_confirmation_customer_can(booking_id: int) -> str:
               ON b.tenant_id = vu.tenant_id AND b.venue_unit_id = vu.venue_unit_id
             LEFT JOIN booking_page bp
               ON b.tenant_id = bp.tenant_id AND b.location_id = bp.location_id AND bp.is_active = true
+            LEFT JOIN location_info li
+              ON b.tenant_id = li.tenant_id AND b.location_id = li.location_id
             WHERE b.booking_id = %s AND b.status = 'cancelled'
         """, (booking_id,))
         
@@ -2021,7 +2102,10 @@ def send_email_confirmation_customer_can(booking_id: int) -> str:
             zone_tag_ids,
             logo_url,
             banner_url,
-            booking_page_alias
+            booking_page_alias,
+            location_address,
+            location_phone,
+            location_website
         ) = row
 
         # Get booking access token for manage booking URL
@@ -2095,6 +2179,17 @@ def send_email_confirmation_customer_can(booking_id: int) -> str:
             # Format start time to 12-hour format
             start_time_formatted = format_time_12hour(start_time)
 
+            # Prepare location information section
+            location_info_text = ""
+            if location_address or location_phone or location_website:
+                location_info_text = "\nLocation Information:\n"
+                if location_phone:
+                    location_info_text += f"Tel: {location_phone}\n"
+                if location_address:
+                    location_info_text += f"Address: {location_address}\n"
+                if location_website:
+                    location_info_text += f"Website: {location_website}\n"
+
             plain_text_body = (
                 f"Dear {customer_name},\n\n"
                 "Your booking has been cancelled. Here are the details of the cancelled booking:\n\n"
@@ -2104,6 +2199,7 @@ def send_email_confirmation_customer_can(booking_id: int) -> str:
                 f"Time: {start_time_formatted}\n"
                 f"Party Size: {party_num} people\n"
                 f"{table_info_text}"
+                f"{location_info_text}"
                 "\nIf you'd like to make a new reservation, please contact us.\n\n"
                 "Best regards,\n"
                 f"{location_name}"
@@ -2126,6 +2222,9 @@ def send_email_confirmation_customer_can(booking_id: int) -> str:
                 is_cancellation=True,
                 booking_page_alias=booking_page_alias,
                 booking_access_token=booking_access_token,
+                location_address=location_address,
+                location_phone=location_phone,
+                location_website=location_website,
                 button_color_start="#dc3545",
                 button_color_end="#e83e8c"
             )
@@ -2133,6 +2232,17 @@ def send_email_confirmation_customer_can(booking_id: int) -> str:
             # Service booking cancellation
             # Format start time to 12-hour format
             start_time_formatted = format_time_12hour(start_time)
+
+            # Prepare location information section
+            location_info_text = ""
+            if location_address or location_phone or location_website:
+                location_info_text = "\nLocation Information:\n"
+                if location_phone:
+                    location_info_text += f"Tel: {location_phone}\n"
+                if location_address:
+                    location_info_text += f"Address: {location_address}\n"
+                if location_website:
+                    location_info_text += f"Website: {location_website}\n"
 
             plain_text_body = (
                 f"Dear {customer_name},\n\n"
@@ -2142,8 +2252,9 @@ def send_email_confirmation_customer_can(booking_id: int) -> str:
                 f"Date: {start_time.strftime('%Y-%m-%d')}\n"
                 f"Time: {start_time_formatted}\n"
                 f"Staff Member: {staff_name or 'Not specified'}\n"
-                f"Service: {service_name or 'General service'}\n\n"
-                "If you'd like to schedule a new appointment, please contact us.\n\n"
+                f"Service: {service_name or 'General service'}\n"
+                f"{location_info_text}"
+                "\nIf you'd like to schedule a new appointment, please contact us.\n\n"
                 "Best regards,\n"
                 f"{location_name}"
             )
@@ -2168,6 +2279,9 @@ def send_email_confirmation_customer_can(booking_id: int) -> str:
                 is_cancellation=True,
                 booking_page_alias=booking_page_alias,
                 booking_access_token=booking_access_token,
+                location_address=location_address,
+                location_phone=location_phone,
+                location_website=location_website,
                 button_color_start="#dc3545",
                 button_color_end="#e83e8c"
             )
