@@ -8,7 +8,8 @@ from tasks.sms import (
     send_sms_confirmation_new, send_sms_confirmation_mod, send_sms_confirmation_can,
     send_email_confirmation_new_rest, send_email_confirmation_new, 
     send_email_confirmation_mod_rest, send_email_confirmation_mod,
-    send_email_confirmation_can_rest, send_email_confirmation_can
+    send_email_confirmation_can_rest, send_email_confirmation_can,
+    send_email_confirmation_customer_new, send_email_confirmation_customer_mod, send_email_confirmation_customer_can
 )
 from tasks.celery_app import app as celery_app
 
@@ -248,7 +249,14 @@ def api_send_sms():
         booking_id = data['booking_id']
         action = data['action']
         business_type = data['business_type']
-        notify_customer = data.get('notify_customer', True)  # Default to True if not provided
+        
+        # Handle notify_customer - default to True if not provided or empty string
+        notify_customer_raw = data.get('notify_customer', True)
+        if notify_customer_raw == "":
+            notify_customer = True  # Treat empty string as True
+        else:
+            notify_customer = notify_customer_raw
+        
         original_booking_id = data.get('original_booking_id')
         
         # Validate booking_id is an integer
@@ -261,7 +269,7 @@ def api_send_sms():
                 'provided': booking_id
             }), 400
         
-        # Validate notify_customer is a boolean
+        # Validate notify_customer is a boolean (after handling empty string)
         if not isinstance(notify_customer, bool):
             return jsonify({
                 'error': 'Invalid notify_customer',
@@ -316,18 +324,26 @@ def api_send_sms():
                     'type': 'sms',
                     'description': 'new booking SMS confirmation'
                 })
+                
+                # Customer email task (only if notify_customer is True)
+                customer_email_task = send_email_confirmation_customer_new.delay(booking_id)
+                tasks.append({
+                    'task_id': customer_email_task.id,
+                    'type': 'customer_email',
+                    'description': 'new booking customer email confirmation'
+                })
             
-            # Email task (different based on business type)
+            # Merchant email task (different based on business type) - always runs
             if business_type == 'rest':
                 email_task = send_email_confirmation_new_rest.delay(booking_id)
-                email_description = 'restaurant new booking email confirmation'
+                email_description = 'restaurant new booking merchant email confirmation'
             else:  # business_type == 'service'
                 email_task = send_email_confirmation_new.delay(booking_id)
-                email_description = 'service new booking email confirmation'
+                email_description = 'service new booking merchant email confirmation'
             
             tasks.append({
                 'task_id': email_task.id,
-                'type': 'email',
+                'type': 'merchant_email',
                 'description': email_description
             })
             
@@ -342,18 +358,26 @@ def api_send_sms():
                     'type': 'sms',
                     'description': 'booking modification SMS confirmation'
                 })
+                
+                # Customer email task (only if notify_customer is True)
+                customer_email_task = send_email_confirmation_customer_mod.delay(booking_id, original_booking_id)
+                tasks.append({
+                    'task_id': customer_email_task.id,
+                    'type': 'customer_email',
+                    'description': 'booking modification customer email confirmation'
+                })
             
-            # Email task (different based on business type)
+            # Merchant email task (different based on business type) - always runs
             if business_type == 'rest':
                 email_task = send_email_confirmation_mod_rest.delay(booking_id, original_booking_id)
-                email_description = 'restaurant booking modification email confirmation'
+                email_description = 'restaurant booking modification merchant email confirmation'
             else:  # business_type == 'service'
                 email_task = send_email_confirmation_mod.delay(booking_id, original_booking_id)
-                email_description = 'service booking modification email confirmation'
+                email_description = 'service booking modification merchant email confirmation'
             
             tasks.append({
                 'task_id': email_task.id,
-                'type': 'email',
+                'type': 'merchant_email',
                 'description': email_description
             })
             
@@ -368,18 +392,26 @@ def api_send_sms():
                     'type': 'sms',
                     'description': 'booking cancellation SMS confirmation'
                 })
+                
+                # Customer email task (only if notify_customer is True)
+                customer_email_task = send_email_confirmation_customer_can.delay(booking_id)
+                tasks.append({
+                    'task_id': customer_email_task.id,
+                    'type': 'customer_email',
+                    'description': 'booking cancellation customer email confirmation'
+                })
             
-            # Email task (different based on business type)
+            # Merchant email task (different based on business type) - always runs
             if business_type == 'rest':
                 email_task = send_email_confirmation_can_rest.delay(booking_id)
-                email_description = 'restaurant booking cancellation email confirmation'
+                email_description = 'restaurant booking cancellation merchant email confirmation'
             else:  # business_type == 'service'
                 email_task = send_email_confirmation_can.delay(booking_id)
-                email_description = 'service booking cancellation email confirmation'
+                email_description = 'service booking cancellation merchant email confirmation'
             
             tasks.append({
                 'task_id': email_task.id,
-                'type': 'email',
+                'type': 'merchant_email',
                 'description': email_description
             })
             
