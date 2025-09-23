@@ -359,8 +359,8 @@ def gen_availability_venue(tenant_id, location_id, location_tz, affected_date=No
         location_zone_tags = []
         cur.execute("""
             SELECT tag_id, name, slug
-            FROM venue_tag 
-            WHERE tenant_id = %s AND location_id = %s AND is_active = TRUE
+            FROM location_tag 
+            WHERE tenant_id = %s AND location_id = %s AND is_active = TRUE AND category_id = 1
             ORDER BY name
         """, (tenant_id, location_id))
         for tag_id, tag_name, tag_slug in cur.fetchall():
