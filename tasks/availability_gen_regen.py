@@ -111,7 +111,7 @@ def gen_availability(tenant_id, location_id, location_tz, affected_date=None):
             SELECT s.service_id, s.name, EXTRACT(EPOCH FROM s.duration)/60
             FROM location_services ls
             JOIN services s ON ls.tenant_id = s.tenant_id AND ls.service_id = s.service_id
-            WHERE ls.tenant_id = %s AND ls.location_id = %s
+            WHERE ls.tenant_id = %s AND ls.location_id = %s AND s.is_active = TRUE
             ORDER BY s.service_id
         """, (tenant_id, location_id))
         for row in cur.fetchall():
@@ -158,7 +158,7 @@ def gen_availability(tenant_id, location_id, location_tz, affected_date=None):
                     FROM staff s
                     JOIN staff_availability sa ON s.tenant_id = sa.tenant_id AND s.staff_id = sa.staff_id
                     WHERE s.tenant_id = %s AND sa.location_id = %s AND sa.type = 'one_time'
-                    AND sa.specific_date = %s AND sa.is_active = TRUE
+                    AND sa.specific_date = %s AND sa.is_active = TRUE AND s.is_active = TRUE
                 """, (tenant_id, location_id, current_date_str))
                 one_time_staff_rows = cur.fetchall()
                 
@@ -173,7 +173,7 @@ def gen_availability(tenant_id, location_id, location_tz, affected_date=None):
                         JOIN staff_availability sa ON s.tenant_id = sa.tenant_id AND s.staff_id = sa.staff_id
                         WHERE s.tenant_id = %s AND sa.location_id = %s AND sa.type = 'recurring'
                         AND sa.day_of_week = %s AND (sa.specific_date IS NULL OR sa.specific_date <> %s)
-                        AND sa.is_active = TRUE
+                        AND sa.is_active = TRUE AND s.is_active = TRUE
                         AND s.staff_id NOT IN %s
                     """, (tenant_id, location_id, db_day, current_date_str, tuple(staff_with_one_time)))
                 else:
@@ -183,7 +183,7 @@ def gen_availability(tenant_id, location_id, location_tz, affected_date=None):
                         JOIN staff_availability sa ON s.tenant_id = sa.tenant_id AND s.staff_id = sa.staff_id
                         WHERE s.tenant_id = %s AND sa.location_id = %s AND sa.type = 'recurring'
                         AND sa.day_of_week = %s AND (sa.specific_date IS NULL OR sa.specific_date <> %s)
-                        AND sa.is_active = TRUE
+                        AND sa.is_active = TRUE AND s.is_active = TRUE
                     """, (tenant_id, location_id, db_day, current_date_str))
                 recurring_staff_rows = cur.fetchall()
 
@@ -334,7 +334,7 @@ def gen_availability_venue(tenant_id, location_id, location_tz, affected_date=No
             SELECT s.service_id, s.name, EXTRACT(EPOCH FROM s.duration)/60
             FROM location_services ls
             JOIN services s ON ls.tenant_id = s.tenant_id AND ls.service_id = s.service_id
-            WHERE ls.tenant_id = %s AND ls.location_id = %s
+            WHERE ls.tenant_id = %s AND ls.location_id = %s AND s.is_active = TRUE
             ORDER BY s.service_id
         """, (tenant_id, location_id))
         for row in cur.fetchall():
@@ -399,7 +399,7 @@ def gen_availability_venue(tenant_id, location_id, location_tz, affected_date=No
                     FROM venue_unit vu
                     JOIN venue_availability va ON vu.tenant_id = va.tenant_id AND vu.venue_unit_id = va.venue_unit_id
                     WHERE vu.tenant_id = %s AND va.location_id = %s AND va.type = 'one_time'
-                    AND va.specific_date = %s AND va.is_active = TRUE
+                    AND va.specific_date = %s AND va.is_active = TRUE AND vu.is_active = TRUE
                 """, (tenant_id, location_id, current_date_str))
                 one_time_venue_rows = cur.fetchall()
                 
@@ -414,7 +414,7 @@ def gen_availability_venue(tenant_id, location_id, location_tz, affected_date=No
                         JOIN venue_availability va ON vu.tenant_id = va.tenant_id AND vu.venue_unit_id = va.venue_unit_id
                         WHERE vu.tenant_id = %s AND va.location_id = %s AND va.type = 'recurring'
                         AND va.day_of_week = %s AND (va.specific_date IS NULL OR va.specific_date <> %s)
-                        AND va.is_active = TRUE
+                        AND va.is_active = TRUE AND vu.is_active = TRUE
                         AND vu.venue_unit_id NOT IN %s
                     """, (tenant_id, location_id, db_day, current_date_str, tuple(venues_with_one_time)))
                 else:
@@ -424,7 +424,7 @@ def gen_availability_venue(tenant_id, location_id, location_tz, affected_date=No
                         JOIN venue_availability va ON vu.tenant_id = va.tenant_id AND vu.venue_unit_id = va.venue_unit_id
                         WHERE vu.tenant_id = %s AND va.location_id = %s AND va.type = 'recurring'
                         AND va.day_of_week = %s AND (va.specific_date IS NULL OR va.specific_date <> %s)
-                        AND va.is_active = TRUE
+                        AND va.is_active = TRUE AND vu.is_active = TRUE
                     """, (tenant_id, location_id, db_day, current_date_str))
                 recurring_venue_rows = cur.fetchall()
 
