@@ -25,7 +25,7 @@ from pathlib import Path
 class AvatarAPI:
     """API class for serving avatar catalog data."""
     
-    def __init__(self, catalog_file: str = "speako-dashboard-avatar/avatar_catalog.json"):
+    def __init__(self, catalog_file: str = "speako-dashboard-avatar/avatar_catalog_simple.json"):
         """Initialize with catalog file path."""
         self.catalog_file = catalog_file
         self.catalog = self.load_catalog()
@@ -37,10 +37,10 @@ class AvatarAPI:
                 with open(self.catalog_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
             else:
-                return {"avatars": [], "metadata": {}}
+                return {"avatars": [], "metadata": {"total": 0}}
         except Exception as e:
             print(f"Error loading avatar catalog: {str(e)}")
-            return {"avatars": [], "metadata": {}}
+            return {"avatars": [], "metadata": {"total": 0}}
     
     def refresh_catalog(self):
         """Refresh catalog from file."""
@@ -65,48 +65,41 @@ class AvatarAPI:
         filtered_avatars = []
         
         for avatar in avatars:
-            analysis = avatar.get("analysis", {})
+            tags = avatar.get("tags", [])
+            tags_lower = [tag.lower() for tag in tags]
             match = True
             
-            # Apply filters
+            # Apply filters based on tags
             if "gender" in filters and filters["gender"]:
-                if analysis.get("gender", "").lower() != filters["gender"].lower():
+                if filters["gender"].lower() not in tags_lower:
                     match = False
             
             if "race" in filters and filters["race"]:
-                if analysis.get("race", "").lower() != filters["race"].lower():
+                if filters["race"].lower() not in tags_lower:
                     match = False
             
             if "occupation" in filters and filters["occupation"]:
-                if analysis.get("occupation", "").lower() != filters["occupation"].lower():
+                if filters["occupation"].lower() not in tags_lower:
                     match = False
             
             if "style" in filters and filters["style"]:
-                if analysis.get("style", "").lower() != filters["style"].lower():
+                if filters["style"].lower() not in tags_lower:
                     match = False
             
             if "age_group" in filters and filters["age_group"]:
-                if analysis.get("age_group", "").lower() != filters["age_group"].lower():
+                if filters["age_group"].lower() not in tags_lower:
                     match = False
             
-            # Tags search
+            # Tags search (any of the provided tags must match)
             if "tags" in filters and filters["tags"]:
                 search_tags = [tag.lower() for tag in filters["tags"]]
-                avatar_tags = [tag.lower() for tag in analysis.get("tags", [])]
-                if not any(tag in avatar_tags for tag in search_tags):
+                if not any(tag in tags_lower for tag in search_tags):
                     match = False
             
-            # Text search
+            # Text search across all tags
             if "search" in filters and filters["search"]:
                 search_term = filters["search"].lower()
-                searchable_text = " ".join([
-                    analysis.get("occupation", ""),
-                    analysis.get("race", ""),
-                    analysis.get("gender", ""),
-                    analysis.get("style", ""),
-                    " ".join(analysis.get("tags", [])),
-                    " ".join(analysis.get("outfit", []))
-                ]).lower()
+                searchable_text = " ".join(tags).lower()
                 
                 if search_term not in searchable_text:
                     match = False
@@ -142,34 +135,57 @@ class AvatarAPI:
         """Get statistics about avatars."""
         avatars = self.catalog.get("avatars", [])
         
-        stats = {
-            "total_avatars": len(avatars),
-            "occupations": {},
-            "races": {},
-            "genders": {},
-            "styles": {},
-            "age_groups": {}
-        }
+        # Count occurrences of each tag
+        tag_counts = {}
+        total_avatars = len(avatars)
         
         for avatar in avatars:
-            analysis = avatar.get("analysis", {})
-            
-            # Count categories
-            for category, key in [
-                ("occupations", "occupation"),
-                ("races", "race"), 
-                ("genders", "gender"),
-                ("styles", "style"),
-                ("age_groups", "age_group")
-            ]:
-                value = analysis.get(key, "unknown")
-                if not value or value.strip() == "":
-                    value = "unknown"
-                stats[category][value] = stats[category].get(value, 0) + 1
+            tags = avatar.get("tags", [])
+            for tag in tags:
+                tag_lower = tag.lower()
+                tag_counts[tag_lower] = tag_counts.get(tag_lower, 0) + 1
+        
+        # Categorize tags
+        gender_tags = {}
+        occupation_tags = {}
+        race_tags = {}
+        style_tags = {}
+        age_tags = {}
+        other_tags = {}
+        
+        # Common categorization patterns
+        genders = ["male", "female", "non-binary"]
+        occupations = ["businessman", "businessperson", "teacher", "farmer", "adventurer", "fashion enthusiast"]
+        races = ["caucasian", "black", "hispanic", "asian", "indian"]
+        styles = ["cartoon", "professional", "casual", "formal"]
+        ages = ["young", "middle-aged", "senior"]
+        
+        for tag, count in tag_counts.items():
+            if tag in genders:
+                gender_tags[tag] = count
+            elif tag in occupations:
+                occupation_tags[tag] = count
+            elif tag in races:
+                race_tags[tag] = count
+            elif tag in styles:
+                style_tags[tag] = count
+            elif tag in ages:
+                age_tags[tag] = count
+            else:
+                other_tags[tag] = count
         
         return {
             "success": True,
-            "data": stats
+            "data": {
+                "total_avatars": total_avatars,
+                "genders": gender_tags,
+                "occupations": occupation_tags,
+                "races": race_tags,
+                "styles": style_tags,
+                "age_groups": age_tags,
+                "other_tags": other_tags,
+                "all_tags": tag_counts
+            }
         }
 
 # Initialize avatar API
@@ -828,6 +844,16 @@ def api_avatar_health_check():
     """
     try:
         catalog_loaded = len(avatar_api.catalog.get("avatars", [])) > 0
+        
+        # Get sample avatar structure for debugging
+        sample_avatar = None
+        avatar_structure = None
+        if catalog_loaded:
+            avatars = avatar_api.catalog.get("avatars", [])
+            if avatars:
+                sample_avatar = avatars[0]
+                avatar_structure = list(sample_avatar.keys())
+        
         return jsonify({
             "success": True,
             "status": "healthy",
@@ -835,7 +861,11 @@ def api_avatar_health_check():
             "catalog_loaded": catalog_loaded,
             "total_avatars": len(avatar_api.catalog.get("avatars", [])),
             "catalog_file": avatar_api.catalog_file,
-            "custom_domain": avatar_api.catalog.get("metadata", {}).get("custom_domain", "N/A")
+            "catalog_file_exists": os.path.exists(avatar_api.catalog_file),
+            "sample_avatar_structure": avatar_structure,
+            "is_simplified_format": avatar_structure == ['id', 'url', 'tags'] if avatar_structure else None,
+            "working_directory": os.getcwd(),
+            "metadata": avatar_api.catalog.get("metadata", {})
         }), 200
         
     except Exception as e:
@@ -843,4 +873,55 @@ def api_avatar_health_check():
             "success": False,
             "status": "unhealthy",
             "error": str(e)
+        }), 500
+
+
+@app.route('/api/avatars/debug', methods=['GET'])
+def api_avatar_debug():
+    """
+    Debug endpoint to check avatar catalog loading (no authentication required)
+    """
+    try:
+        debug_info = {
+            "working_directory": os.getcwd(),
+            "catalog_file_path": avatar_api.catalog_file,
+            "absolute_catalog_path": os.path.abspath(avatar_api.catalog_file),
+            "catalog_file_exists": os.path.exists(avatar_api.catalog_file),
+            "total_avatars_loaded": len(avatar_api.catalog.get("avatars", [])),
+            "metadata": avatar_api.catalog.get("metadata", {}),
+            "files_in_speako_dashboard_avatar": []
+        }
+        
+        # Check what files exist in the speako-dashboard-avatar directory
+        avatar_dir = "speako-dashboard-avatar"
+        if os.path.exists(avatar_dir):
+            files = os.listdir(avatar_dir)
+            catalog_files = [f for f in files if f.startswith('avatar_catalog') and f.endswith('.json')]
+            debug_info["files_in_speako_dashboard_avatar"] = catalog_files
+            
+            # Get file sizes for catalog files
+            debug_info["catalog_file_sizes"] = {}
+            for file in catalog_files:
+                file_path = os.path.join(avatar_dir, file)
+                if os.path.exists(file_path):
+                    debug_info["catalog_file_sizes"][file] = os.path.getsize(file_path)
+        
+        # Check avatar structure
+        avatars = avatar_api.catalog.get("avatars", [])
+        if avatars:
+            first_avatar = avatars[0]
+            debug_info["first_avatar_keys"] = list(first_avatar.keys())
+            debug_info["is_simplified_format"] = set(first_avatar.keys()) == {'id', 'url', 'tags'}
+            debug_info["first_avatar_sample"] = {
+                "id": first_avatar.get("id"),
+                "url_length": len(first_avatar.get("url", "")),
+                "tags_count": len(first_avatar.get("tags", []))
+            }
+        
+        return jsonify(debug_info), 200
+        
+    except Exception as e:
+        return jsonify({
+            "error": "Debug endpoint failed",
+            "message": str(e)
         }), 500
