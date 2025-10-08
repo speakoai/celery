@@ -38,3 +38,6 @@ python-dateutil
 tzdata
 twilio
 sendgrid
+openai
+requests
+pathlib

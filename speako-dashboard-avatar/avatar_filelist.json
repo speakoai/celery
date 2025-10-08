@@ -1,0 +1,2405 @@
+{
+  "generated_at": "2025-10-08T17:17:16.109494",
+  "total_files": 110,
+  "files": [
+    {
+      "id": "avatar_001",
+      "filename": "female_sunglasses_earrings_cartoon.webp",
+      "original_name": "Asset 100512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_sunglasses_earrings_cartoon.webp",
+      "tags": [
+        "sunglasses",
+        "blonde",
+        "smiling",
+        "cartoon",
+        "earrings",
+        "tank top",
+        "female",
+        "young"
+      ],
+      "occupation": "",
+      "race": "",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "sunglasses",
+        "earrings",
+        "tank top"
+      ]
+    },
+    {
+      "id": "avatar_002",
+      "filename": "male_businessman_shirt_bowtie.webp",
+      "original_name": "Asset 101512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_businessman_shirt_bowtie.webp",
+      "tags": [
+        "business",
+        "smiling",
+        "cartoon",
+        "bowtie",
+        "curly hair"
+      ],
+      "occupation": "businessman",
+      "race": "unknown",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "shirt",
+        "bowtie"
+      ]
+    },
+    {
+      "id": "avatar_003",
+      "filename": "female_businessperson_jacket_earrings.webp",
+      "original_name": "Asset 102512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_businessperson_jacket_earrings.webp",
+      "tags": [
+        "business",
+        "professional",
+        "sunglasses",
+        "blonde",
+        "confident",
+        "cartoon"
+      ],
+      "occupation": "businessperson",
+      "race": "unknown",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "jacket",
+        "earrings",
+        "sunglasses"
+      ]
+    },
+    {
+      "id": "avatar_004",
+      "filename": "redberet_orangescarf_cartoon.webp",
+      "original_name": "Asset 103512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/redberet_orangescarf_cartoon.webp",
+      "tags": [
+        "young",
+        "cartoon",
+        "smiling",
+        "beret",
+        "scarf"
+      ],
+      "occupation": "",
+      "race": "",
+      "gender": "",
+      "style": "cartoon",
+      "outfit": [
+        "red beret",
+        "orange scarf",
+        "red top"
+      ]
+    },
+    {
+      "id": "avatar_005",
+      "filename": "male_caucasian_businessman_suit.webp",
+      "original_name": "Asset 104512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_businessman_suit.webp",
+      "tags": [
+        "businessman",
+        "cartoon",
+        "smiling",
+        "suit",
+        "short hair",
+        "front-facing"
+      ],
+      "occupation": "businessman",
+      "race": "caucasian",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "suit",
+        "tie"
+      ]
+    },
+    {
+      "id": "avatar_006",
+      "filename": "male_jacket_cartoon.webp",
+      "original_name": "Asset 10512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_jacket_cartoon.webp",
+      "tags": [
+        "cartoon",
+        "smiling",
+        "young",
+        "male",
+        "short hair",
+        "jacket"
+      ],
+      "occupation": "",
+      "race": "",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "jacket"
+      ]
+    },
+    {
+      "id": "avatar_007",
+      "filename": "male_caucasian_adventurer_hat.webp",
+      "original_name": "Asset 105512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_adventurer_hat.webp",
+      "tags": [
+        "adventurer",
+        "bearded",
+        "hat",
+        "cartoon",
+        "smiling"
+      ],
+      "occupation": "adventurer",
+      "race": "caucasian",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "hat",
+        "red vest",
+        "white shirt"
+      ]
+    },
+    {
+      "id": "avatar_008",
+      "filename": "female_beanie_scarf_cartoon.webp",
+      "original_name": "Asset 106512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_beanie_scarf_cartoon.webp",
+      "tags": [
+        "beanie",
+        "scarf",
+        "smiling",
+        "cartoon"
+      ],
+      "occupation": "",
+      "race": "",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "beanie",
+        "scarf",
+        "coat"
+      ]
+    },
+    {
+      "id": "avatar_009",
+      "filename": "male_casualshirt_cartoon.webp",
+      "original_name": "Asset 107512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_casualshirt_cartoon.webp",
+      "tags": [
+        "cartoon",
+        "smiling",
+        "young",
+        "casual"
+      ],
+      "occupation": "unknown",
+      "race": "unknown",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "casual shirt"
+      ]
+    },
+    {
+      "id": "avatar_010",
+      "filename": "female_redtop_cartoon.webp",
+      "original_name": "Asset 108512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_redtop_cartoon.webp",
+      "tags": [
+        "female",
+        "young",
+        "cartoon",
+        "smiling",
+        "phone",
+        "front-facing"
+      ],
+      "occupation": "",
+      "race": "",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "red top"
+      ]
+    },
+    {
+      "id": "avatar_011",
+      "filename": "female_teacher_glasses_pearls.webp",
+      "original_name": "Asset 109512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_teacher_glasses_pearls.webp",
+      "tags": [
+        "glasses",
+        "smiling",
+        "cartoon",
+        "female",
+        "young"
+      ],
+      "occupation": "teacher",
+      "race": "",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "glasses",
+        "pearls",
+        "vest"
+      ]
+    },
+    {
+      "id": "avatar_012",
+      "filename": "female_hispanic_fashionenthusiast.webp",
+      "original_name": "Asset 110512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_hispanic_fashionenthusiast.webp",
+      "tags": [
+        "smiling",
+        "green bandana",
+        "earrings",
+        "short curly hair",
+        "orange top",
+        "cartoon"
+      ],
+      "occupation": "fashion enthusiast",
+      "race": "hispanic",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "green bandana",
+        "orange top",
+        "earrings"
+      ]
+    },
+    {
+      "id": "avatar_013",
+      "filename": "male_black_businessman_suit.webp",
+      "original_name": "Asset 111512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_black_businessman_suit.webp",
+      "tags": [
+        "professional",
+        "formal",
+        "happy",
+        "stylish"
+      ],
+      "occupation": "businessman",
+      "race": "black",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "suit",
+        "tie",
+        "glasses"
+      ]
+    },
+    {
+      "id": "avatar_014",
+      "filename": "female_caucasian_farmer_hat.webp",
+      "original_name": "Asset 112512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_caucasian_farmer_hat.webp",
+      "tags": [
+        "friendly",
+        "outdoorsy",
+        "illustrated"
+      ],
+      "occupation": "farmer",
+      "race": "caucasian",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "hat",
+        "overalls"
+      ]
+    },
+    {
+      "id": "avatar_015",
+      "filename": "female_caucasian_businessperson_vest.webp",
+      "original_name": "Asset 11512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_caucasian_businessperson_vest.webp",
+      "tags": [
+        "business",
+        "professional",
+        "friendly"
+      ],
+      "occupation": "businessperson",
+      "race": "caucasian",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "vest",
+        "tie",
+        "earrings"
+      ]
+    },
+    {
+      "id": "avatar_016",
+      "filename": "male_caucasian_businessman_glasses.webp",
+      "original_name": "Asset 12512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_businessman_glasses.webp",
+      "tags": [
+        "glasses",
+        "white hair",
+        "suspenders",
+        "cartoon"
+      ],
+      "occupation": "businessman",
+      "race": "caucasian",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "glasses",
+        "suspenders",
+        "shirt"
+      ]
+    },
+    {
+      "id": "avatar_017",
+      "filename": "female_sunglasses_cartoon.webp",
+      "original_name": "Asset 13512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_sunglasses_cartoon.webp",
+      "tags": [
+        "blonde",
+        "sunglasses",
+        "cartoon",
+        "smiling"
+      ],
+      "occupation": "unknown",
+      "race": "unknown",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "sunglasses"
+      ]
+    },
+    {
+      "id": "avatar_018",
+      "filename": "female_redtop_cartoon_20251008_171939.webp",
+      "original_name": "Asset 14512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_redtop_cartoon_20251008_171939.webp",
+      "tags": [
+        "female",
+        "young",
+        "smiling",
+        "blonde",
+        "cartoon",
+        "red top"
+      ],
+      "occupation": "",
+      "race": "",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "red top"
+      ]
+    },
+    {
+      "id": "avatar_019",
+      "filename": "male_caucasian_businessman_suit_20251008_171945.webp",
+      "original_name": "Asset 15512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_businessman_suit_20251008_171945.webp",
+      "tags": [
+        "businessman",
+        "suit",
+        "bowtie",
+        "cartoon",
+        "smiling",
+        "male"
+      ],
+      "occupation": "businessman",
+      "race": "caucasian",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "suit",
+        "bowtie"
+      ]
+    },
+    {
+      "id": "avatar_020",
+      "filename": "female_blackdress_pearlnecklace_cartoon.webp",
+      "original_name": "Asset 16512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_blackdress_pearlnecklace_cartoon.webp",
+      "tags": [
+        "avatar",
+        "cartoon",
+        "smiling",
+        "female",
+        "young",
+        "black dress",
+        "pearl necklace",
+        "front-facing"
+      ],
+      "occupation": "",
+      "race": "",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "black dress",
+        "pearl necklace"
+      ]
+    },
+    {
+      "id": "avatar_021",
+      "filename": "male_caucasian_businessman_jacket.webp",
+      "original_name": "Asset 17512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_businessman_jacket.webp",
+      "tags": [
+        "businessman",
+        "cartoon",
+        "smiling",
+        "short hair",
+        "jacket",
+        "collared shirt",
+        "middle-aged"
+      ],
+      "occupation": "businessman",
+      "race": "caucasian",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "jacket",
+        "collared shirt"
+      ]
+    },
+    {
+      "id": "avatar_022",
+      "filename": "glasses_redshirt_cartoon.webp",
+      "original_name": "Asset 18512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/glasses_redshirt_cartoon.webp",
+      "tags": [
+        "cartoon",
+        "glasses",
+        "red shirt",
+        "friendly expression"
+      ],
+      "occupation": "unknown",
+      "race": "unknown",
+      "gender": "unknown",
+      "style": "cartoon",
+      "outfit": [
+        "glasses",
+        "red shirt"
+      ]
+    },
+    {
+      "id": "avatar_023",
+      "filename": "jacket_stripedshirt_cartoon.webp",
+      "original_name": "Asset 19512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/jacket_stripedshirt_cartoon.webp",
+      "tags": [
+        "avatar",
+        "young",
+        "smiling",
+        "cartoon",
+        "jacket",
+        "striped shirt",
+        "dark hair"
+      ],
+      "occupation": "unknown",
+      "race": "unknown",
+      "gender": "unknown",
+      "style": "cartoon",
+      "outfit": [
+        "jacket",
+        "striped shirt"
+      ]
+    },
+    {
+      "id": "avatar_024",
+      "filename": "female_casualshirt_cartoon.webp",
+      "original_name": "Asset 20512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_casualshirt_cartoon.webp",
+      "tags": [
+        "cartoon",
+        "female",
+        "smiling",
+        "blonde",
+        "young",
+        "casual"
+      ],
+      "occupation": "unknown",
+      "race": "unknown",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "casual shirt"
+      ]
+    },
+    {
+      "id": "avatar_025",
+      "filename": "scarf_jacket_cartoon.webp",
+      "original_name": "Asset 21512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/scarf_jacket_cartoon.webp",
+      "tags": [
+        "cartoon",
+        "smiling",
+        "front-facing",
+        "scarf",
+        "jacket",
+        "young"
+      ],
+      "occupation": "unknown",
+      "race": "unknown",
+      "gender": "unknown",
+      "style": "cartoon",
+      "outfit": [
+        "scarf",
+        "jacket"
+      ]
+    },
+    {
+      "id": "avatar_026",
+      "filename": "female_undetermined_hijab_cartoon.webp",
+      "original_name": "Asset 22512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_undetermined_hijab_cartoon.webp",
+      "tags": [
+        "cartoon",
+        "hijab",
+        "smiling",
+        "female",
+        "young",
+        "front-facing"
+      ],
+      "occupation": "undetermined",
+      "race": "undetermined",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "hijab"
+      ]
+    },
+    {
+      "id": "avatar_027",
+      "filename": "male_indian_businessman_turban.webp",
+      "original_name": "Asset 23512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_indian_businessman_turban.webp",
+      "tags": [
+        "turban",
+        "beard",
+        "happy",
+        "cartoon",
+        "male",
+        "indian"
+      ],
+      "occupation": "businessman",
+      "race": "indian",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "turban"
+      ]
+    },
+    {
+      "id": "avatar_028",
+      "filename": "male_asian_businessman_glasses.webp",
+      "original_name": "Asset 24512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_asian_businessman_glasses.webp",
+      "tags": [
+        "professional",
+        "formal",
+        "business",
+        "smiling"
+      ],
+      "occupation": "businessman",
+      "race": "asian",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "glasses",
+        "suit",
+        "tie"
+      ]
+    },
+    {
+      "id": "avatar_029",
+      "filename": "male_caucasian_businessman_suit_20251008_172108.webp",
+      "original_name": "Asset 2512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_businessman_suit_20251008_172108.webp",
+      "tags": [
+        "cartoon",
+        "smiling",
+        "blue jacket",
+        "business",
+        "young male"
+      ],
+      "occupation": "businessman",
+      "race": "caucasian",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "suit",
+        "blue jacket"
+      ]
+    },
+    {
+      "id": "avatar_030",
+      "filename": "female_whitetop_necklace_cartoon.webp",
+      "original_name": "Asset 25512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_whitetop_necklace_cartoon.webp",
+      "tags": [
+        "smiling",
+        "cartoon",
+        "young",
+        "necklace",
+        "short hair",
+        "solid background",
+        "front-facing"
+      ],
+      "occupation": "unknown",
+      "race": "unknown",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "white top",
+        "necklace"
+      ]
+    },
+    {
+      "id": "avatar_031",
+      "filename": "female_casualprofessional_hat_earrings.webp",
+      "original_name": "Asset 26512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_casualprofessional_hat_earrings.webp",
+      "tags": [
+        "casual",
+        "friendly",
+        "accessories",
+        "headwear",
+        "youthful"
+      ],
+      "occupation": "casual professional",
+      "race": "unknown",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "hat",
+        "earrings",
+        "scarf"
+      ]
+    },
+    {
+      "id": "avatar_032",
+      "filename": "male_caucasian_businessman_shirt.webp",
+      "original_name": "Asset 27512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_businessman_shirt.webp",
+      "tags": [
+        "businessman",
+        "male",
+        "senior",
+        "cartoon",
+        "smiling",
+        "grey hair",
+        "shirt",
+        "tie"
+      ],
+      "occupation": "businessman",
+      "race": "caucasian",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "shirt",
+        "tie"
+      ]
+    },
+    {
+      "id": "avatar_033",
+      "filename": "female_black_teacher_glasses.webp",
+      "original_name": "Asset 28512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_black_teacher_glasses.webp",
+      "tags": [
+        "teacher",
+        "glasses",
+        "smiling",
+        "red shirt",
+        "cartoon"
+      ],
+      "occupation": "teacher",
+      "race": "black",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "glasses",
+        "red shirt"
+      ]
+    },
+    {
+      "id": "avatar_034",
+      "filename": "purpleshirt_cartoon.webp",
+      "original_name": "Asset 29512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/purpleshirt_cartoon.webp",
+      "tags": [
+        "avatar",
+        "young",
+        "cartoon",
+        "smiling",
+        "curly hair",
+        "purple shirt"
+      ],
+      "occupation": "unknown",
+      "race": "unknown",
+      "gender": "unknown",
+      "style": "cartoon",
+      "outfit": [
+        "purple shirt"
+      ]
+    },
+    {
+      "id": "avatar_035",
+      "filename": "male_farmer_hat_beard.webp",
+      "original_name": "Asset 30512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_farmer_hat_beard.webp",
+      "tags": [
+        "hat",
+        "beard",
+        "red hair",
+        "smiling",
+        "cartoon style",
+        "farmer",
+        "friendly expression"
+      ],
+      "occupation": "farmer",
+      "race": "unknown",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "hat",
+        "beard",
+        "overalls"
+      ]
+    },
+    {
+      "id": "avatar_036",
+      "filename": "whitetop_earrings_cartoon.webp",
+      "original_name": "Asset 31512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/whitetop_earrings_cartoon.webp",
+      "tags": [
+        "cartoon",
+        "smiling",
+        "earrings",
+        "curly hair"
+      ],
+      "occupation": "unknown",
+      "race": "unknown",
+      "gender": "unknown",
+      "style": "cartoon",
+      "outfit": [
+        "white top",
+        "earrings"
+      ]
+    },
+    {
+      "id": "avatar_037",
+      "filename": "male_caucasian_businessman_glasses_20251008_172216.webp",
+      "original_name": "Asset 32512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_businessman_glasses_20251008_172216.webp",
+      "tags": [
+        "businessman",
+        "glasses",
+        "suit",
+        "cartoon",
+        "smiling",
+        "young"
+      ],
+      "occupation": "businessman",
+      "race": "caucasian",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "glasses",
+        "suit"
+      ]
+    },
+    {
+      "id": "avatar_038",
+      "filename": "greenshirt_cartoon.webp",
+      "original_name": "Asset 33512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/greenshirt_cartoon.webp",
+      "tags": [
+        "cartoon",
+        "smiling",
+        "young",
+        "green shirt",
+        "front-facing"
+      ],
+      "occupation": "unknown",
+      "race": "unknown",
+      "gender": "unknown",
+      "style": "cartoon",
+      "outfit": [
+        "green shirt"
+      ]
+    },
+    {
+      "id": "avatar_039",
+      "filename": "female_tanktop_earrings_cartoon.webp",
+      "original_name": "Asset 34512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_tanktop_earrings_cartoon.webp",
+      "tags": [
+        "cartoon",
+        "friendly",
+        "young",
+        "blonde",
+        "dreadlocks",
+        "female",
+        "earrings",
+        "tank top",
+        "front-facing"
+      ],
+      "occupation": "",
+      "race": "",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "tank top",
+        "earrings"
+      ]
+    },
+    {
+      "id": "avatar_040",
+      "filename": "female_creativeprofessional_tshirt_glasses.webp",
+      "original_name": "Asset 3512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_creativeprofessional_tshirt_glasses.webp",
+      "tags": [
+        "creative",
+        "stylish",
+        "colorful",
+        "trendy",
+        "playful"
+      ],
+      "occupation": "creative professional",
+      "race": "unknown",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "t-shirt",
+        "glasses",
+        "earrings"
+      ]
+    },
+    {
+      "id": "avatar_041",
+      "filename": "tanktop_cartoon.webp",
+      "original_name": "Asset 35512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/tanktop_cartoon.webp",
+      "tags": [
+        "cartoon",
+        "smiling",
+        "red hair",
+        "tank top",
+        "young"
+      ],
+      "occupation": "unknown",
+      "race": "unknown",
+      "gender": "unknown",
+      "style": "cartoon",
+      "outfit": [
+        "tank top"
+      ]
+    },
+    {
+      "id": "avatar_042",
+      "filename": "female_bandana_overalls_cartoon.webp",
+      "original_name": "Asset 36512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_bandana_overalls_cartoon.webp",
+      "tags": [
+        "bandana",
+        "overalls",
+        "smiling",
+        "cartoon",
+        "young",
+        "female"
+      ],
+      "occupation": "",
+      "race": "",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "bandana",
+        "overalls"
+      ]
+    },
+    {
+      "id": "avatar_043",
+      "filename": "male_artist_hat_jacket.webp",
+      "original_name": "Asset 37512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_artist_hat_jacket.webp",
+      "tags": [
+        "hat",
+        "jacket",
+        "smiling",
+        "cartoon",
+        "young",
+        "male"
+      ],
+      "occupation": "artist",
+      "race": "unknown",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "hat",
+        "jacket"
+      ]
+    },
+    {
+      "id": "avatar_044",
+      "filename": "sweater_tshirt_cartoon.webp",
+      "original_name": "Asset 38512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/sweater_tshirt_cartoon.webp",
+      "tags": [
+        "cartoon",
+        "smiling",
+        "curly hair",
+        "casual",
+        "front-facing",
+        "solid background"
+      ],
+      "occupation": "",
+      "race": "",
+      "gender": "",
+      "style": "cartoon",
+      "outfit": [
+        "sweater",
+        "t-shirt"
+      ]
+    },
+    {
+      "id": "avatar_045",
+      "filename": "female_unspecified_business_sleevelessblouse.webp",
+      "original_name": "Asset 39512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_unspecified_business_sleevelessblouse.webp",
+      "tags": [
+        "cartoon",
+        "female",
+        "smiling",
+        "short hair",
+        "earrings"
+      ],
+      "occupation": "business",
+      "race": "unspecified",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "sleeveless blouse",
+        "earrings"
+      ]
+    },
+    {
+      "id": "avatar_046",
+      "filename": "male_hat_cartoon.webp",
+      "original_name": "Asset 40512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_hat_cartoon.webp",
+      "tags": [
+        "cartoon",
+        "smiling",
+        "hat",
+        "beard",
+        "male"
+      ],
+      "occupation": "unknown",
+      "race": "unknown",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "hat"
+      ]
+    },
+    {
+      "id": "avatar_047",
+      "filename": "female_business_suit_glasses.webp",
+      "original_name": "Asset 41512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_business_suit_glasses.webp",
+      "tags": [
+        "business",
+        "glasses",
+        "short hair",
+        "smiling",
+        "cartoon"
+      ],
+      "occupation": "business",
+      "race": "unknown",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "suit",
+        "glasses",
+        "earrings"
+      ]
+    },
+    {
+      "id": "avatar_048",
+      "filename": "female_tanktop_earrings_cartoon_20251008_172351.webp",
+      "original_name": "Asset 42512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_tanktop_earrings_cartoon_20251008_172351.webp",
+      "tags": [
+        "cartoon",
+        "female",
+        "smiling",
+        "earrings",
+        "tank top",
+        "brunette",
+        "front-facing",
+        "solid background"
+      ],
+      "occupation": "",
+      "race": "",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "tank top",
+        "earrings"
+      ]
+    },
+    {
+      "id": "avatar_049",
+      "filename": "male_caucasian_student_tshirt.webp",
+      "original_name": "Asset 43512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_student_tshirt.webp",
+      "tags": [
+        "cartoon",
+        "smiling",
+        "young",
+        "short hair",
+        "t-shirt"
+      ],
+      "occupation": "student",
+      "race": "caucasian",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "t-shirt"
+      ]
+    },
+    {
+      "id": "avatar_050",
+      "filename": "female_unidentified_businesswoman_whiteblouse.webp",
+      "original_name": "Asset 44512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_unidentified_businesswoman_whiteblouse.webp",
+      "tags": [
+        "cartoon",
+        "smiling",
+        "short hair",
+        "white blouse",
+        "earrings"
+      ],
+      "occupation": "businesswoman",
+      "race": "unidentified",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "white blouse",
+        "tie",
+        "earrings"
+      ]
+    },
+    {
+      "id": "avatar_051",
+      "filename": "male_caucasian_businessman_hat.webp",
+      "original_name": "Asset 4512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_businessman_hat.webp",
+      "tags": [
+        "business",
+        "hat",
+        "smiling",
+        "cartoon",
+        "male",
+        "young"
+      ],
+      "occupation": "businessman",
+      "race": "caucasian",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "hat",
+        "shirt",
+        "tie"
+      ]
+    },
+    {
+      "id": "avatar_052",
+      "filename": "male_student_blueshirt_pinkvest.webp",
+      "original_name": "Asset 45512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_student_blueshirt_pinkvest.webp",
+      "tags": [
+        "young",
+        "male",
+        "cartoon",
+        "smiling",
+        "red hair",
+        "solid background",
+        "vest",
+        "shirt"
+      ],
+      "occupation": "student",
+      "race": "unknown",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "blue shirt",
+        "pink vest"
+      ]
+    },
+    {
+      "id": "avatar_053",
+      "filename": "female_caucasian_teacher_pinkshirt.webp",
+      "original_name": "Asset 46512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_caucasian_teacher_pinkshirt.webp",
+      "tags": [
+        "freckles",
+        "youthful",
+        "friendly",
+        "animated"
+      ],
+      "occupation": "teacher",
+      "race": "caucasian",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "pink shirt"
+      ]
+    },
+    {
+      "id": "avatar_054",
+      "filename": "jacket_turtleneck_cartoon.webp",
+      "original_name": "Asset 47512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/jacket_turtleneck_cartoon.webp",
+      "tags": [
+        "avatar",
+        "cartoon",
+        "smiling",
+        "young",
+        "jacket",
+        "turtleneck",
+        "short hair"
+      ],
+      "occupation": "unknown",
+      "race": "unknown",
+      "gender": "unknown",
+      "style": "cartoon",
+      "outfit": [
+        "jacket",
+        "turtleneck"
+      ]
+    },
+    {
+      "id": "avatar_055",
+      "filename": "female_asian_businesswoman_jacket.webp",
+      "original_name": "Asset 48512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_asian_businesswoman_jacket.webp",
+      "tags": [
+        "professional",
+        "friendly",
+        "stylish",
+        "confident"
+      ],
+      "occupation": "businesswoman",
+      "race": "asian",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "jacket",
+        "earrings",
+        "turtleneck"
+      ]
+    },
+    {
+      "id": "avatar_056",
+      "filename": "male_caucasian_businessman_shirt_20251008_172454.webp",
+      "original_name": "Asset 49512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_businessman_shirt_20251008_172454.webp",
+      "tags": [
+        "businessman",
+        "young",
+        "cartoon",
+        "smiling",
+        "mustache",
+        "short hair",
+        "front-facing"
+      ],
+      "occupation": "businessman",
+      "race": "caucasian",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "shirt"
+      ]
+    },
+    {
+      "id": "avatar_057",
+      "filename": "female_whiteshirt_purplecardigan_cartoon.webp",
+      "original_name": "Asset 50512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_whiteshirt_purplecardigan_cartoon.webp",
+      "tags": [
+        "senior",
+        "female",
+        "friendly",
+        "cartoon",
+        "gray hair",
+        "earrings",
+        "purple cardigan"
+      ],
+      "occupation": "unknown",
+      "race": "unknown",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "white shirt",
+        "purple cardigan",
+        "earrings"
+      ]
+    },
+    {
+      "id": "avatar_058",
+      "filename": "hat_scarf_cartoon.webp",
+      "original_name": "Asset 51512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/hat_scarf_cartoon.webp",
+      "tags": [
+        "hat",
+        "scarf",
+        "smiling",
+        "cartoon",
+        "earrings",
+        "short hair"
+      ],
+      "occupation": "unknown",
+      "race": "unknown",
+      "gender": "unknown",
+      "style": "cartoon",
+      "outfit": [
+        "hat",
+        "scarf",
+        "earrings"
+      ]
+    },
+    {
+      "id": "avatar_059",
+      "filename": "male_black_businessman_glasses.webp",
+      "original_name": "Asset 52512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_black_businessman_glasses.webp",
+      "tags": [
+        "professional",
+        "friendly",
+        "confident",
+        "bald",
+        "glasses",
+        "suit"
+      ],
+      "occupation": "businessman",
+      "race": "black",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "glasses",
+        "suit"
+      ]
+    },
+    {
+      "id": "avatar_060",
+      "filename": "pinktop_cartoon.webp",
+      "original_name": "Asset 53512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/pinktop_cartoon.webp",
+      "tags": [
+        "young",
+        "cartoon",
+        "blonde hair",
+        "pink top",
+        "laughing",
+        "front-facing"
+      ],
+      "occupation": "unknown",
+      "race": "unknown",
+      "gender": "unknown",
+      "style": "cartoon",
+      "outfit": [
+        "pink top"
+      ]
+    },
+    {
+      "id": "avatar_061",
+      "filename": "unidentified_tanktop_cartoon.webp",
+      "original_name": "Asset 54512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/unidentified_tanktop_cartoon.webp",
+      "tags": [
+        "cartoon",
+        "serious",
+        "tank top",
+        "short hair",
+        "young",
+        "front-facing"
+      ],
+      "occupation": "unidentified",
+      "race": "unidentified",
+      "gender": "unidentified",
+      "style": "cartoon",
+      "outfit": [
+        "tank top"
+      ]
+    },
+    {
+      "id": "avatar_062",
+      "filename": "female_greenheadband_orangetop_cartoon.webp",
+      "original_name": "Asset 5512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_greenheadband_orangetop_cartoon.webp",
+      "tags": [
+        "cartoon",
+        "smiling",
+        "headband",
+        "young",
+        "female"
+      ],
+      "occupation": "",
+      "race": "",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "green headband",
+        "orange top"
+      ]
+    },
+    {
+      "id": "avatar_063",
+      "filename": "female_greentanktop_earrings_cartoon.webp",
+      "original_name": "Asset 55512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_greentanktop_earrings_cartoon.webp",
+      "tags": [
+        "avatar",
+        "pink hair",
+        "lollipop",
+        "earrings",
+        "casual style",
+        "youthful"
+      ],
+      "occupation": "",
+      "race": "",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "green tank top",
+        "earrings",
+        "necklace"
+      ]
+    },
+    {
+      "id": "avatar_064",
+      "filename": "male_caucasian_deliveryperson_cap.webp",
+      "original_name": "Asset 56512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_deliveryperson_cap.webp",
+      "tags": [
+        "delivery",
+        "uniform",
+        "cap",
+        "smiling",
+        "cartoon"
+      ],
+      "occupation": "delivery person",
+      "race": "caucasian",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "cap",
+        "uniform",
+        "tie"
+      ]
+    },
+    {
+      "id": "avatar_065",
+      "filename": "female_notdeterminable_businesswoman_blazer.webp",
+      "original_name": "Asset 57512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_notdeterminable_businesswoman_blazer.webp",
+      "tags": [
+        "cartoon",
+        "smiling",
+        "business",
+        "formal attire",
+        "earrings",
+        "pearl necklace",
+        "brunette"
+      ],
+      "occupation": "businesswoman",
+      "race": "not determinable",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "blazer",
+        "pearl necklace",
+        "earrings"
+      ]
+    },
+    {
+      "id": "avatar_066",
+      "filename": "male_sleevelessshirt_cartoon.webp",
+      "original_name": "Asset 58512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_sleevelessshirt_cartoon.webp",
+      "tags": [
+        "male",
+        "young",
+        "sleeveless shirt",
+        "cartoon",
+        "smiling",
+        "short hair",
+        "front-facing"
+      ],
+      "occupation": "unknown",
+      "race": "unknown",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "sleeveless shirt"
+      ]
+    },
+    {
+      "id": "avatar_067",
+      "filename": "female_teacher_purpletop_glasses.webp",
+      "original_name": "Asset 59512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_teacher_purpletop_glasses.webp",
+      "tags": [
+        "cartoon",
+        "smiling",
+        "glasses",
+        "casual",
+        "friendly",
+        "earrings"
+      ],
+      "occupation": "teacher",
+      "race": "unknown",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "purple top",
+        "glasses",
+        "earrings"
+      ]
+    },
+    {
+      "id": "avatar_068",
+      "filename": "male_caucasian_businessman_orangeshirt.webp",
+      "original_name": "Asset 60512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_businessman_orangeshirt.webp",
+      "tags": [
+        "mustache",
+        "smiling",
+        "cartoon",
+        "suspenders",
+        "orange shirt"
+      ],
+      "occupation": "businessman",
+      "race": "caucasian",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "orange shirt",
+        "suspenders"
+      ]
+    },
+    {
+      "id": "avatar_069",
+      "filename": "female_artist_beret_scarf.webp",
+      "original_name": "Asset 61512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_artist_beret_scarf.webp",
+      "tags": [
+        "artist",
+        "beret",
+        "scarf",
+        "cartoon",
+        "smiling",
+        "young"
+      ],
+      "occupation": "artist",
+      "race": "unknown",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "beret",
+        "scarf",
+        "coat",
+        "earrings"
+      ]
+    },
+    {
+      "id": "avatar_070",
+      "filename": "male_vest_cartoon.webp",
+      "original_name": "Asset 62512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_vest_cartoon.webp",
+      "tags": [
+        "cartoon",
+        "smiling",
+        "blonde",
+        "young",
+        "male"
+      ],
+      "occupation": "unknown",
+      "race": "unknown",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "vest"
+      ]
+    },
+    {
+      "id": "avatar_071",
+      "filename": "female_notspecified_artist_glasses.webp",
+      "original_name": "Asset 63512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_notspecified_artist_glasses.webp",
+      "tags": [
+        "glasses",
+        "earrings",
+        "blue hair",
+        "cartoon",
+        "smiling",
+        "young",
+        "female"
+      ],
+      "occupation": "artist",
+      "race": "not specified",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "glasses",
+        "earrings",
+        "off-shoulder top"
+      ]
+    },
+    {
+      "id": "avatar_072",
+      "filename": "purpleshirt_cartoon_20251008_172700.webp",
+      "original_name": "Asset 64512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/purpleshirt_cartoon_20251008_172700.webp",
+      "tags": [
+        "young",
+        "smiling",
+        "cartoon",
+        "curly hair",
+        "front-facing"
+      ],
+      "occupation": "unknown",
+      "race": "unknown",
+      "gender": "unknown",
+      "style": "cartoon",
+      "outfit": [
+        "purple shirt"
+      ]
+    },
+    {
+      "id": "avatar_073",
+      "filename": "jacket_shirt_cartoon.webp",
+      "original_name": "Asset 6512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/jacket_shirt_cartoon.webp",
+      "tags": [
+        "cartoon",
+        "smiling",
+        "blonde hair",
+        "jacket",
+        "young"
+      ],
+      "occupation": "",
+      "race": "",
+      "gender": "",
+      "style": "cartoon",
+      "outfit": [
+        "jacket",
+        "shirt"
+      ]
+    },
+    {
+      "id": "avatar_074",
+      "filename": "female_caucasian_businesswoman_glasses.webp",
+      "original_name": "Asset 65512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_caucasian_businesswoman_glasses.webp",
+      "tags": [
+        "businesswoman",
+        "glasses",
+        "blonde",
+        "friendly",
+        "cartoon"
+      ],
+      "occupation": "businesswoman",
+      "race": "caucasian",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "glasses",
+        "earrings",
+        "pearl necklace",
+        "shirt",
+        "blazer"
+      ]
+    },
+    {
+      "id": "avatar_075",
+      "filename": "female_pinktop_earrings_cartoon.webp",
+      "original_name": "Asset 66512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_pinktop_earrings_cartoon.webp",
+      "tags": [
+        "cartoon",
+        "smiling",
+        "female",
+        "blonde",
+        "earrings"
+      ],
+      "occupation": "unknown",
+      "race": "unknown",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "pink top",
+        "earrings"
+      ]
+    },
+    {
+      "id": "avatar_076",
+      "filename": "male_black_teacher_glasses.webp",
+      "original_name": "Asset 67512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_black_teacher_glasses.webp",
+      "tags": [
+        "teacher",
+        "glasses",
+        "smiling",
+        "senior",
+        "male",
+        "cartoon",
+        "white hair"
+      ],
+      "occupation": "teacher",
+      "race": "black",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "glasses",
+        "green vest",
+        "white shirt"
+      ]
+    },
+    {
+      "id": "avatar_077",
+      "filename": "female_retired_glasses_earrings.webp",
+      "original_name": "Asset 68512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_retired_glasses_earrings.webp",
+      "tags": [
+        "senior",
+        "friendly",
+        "glasses",
+        "cartoon",
+        "female",
+        "accessories"
+      ],
+      "occupation": "retired",
+      "race": "unknown",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "glasses",
+        "earrings",
+        "collared shirt",
+        "sweater"
+      ]
+    },
+    {
+      "id": "avatar_078",
+      "filename": "earring_casualshirt_cartoon.webp",
+      "original_name": "Asset 69512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/earring_casualshirt_cartoon.webp",
+      "tags": [
+        "bald",
+        "smiling",
+        "cartoon",
+        "earring",
+        "young",
+        "front-facing"
+      ],
+      "occupation": "unknown",
+      "race": "unknown",
+      "gender": "unknown",
+      "style": "cartoon",
+      "outfit": [
+        "earring",
+        "casual shirt"
+      ]
+    },
+    {
+      "id": "avatar_079",
+      "filename": "greenhat_whiteshirt_cartoon.webp",
+      "original_name": "Asset 70512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/greenhat_whiteshirt_cartoon.webp",
+      "tags": [
+        "cartoon",
+        "smiling",
+        "green hat",
+        "earrings",
+        "front-facing",
+        "youthful"
+      ],
+      "occupation": "unknown",
+      "race": "unknown",
+      "gender": "unknown",
+      "style": "cartoon",
+      "outfit": [
+        "green hat",
+        "white shirt",
+        "green scarf",
+        "earrings"
+      ]
+    },
+    {
+      "id": "avatar_080",
+      "filename": "female_caucasian_businessman_glasses.webp",
+      "original_name": "Asset 71512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_caucasian_businessman_glasses.webp",
+      "tags": [
+        "professional",
+        "friendly",
+        "confident",
+        "business attire"
+      ],
+      "occupation": "businessman",
+      "race": "caucasian",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "glasses",
+        "suit",
+        "earrings"
+      ]
+    },
+    {
+      "id": "avatar_081",
+      "filename": "male_caucasian_businessman_suit_20251008_172808.webp",
+      "original_name": "Asset 72512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_businessman_suit_20251008_172808.webp",
+      "tags": [
+        "mustache",
+        "formal",
+        "friendly",
+        "business"
+      ],
+      "occupation": "businessman",
+      "race": "caucasian",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "suit",
+        "tie"
+      ]
+    },
+    {
+      "id": "avatar_082",
+      "filename": "female_caucasian_teacher_redtop.webp",
+      "original_name": "Asset 73512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_caucasian_teacher_redtop.webp",
+      "tags": [
+        "teacher",
+        "caucasian",
+        "female",
+        "young",
+        "red top",
+        "cartoon",
+        "smiling",
+        "blonde hair",
+        "front-facing",
+        "solid background"
+      ],
+      "occupation": "teacher",
+      "race": "caucasian",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "red top"
+      ]
+    },
+    {
+      "id": "avatar_083",
+      "filename": "male_unidentified_businessman_glasses.webp",
+      "original_name": "Asset 74512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_unidentified_businessman_glasses.webp",
+      "tags": [
+        "business",
+        "formal",
+        "glasses",
+        "smiling",
+        "male",
+        "cartoon"
+      ],
+      "occupation": "businessman",
+      "race": "unidentified",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "glasses",
+        "suit",
+        "tie"
+      ]
+    },
+    {
+      "id": "avatar_084",
+      "filename": "male_glasses_cartoon.webp",
+      "original_name": "Asset 7512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_glasses_cartoon.webp",
+      "tags": [
+        "beard",
+        "glasses",
+        "cartoon",
+        "male",
+        "neutral expression"
+      ],
+      "occupation": "unknown",
+      "race": "unknown",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "glasses"
+      ]
+    },
+    {
+      "id": "avatar_085",
+      "filename": "male_caucasian_businessman_suit_20251008_172833.webp",
+      "original_name": "Asset 75512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_businessman_suit_20251008_172833.webp",
+      "tags": [
+        "businessman",
+        "caucasian",
+        "male",
+        "suit",
+        "tie",
+        "cartoon",
+        "smiling",
+        "red hair",
+        "short hair"
+      ],
+      "occupation": "businessman",
+      "race": "caucasian",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "suit",
+        "tie"
+      ]
+    },
+    {
+      "id": "avatar_086",
+      "filename": "female_whiteshirt_cartoon.webp",
+      "original_name": "Asset 76512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_whiteshirt_cartoon.webp",
+      "tags": [
+        "cartoon",
+        "smiling",
+        "young",
+        "female",
+        "short hair",
+        "white shirt"
+      ],
+      "occupation": "unknown",
+      "race": "unknown",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "white shirt"
+      ]
+    },
+    {
+      "id": "avatar_087",
+      "filename": "male_caucasian_businessman_jacket_20251008_172851.webp",
+      "original_name": "Asset 77512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_businessman_jacket_20251008_172851.webp",
+      "tags": [
+        "businessman",
+        "sunglasses",
+        "curly hair",
+        "smiling",
+        "cartoon"
+      ],
+      "occupation": "businessman",
+      "race": "caucasian",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "jacket",
+        "sunglasses"
+      ]
+    },
+    {
+      "id": "avatar_088",
+      "filename": "female_caucasian_retired_hat.webp",
+      "original_name": "Asset 78512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_caucasian_retired_hat.webp",
+      "tags": [
+        "hat",
+        "smiling",
+        "senior",
+        "female",
+        "earrings",
+        "cartoon",
+        "gray hair"
+      ],
+      "occupation": "retired",
+      "race": "caucasian",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "hat",
+        "earrings"
+      ]
+    },
+    {
+      "id": "avatar_089",
+      "filename": "female_uncertain_tanktop_cartoon.webp",
+      "original_name": "Asset 79512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_uncertain_tanktop_cartoon.webp",
+      "tags": [
+        "avatar",
+        "cartoon",
+        "smiling",
+        "short hair",
+        "tank top"
+      ],
+      "occupation": "uncertain",
+      "race": "uncertain",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "tank top"
+      ]
+    },
+    {
+      "id": "avatar_090",
+      "filename": "male_hispanic_businessman_redshirt.webp",
+      "original_name": "Asset 80512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_hispanic_businessman_redshirt.webp",
+      "tags": [
+        "mustache",
+        "smiling",
+        "cartoon",
+        "red shirt",
+        "solid background"
+      ],
+      "occupation": "businessman",
+      "race": "hispanic",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "red shirt"
+      ]
+    },
+    {
+      "id": "avatar_091",
+      "filename": "female_caucasian_teacher_browntop.webp",
+      "original_name": "Asset 81512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_caucasian_teacher_browntop.webp",
+      "tags": [
+        "happy",
+        "female",
+        "cartoon",
+        "smiling",
+        "brown top",
+        "brunette"
+      ],
+      "occupation": "teacher",
+      "race": "caucasian",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "brown top"
+      ]
+    },
+    {
+      "id": "avatar_092",
+      "filename": "male_caucasian_student_blueshirt.webp",
+      "original_name": "Asset 82512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_student_blueshirt.webp",
+      "tags": [
+        "young",
+        "male",
+        "blonde",
+        "smiling",
+        "cartoon",
+        "blue shirt",
+        "white t-shirt"
+      ],
+      "occupation": "student",
+      "race": "caucasian",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "blue shirt",
+        "white t-shirt"
+      ]
+    },
+    {
+      "id": "avatar_093",
+      "filename": "glasses_hoodie_cartoon.webp",
+      "original_name": "Asset 84512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/glasses_hoodie_cartoon.webp",
+      "tags": [
+        "cartoon",
+        "glasses",
+        "hoodie",
+        "earring",
+        "friendly",
+        "solid background"
+      ],
+      "occupation": "unknown",
+      "race": "unknown",
+      "gender": "unknown",
+      "style": "cartoon",
+      "outfit": [
+        "glasses",
+        "hoodie",
+        "earring"
+      ]
+    },
+    {
+      "id": "avatar_094",
+      "filename": "female_sleevelessdress_earrings_cartoon.webp",
+      "original_name": "Asset 8512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_sleevelessdress_earrings_cartoon.webp",
+      "tags": [
+        "female",
+        "young",
+        "cartoon",
+        "smiling",
+        "jewelry"
+      ],
+      "occupation": "",
+      "race": "",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "sleeveless dress",
+        "earrings",
+        "necklace"
+      ]
+    },
+    {
+      "id": "avatar_095",
+      "filename": "male_caucasian_student_bluejacket.webp",
+      "original_name": "Asset 85512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_student_bluejacket.webp",
+      "tags": [
+        "youthful",
+        "friendly",
+        "animated",
+        "blonde hair"
+      ],
+      "occupation": "student",
+      "race": "caucasian",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "blue jacket",
+        "white shirt"
+      ]
+    },
+    {
+      "id": "avatar_096",
+      "filename": "female_caucasian_teacher_hoodie.webp",
+      "original_name": "Asset 86512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_caucasian_teacher_hoodie.webp",
+      "tags": [
+        "teacher",
+        "caucasian",
+        "female",
+        "young",
+        "hoodie",
+        "earrings",
+        "cartoon",
+        "smiling",
+        "red hair",
+        "front-facing"
+      ],
+      "occupation": "teacher",
+      "race": "caucasian",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "hoodie",
+        "earrings"
+      ]
+    },
+    {
+      "id": "avatar_097",
+      "filename": "female_necklace_earrings_cartoon.webp",
+      "original_name": "Asset 87512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_necklace_earrings_cartoon.webp",
+      "tags": [
+        "avatar",
+        "jewelry",
+        "smile",
+        "stylized"
+      ],
+      "occupation": "unknown",
+      "race": "unknown",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "necklace",
+        "earrings"
+      ]
+    },
+    {
+      "id": "avatar_098",
+      "filename": "male_businessman_suit_glasses.webp",
+      "original_name": "Asset 88512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_businessman_suit_glasses.webp",
+      "tags": [
+        "businessman",
+        "suit",
+        "glasses",
+        "phone",
+        "confident",
+        "cartoon"
+      ],
+      "occupation": "businessman",
+      "race": "",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "suit",
+        "glasses"
+      ]
+    },
+    {
+      "id": "avatar_099",
+      "filename": "male_caucasian_businessman_shirt_20251008_173025.webp",
+      "original_name": "Asset 89512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_businessman_shirt_20251008_173025.webp",
+      "tags": [
+        "businessman",
+        "smiling",
+        "cartoon",
+        "young",
+        "shirt",
+        "tie"
+      ],
+      "occupation": "businessman",
+      "race": "caucasian",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "shirt",
+        "tie"
+      ]
+    },
+    {
+      "id": "avatar_100",
+      "filename": "hat_scarf_cartoon_20251008_173031.webp",
+      "original_name": "Asset 90512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/hat_scarf_cartoon_20251008_173031.webp",
+      "tags": [
+        "hat",
+        "scarf",
+        "red hair",
+        "smiling",
+        "cartoon",
+        "front-facing"
+      ],
+      "occupation": "",
+      "race": "",
+      "gender": "",
+      "style": "cartoon",
+      "outfit": [
+        "hat",
+        "scarf"
+      ]
+    },
+    {
+      "id": "avatar_101",
+      "filename": "greenshirt_cartoon_20251008_173043.webp",
+      "original_name": "Asset 91512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/greenshirt_cartoon_20251008_173043.webp",
+      "tags": [
+        "green shirt",
+        "cartoon",
+        "smiling",
+        "young",
+        "short curly hair"
+      ],
+      "occupation": "unknown",
+      "race": "unknown",
+      "gender": "unknown",
+      "style": "cartoon",
+      "outfit": [
+        "green shirt"
+      ]
+    },
+    {
+      "id": "avatar_102",
+      "filename": "male_black_student_greenshirt.webp",
+      "original_name": "Asset 92512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_black_student_greenshirt.webp",
+      "tags": [
+        "youthful",
+        "smile",
+        "cartoon",
+        "green shirt",
+        "curly hair"
+      ],
+      "occupation": "student",
+      "race": "black",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "green shirt"
+      ]
+    },
+    {
+      "id": "avatar_103",
+      "filename": "jacket_earrings_cartoon.webp",
+      "original_name": "Asset 93512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/jacket_earrings_cartoon.webp",
+      "tags": [
+        "cartoon",
+        "smiling",
+        "jacket",
+        "earrings",
+        "blonde hair"
+      ],
+      "occupation": "unknown",
+      "race": "unknown",
+      "gender": "unknown",
+      "style": "cartoon",
+      "outfit": [
+        "jacket",
+        "earrings"
+      ]
+    },
+    {
+      "id": "avatar_104",
+      "filename": "nonbinary_artist_leatherjacket_earring.webp",
+      "original_name": "Asset 94512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/nonbinary_artist_leatherjacket_earring.webp",
+      "tags": [
+        "punk",
+        "alternative",
+        "joyful",
+        "modern"
+      ],
+      "occupation": "artist",
+      "race": "unknown",
+      "gender": "non-binary",
+      "style": "cartoon",
+      "outfit": [
+        "leather jacket",
+        "earring"
+      ]
+    },
+    {
+      "id": "avatar_105",
+      "filename": "male_casual_redbeanie_jacket.webp",
+      "original_name": "Asset 9512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_casual_redbeanie_jacket.webp",
+      "tags": [
+        "beanie",
+        "jacket",
+        "smile",
+        "cartoon",
+        "front-facing",
+        "young",
+        "male"
+      ],
+      "occupation": "casual",
+      "race": "unknown",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "red beanie",
+        "jacket"
+      ]
+    },
+    {
+      "id": "avatar_106",
+      "filename": "female_pinkshirt_purplejacket_cartoon.webp",
+      "original_name": "Asset 95512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_pinkshirt_purplejacket_cartoon.webp",
+      "tags": [
+        "cartoon",
+        "smiling",
+        "front-facing",
+        "pink shirt",
+        "purple jacket",
+        "young",
+        "female",
+        "long brunette hair"
+      ],
+      "occupation": "unknown",
+      "race": "unknown",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "pink shirt",
+        "purple jacket"
+      ]
+    },
+    {
+      "id": "avatar_107",
+      "filename": "male_caucasian_artist_tanktop.webp",
+      "original_name": "Asset 96512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_artist_tanktop.webp",
+      "tags": [
+        "beard",
+        "casual",
+        "neutral expression",
+        "cartoon style",
+        "young adult"
+      ],
+      "occupation": "artist",
+      "race": "caucasian",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "tank top"
+      ]
+    },
+    {
+      "id": "avatar_108",
+      "filename": "male_casual_redcap_tshirt.webp",
+      "original_name": "Asset 97512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_casual_redcap_tshirt.webp",
+      "tags": [
+        "casual",
+        "youthful",
+        "friendly",
+        "simple"
+      ],
+      "occupation": "casual",
+      "race": "",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": [
+        "red cap",
+        "t-shirt"
+      ]
+    },
+    {
+      "id": "avatar_109",
+      "filename": "female_black_teacher_glasses_20251008_173146.webp",
+      "original_name": "Asset 98512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_black_teacher_glasses_20251008_173146.webp",
+      "tags": [
+        "friendly",
+        "cartoon",
+        "glasses",
+        "earrings",
+        "young female",
+        "teacher"
+      ],
+      "occupation": "teacher",
+      "race": "black",
+      "gender": "female",
+      "style": "cartoon",
+      "outfit": [
+        "glasses",
+        "earrings",
+        "sleeveless top"
+      ]
+    },
+    {
+      "id": "avatar_110",
+      "filename": "male_cartoon.webp",
+      "original_name": "Asset 99512.webp",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_cartoon.webp",
+      "tags": [
+        "cartoon",
+        "smiling",
+        "young",
+        "short hair",
+        "front-facing"
+      ],
+      "occupation": "unknown",
+      "race": "unknown",
+      "gender": "male",
+      "style": "cartoon",
+      "outfit": []
+    }
+  ],
+  "url_updated": "2025-10-08T17:37:14.109519",
+  "custom_domain": "https://assets.speako.ai"
+}

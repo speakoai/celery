@@ -1,0 +1,74 @@
+{
+  "folder_info": {
+    "name": "speako-dashboard-avatar",
+    "purpose": "Avatar scanning, analysis, and management system",
+    "created": "2025-10-08T17:39:39.563389",
+    "total_files": 35
+  },
+  "file_categories": {
+    "core_scanners": [
+      "avatar_scanner.py",
+      "batch_avatar_scanner.py"
+    ],
+    "json_outputs": [
+      "avatar_catalog.json",
+      "avatar_filelist.json",
+      "avatar_summary.json",
+      "avatar_progress.json"
+    ],
+    "utility_scripts": [
+      "update_avatar_urls.py",
+      "test_avatar_setup.py",
+      "preview_avatars.py",
+      "test_avatar_urls.py"
+    ],
+    "documentation": [
+      "AVATAR_README.md"
+    ],
+    "logs": [
+      "avatar_scanner.log",
+      "batch_avatar_scanner.log"
+    ],
+    "backups": [
+      "avatar_catalog_backup_20251008_171758.json",
+      "avatar_catalog_backup_20251008_171836.json",
+      "avatar_catalog_backup_20251008_171910.json",
+      "avatar_catalog_backup_20251008_171954.json",
+      "avatar_catalog_backup_20251008_172033.json",
+      "avatar_catalog_backup_20251008_172117.json",
+      "avatar_catalog_backup_20251008_172157.json",
+      "avatar_catalog_backup_20251008_172242.json",
+      "avatar_catalog_backup_20251008_172324.json",
+      "avatar_catalog_backup_20251008_172405.json",
+      "avatar_catalog_backup_20251008_172443.json",
+      "avatar_catalog_backup_20251008_172524.json",
+      "avatar_catalog_backup_20251008_172601.json",
+      "avatar_catalog_backup_20251008_172640.json",
+      "avatar_catalog_backup_20251008_172722.json",
+      "avatar_catalog_backup_20251008_172758.json",
+      "avatar_catalog_backup_20251008_172834.json",
+      "avatar_catalog_backup_20251008_172919.json",
+      "avatar_catalog_backup_20251008_172954.json",
+      "avatar_catalog_backup_20251008_173033.json",
+      "avatar_catalog_backup_20251008_173115.json",
+      "avatar_catalog_backup_20251008_173155.json"
+    ]
+  },
+  "quick_commands": {
+    "scan_avatars": "python batch_avatar_scanner.py",
+    "test_setup": "python test_avatar_setup.py",
+    "preview_files": "python preview_avatars.py",
+    "update_urls": "python update_avatar_urls.py",
+    "test_urls": "python test_avatar_urls.py"
+  },
+  "file_descriptions": {
+    "avatar_catalog.json": "Complete avatar database with full metadata",
+    "avatar_filelist.json": "Simple file list perfect for website integration",
+    "avatar_summary.json": "Statistics and overview of all avatars",
+    "avatar_scanner.py": "Main avatar scanning and analysis script",
+    "batch_avatar_scanner.py": "Enhanced batch processing with progress tracking",
+    "update_avatar_urls.py": "Updates URLs to use custom domain",
+    "test_avatar_setup.py": "Verifies setup and connectivity",
+    "AVATAR_README.md": "Complete documentation and usage guide"
+  }
+}
