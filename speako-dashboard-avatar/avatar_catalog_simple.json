@@ -1,0 +1,1737 @@
+{
+  "metadata": {
+    "total": 110,
+    "last_updated": "2025-10-08T17:31:55.362971",
+    "domain": "https://assets.speako.ai"
+  },
+  "avatars": [
+    {
+      "id": "avatar_001",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_sunglasses_earrings_cartoon.webp",
+      "tags": [
+        "female",
+        "young",
+        "smiling",
+        "sunglasses",
+        "earrings",
+        "tank top",
+        "short",
+        "blonde"
+      ]
+    },
+    {
+      "id": "avatar_002",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_businessman_shirt_bowtie.webp",
+      "tags": [
+        "male",
+        "young",
+        "unknown",
+        "businessman",
+        "smiling",
+        "shirt",
+        "bowtie",
+        "short",
+        "curly",
+        "business",
+        "curly hair"
+      ]
+    },
+    {
+      "id": "avatar_003",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_businessperson_jacket_earrings.webp",
+      "tags": [
+        "female",
+        "middle-aged",
+        "unknown",
+        "businessperson",
+        "confident",
+        "jacket",
+        "earrings",
+        "sunglasses",
+        "blonde",
+        "short",
+        "business",
+        "professional"
+      ]
+    },
+    {
+      "id": "avatar_004",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/redberet_orangescarf_cartoon.webp",
+      "tags": [
+        "young",
+        "smiling",
+        "red beret",
+        "orange scarf",
+        "red top",
+        "short brunette",
+        "beret",
+        "scarf"
+      ]
+    },
+    {
+      "id": "avatar_005",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_businessman_suit.webp",
+      "tags": [
+        "male",
+        "young",
+        "caucasian",
+        "businessman",
+        "smiling",
+        "suit",
+        "tie",
+        "short",
+        "brunette",
+        "short hair",
+        "front-facing"
+      ]
+    },
+    {
+      "id": "avatar_006",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_jacket_cartoon.webp",
+      "tags": [
+        "male",
+        "young",
+        "smiling",
+        "jacket",
+        "short",
+        "brunette",
+        "short hair"
+      ]
+    },
+    {
+      "id": "avatar_007",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_adventurer_hat.webp",
+      "tags": [
+        "male",
+        "young",
+        "caucasian",
+        "adventurer",
+        "smiling",
+        "hat",
+        "red vest",
+        "white shirt",
+        "red",
+        "short",
+        "bearded"
+      ]
+    },
+    {
+      "id": "avatar_008",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_beanie_scarf_cartoon.webp",
+      "tags": [
+        "female",
+        "young",
+        "smiling",
+        "beanie",
+        "scarf",
+        "coat",
+        "short"
+      ]
+    },
+    {
+      "id": "avatar_009",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_casualshirt_cartoon.webp",
+      "tags": [
+        "male",
+        "young",
+        "unknown",
+        "smiling",
+        "casual shirt",
+        "short",
+        "brunette",
+        "casual"
+      ]
+    },
+    {
+      "id": "avatar_010",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_redtop_cartoon.webp",
+      "tags": [
+        "female",
+        "young",
+        "smiling",
+        "red top",
+        "medium length",
+        "dark",
+        "phone",
+        "front-facing"
+      ]
+    },
+    {
+      "id": "avatar_011",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_teacher_glasses_pearls.webp",
+      "tags": [
+        "female",
+        "young",
+        "teacher",
+        "smiling",
+        "glasses",
+        "pearls",
+        "vest",
+        "long",
+        "brunette"
+      ]
+    },
+    {
+      "id": "avatar_012",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_hispanic_fashionenthusiast.webp",
+      "tags": [
+        "female",
+        "young",
+        "hispanic",
+        "fashion enthusiast",
+        "smiling",
+        "green bandana",
+        "orange top",
+        "earrings",
+        "short curly",
+        "short curly hair"
+      ]
+    },
+    {
+      "id": "avatar_013",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_black_businessman_suit.webp",
+      "tags": [
+        "male",
+        "young",
+        "black",
+        "businessman",
+        "smiling",
+        "suit",
+        "tie",
+        "glasses",
+        "short",
+        "professional",
+        "formal",
+        "happy",
+        "stylish"
+      ]
+    },
+    {
+      "id": "avatar_014",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_caucasian_farmer_hat.webp",
+      "tags": [
+        "female",
+        "young",
+        "caucasian",
+        "farmer",
+        "smiling",
+        "hat",
+        "overalls",
+        "medium length",
+        "red",
+        "friendly",
+        "outdoorsy",
+        "illustrated"
+      ]
+    },
+    {
+      "id": "avatar_015",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_caucasian_businessperson_vest.webp",
+      "tags": [
+        "female",
+        "young",
+        "caucasian",
+        "businessperson",
+        "smiling",
+        "vest",
+        "tie",
+        "earrings",
+        "short",
+        "red",
+        "business",
+        "professional",
+        "friendly"
+      ]
+    },
+    {
+      "id": "avatar_016",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_businessman_glasses.webp",
+      "tags": [
+        "male",
+        "middle-aged",
+        "caucasian",
+        "businessman",
+        "smiling",
+        "glasses",
+        "suspenders",
+        "shirt",
+        "short",
+        "white",
+        "white hair"
+      ]
+    },
+    {
+      "id": "avatar_017",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_sunglasses_cartoon.webp",
+      "tags": [
+        "female",
+        "young",
+        "unknown",
+        "smiling",
+        "sunglasses",
+        "blonde"
+      ]
+    },
+    {
+      "id": "avatar_018",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_redtop_cartoon_20251008_171939.webp",
+      "tags": [
+        "female",
+        "young",
+        "smiling",
+        "red top",
+        "blonde",
+        "short"
+      ]
+    },
+    {
+      "id": "avatar_019",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_businessman_suit_20251008_171945.webp",
+      "tags": [
+        "male",
+        "young",
+        "caucasian",
+        "businessman",
+        "smiling",
+        "suit",
+        "bowtie",
+        "short"
+      ]
+    },
+    {
+      "id": "avatar_020",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_blackdress_pearlnecklace_cartoon.webp",
+      "tags": [
+        "female",
+        "young",
+        "smiling",
+        "black dress",
+        "pearl necklace",
+        "short brown",
+        "avatar",
+        "front-facing"
+      ]
+    },
+    {
+      "id": "avatar_021",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_businessman_jacket.webp",
+      "tags": [
+        "male",
+        "middle-aged",
+        "caucasian",
+        "businessman",
+        "smiling",
+        "jacket",
+        "collared shirt",
+        "short",
+        "brunette",
+        "short hair"
+      ]
+    },
+    {
+      "id": "avatar_022",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/glasses_redshirt_cartoon.webp",
+      "tags": [
+        "unknown",
+        "young",
+        "friendly",
+        "glasses",
+        "red shirt",
+        "short",
+        "dark",
+        "friendly expression"
+      ]
+    },
+    {
+      "id": "avatar_023",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/jacket_stripedshirt_cartoon.webp",
+      "tags": [
+        "unknown",
+        "young",
+        "smiling",
+        "jacket",
+        "striped shirt",
+        "short",
+        "dark",
+        "avatar",
+        "dark hair"
+      ]
+    },
+    {
+      "id": "avatar_024",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_casualshirt_cartoon.webp",
+      "tags": [
+        "female",
+        "young",
+        "unknown",
+        "smiling",
+        "casual shirt",
+        "blonde",
+        "medium length",
+        "casual"
+      ]
+    },
+    {
+      "id": "avatar_025",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/scarf_jacket_cartoon.webp",
+      "tags": [
+        "unknown",
+        "young",
+        "smiling",
+        "scarf",
+        "jacket",
+        "short",
+        "front-facing"
+      ]
+    },
+    {
+      "id": "avatar_026",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_undetermined_hijab_cartoon.webp",
+      "tags": [
+        "female",
+        "young",
+        "undetermined",
+        "smiling",
+        "hijab",
+        "covered",
+        "front-facing"
+      ]
+    },
+    {
+      "id": "avatar_027",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_indian_businessman_turban.webp",
+      "tags": [
+        "male",
+        "middle-aged",
+        "indian",
+        "businessman",
+        "smiling",
+        "turban",
+        "black",
+        "beard",
+        "happy"
+      ]
+    },
+    {
+      "id": "avatar_028",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_asian_businessman_glasses.webp",
+      "tags": [
+        "male",
+        "young",
+        "asian",
+        "businessman",
+        "friendly",
+        "glasses",
+        "suit",
+        "tie",
+        "short",
+        "professional",
+        "formal",
+        "business",
+        "smiling"
+      ]
+    },
+    {
+      "id": "avatar_029",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_businessman_suit_20251008_172108.webp",
+      "tags": [
+        "male",
+        "young",
+        "caucasian",
+        "businessman",
+        "smiling",
+        "suit",
+        "blue jacket",
+        "short",
+        "brunette",
+        "business",
+        "young male"
+      ]
+    },
+    {
+      "id": "avatar_030",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_whitetop_necklace_cartoon.webp",
+      "tags": [
+        "female",
+        "young",
+        "unknown",
+        "smiling",
+        "white top",
+        "necklace",
+        "short",
+        "black",
+        "short hair",
+        "solid background",
+        "front-facing"
+      ]
+    },
+    {
+      "id": "avatar_031",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_casualprofessional_hat_earrings.webp",
+      "tags": [
+        "female",
+        "young",
+        "unknown",
+        "casual professional",
+        "smiling",
+        "hat",
+        "earrings",
+        "scarf",
+        "short",
+        "casual",
+        "friendly",
+        "accessories",
+        "headwear",
+        "youthful"
+      ]
+    },
+    {
+      "id": "avatar_032",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_businessman_shirt.webp",
+      "tags": [
+        "male",
+        "senior",
+        "caucasian",
+        "businessman",
+        "smiling",
+        "shirt",
+        "tie",
+        "short",
+        "grey",
+        "grey hair"
+      ]
+    },
+    {
+      "id": "avatar_033",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_black_teacher_glasses.webp",
+      "tags": [
+        "female",
+        "young",
+        "black",
+        "teacher",
+        "smiling",
+        "glasses",
+        "red shirt",
+        "short"
+      ]
+    },
+    {
+      "id": "avatar_034",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/purpleshirt_cartoon.webp",
+      "tags": [
+        "unknown",
+        "young",
+        "smiling",
+        "purple shirt",
+        "curly",
+        "avatar",
+        "curly hair"
+      ]
+    },
+    {
+      "id": "avatar_035",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_farmer_hat_beard.webp",
+      "tags": [
+        "male",
+        "middle-aged",
+        "unknown",
+        "farmer",
+        "friendly",
+        "hat",
+        "beard",
+        "overalls",
+        "red",
+        "medium length",
+        "red hair",
+        "smiling",
+        "cartoon style",
+        "friendly expression"
+      ]
+    },
+    {
+      "id": "avatar_036",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/whitetop_earrings_cartoon.webp",
+      "tags": [
+        "unknown",
+        "young",
+        "smiling",
+        "white top",
+        "earrings",
+        "short curly",
+        "curly hair"
+      ]
+    },
+    {
+      "id": "avatar_037",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_businessman_glasses_20251008_172216.webp",
+      "tags": [
+        "male",
+        "young",
+        "caucasian",
+        "businessman",
+        "smiling",
+        "glasses",
+        "suit",
+        "short",
+        "brunette"
+      ]
+    },
+    {
+      "id": "avatar_038",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/greenshirt_cartoon.webp",
+      "tags": [
+        "unknown",
+        "young",
+        "smiling",
+        "green shirt",
+        "short",
+        "dark",
+        "front-facing"
+      ]
+    },
+    {
+      "id": "avatar_039",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_tanktop_earrings_cartoon.webp",
+      "tags": [
+        "female",
+        "young",
+        "friendly",
+        "tank top",
+        "earrings",
+        "blonde",
+        "dreadlocks",
+        "front-facing"
+      ]
+    },
+    {
+      "id": "avatar_040",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_creativeprofessional_tshirt_glasses.webp",
+      "tags": [
+        "female",
+        "young",
+        "unknown",
+        "creative professional",
+        "smiling",
+        "t-shirt",
+        "glasses",
+        "earrings",
+        "short",
+        "blue",
+        "pink",
+        "creative",
+        "stylish",
+        "colorful",
+        "trendy",
+        "playful"
+      ]
+    },
+    {
+      "id": "avatar_041",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/tanktop_cartoon.webp",
+      "tags": [
+        "unknown",
+        "young",
+        "smiling",
+        "tank top",
+        "short",
+        "red",
+        "red hair"
+      ]
+    },
+    {
+      "id": "avatar_042",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_bandana_overalls_cartoon.webp",
+      "tags": [
+        "female",
+        "young",
+        "smiling",
+        "bandana",
+        "overalls",
+        "medium length",
+        "red"
+      ]
+    },
+    {
+      "id": "avatar_043",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_artist_hat_jacket.webp",
+      "tags": [
+        "male",
+        "young",
+        "unknown",
+        "artist",
+        "smiling",
+        "hat",
+        "jacket",
+        "long"
+      ]
+    },
+    {
+      "id": "avatar_044",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/sweater_tshirt_cartoon.webp",
+      "tags": [
+        "smiling",
+        "sweater",
+        "t-shirt",
+        "curly",
+        "curly hair",
+        "casual",
+        "front-facing",
+        "solid background"
+      ]
+    },
+    {
+      "id": "avatar_045",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_unspecified_business_sleevelessblouse.webp",
+      "tags": [
+        "female",
+        "young",
+        "unspecified",
+        "business",
+        "smiling",
+        "sleeveless blouse",
+        "earrings",
+        "short brunette",
+        "short hair"
+      ]
+    },
+    {
+      "id": "avatar_046",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_hat_cartoon.webp",
+      "tags": [
+        "male",
+        "young",
+        "unknown",
+        "smiling",
+        "hat",
+        "red",
+        "medium length",
+        "beard"
+      ]
+    },
+    {
+      "id": "avatar_047",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_business_suit_glasses.webp",
+      "tags": [
+        "female",
+        "middle-aged",
+        "unknown",
+        "business",
+        "smiling",
+        "suit",
+        "glasses",
+        "earrings",
+        "short",
+        "black",
+        "short hair"
+      ]
+    },
+    {
+      "id": "avatar_048",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_tanktop_earrings_cartoon_20251008_172351.webp",
+      "tags": [
+        "female",
+        "young",
+        "smiling",
+        "tank top",
+        "earrings",
+        "medium length",
+        "brunette",
+        "front-facing",
+        "solid background"
+      ]
+    },
+    {
+      "id": "avatar_049",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_student_tshirt.webp",
+      "tags": [
+        "male",
+        "young",
+        "caucasian",
+        "student",
+        "smiling",
+        "t-shirt",
+        "short brunette",
+        "short hair"
+      ]
+    },
+    {
+      "id": "avatar_050",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_unidentified_businesswoman_whiteblouse.webp",
+      "tags": [
+        "female",
+        "young",
+        "unidentified",
+        "businesswoman",
+        "smiling",
+        "white blouse",
+        "tie",
+        "earrings",
+        "short",
+        "curly",
+        "brunette",
+        "short hair"
+      ]
+    },
+    {
+      "id": "avatar_051",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_businessman_hat.webp",
+      "tags": [
+        "male",
+        "young",
+        "caucasian",
+        "businessman",
+        "smiling",
+        "hat",
+        "shirt",
+        "tie",
+        "short",
+        "business"
+      ]
+    },
+    {
+      "id": "avatar_052",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_student_blueshirt_pinkvest.webp",
+      "tags": [
+        "male",
+        "young",
+        "unknown",
+        "student",
+        "smiling",
+        "blue shirt",
+        "pink vest",
+        "short",
+        "red",
+        "red hair",
+        "solid background",
+        "vest",
+        "shirt"
+      ]
+    },
+    {
+      "id": "avatar_053",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_caucasian_teacher_pinkshirt.webp",
+      "tags": [
+        "female",
+        "young",
+        "caucasian",
+        "teacher",
+        "smiling",
+        "pink shirt",
+        "long",
+        "red",
+        "freckles",
+        "youthful",
+        "friendly",
+        "animated"
+      ]
+    },
+    {
+      "id": "avatar_054",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/jacket_turtleneck_cartoon.webp",
+      "tags": [
+        "unknown",
+        "young",
+        "smiling",
+        "jacket",
+        "turtleneck",
+        "short",
+        "brown",
+        "avatar",
+        "short hair"
+      ]
+    },
+    {
+      "id": "avatar_055",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_asian_businesswoman_jacket.webp",
+      "tags": [
+        "female",
+        "young",
+        "asian",
+        "businesswoman",
+        "smiling",
+        "jacket",
+        "earrings",
+        "turtleneck",
+        "short",
+        "professional",
+        "friendly",
+        "stylish",
+        "confident"
+      ]
+    },
+    {
+      "id": "avatar_056",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_businessman_shirt_20251008_172454.webp",
+      "tags": [
+        "male",
+        "young",
+        "caucasian",
+        "businessman",
+        "smiling",
+        "shirt",
+        "short",
+        "black",
+        "mustache",
+        "short hair",
+        "front-facing"
+      ]
+    },
+    {
+      "id": "avatar_057",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_whiteshirt_purplecardigan_cartoon.webp",
+      "tags": [
+        "female",
+        "senior",
+        "unknown",
+        "friendly",
+        "white shirt",
+        "purple cardigan",
+        "earrings",
+        "short",
+        "gray",
+        "gray hair"
+      ]
+    },
+    {
+      "id": "avatar_058",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/hat_scarf_cartoon.webp",
+      "tags": [
+        "unknown",
+        "young",
+        "smiling",
+        "hat",
+        "scarf",
+        "earrings",
+        "short",
+        "red",
+        "short hair"
+      ]
+    },
+    {
+      "id": "avatar_059",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_black_businessman_glasses.webp",
+      "tags": [
+        "male",
+        "young",
+        "black",
+        "businessman",
+        "smiling",
+        "glasses",
+        "suit",
+        "bald",
+        "professional",
+        "friendly",
+        "confident"
+      ]
+    },
+    {
+      "id": "avatar_060",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/pinktop_cartoon.webp",
+      "tags": [
+        "unknown",
+        "young",
+        "laughing",
+        "pink top",
+        "blonde",
+        "blonde hair",
+        "front-facing"
+      ]
+    },
+    {
+      "id": "avatar_061",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/unidentified_tanktop_cartoon.webp",
+      "tags": [
+        "unidentified",
+        "young",
+        "serious",
+        "tank top",
+        "short brown",
+        "short hair",
+        "front-facing"
+      ]
+    },
+    {
+      "id": "avatar_062",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_greenheadband_orangetop_cartoon.webp",
+      "tags": [
+        "female",
+        "young",
+        "smiling",
+        "green headband",
+        "orange top",
+        "long",
+        "dark",
+        "headband"
+      ]
+    },
+    {
+      "id": "avatar_063",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_greentanktop_earrings_cartoon.webp",
+      "tags": [
+        "female",
+        "young",
+        "neutral",
+        "green tank top",
+        "earrings",
+        "necklace",
+        "short",
+        "pink and blue",
+        "avatar",
+        "pink hair",
+        "lollipop",
+        "casual style",
+        "youthful"
+      ]
+    },
+    {
+      "id": "avatar_064",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_deliveryperson_cap.webp",
+      "tags": [
+        "male",
+        "young",
+        "caucasian",
+        "delivery person",
+        "smiling",
+        "cap",
+        "uniform",
+        "tie",
+        "covered by cap",
+        "delivery"
+      ]
+    },
+    {
+      "id": "avatar_065",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_notdeterminable_businesswoman_blazer.webp",
+      "tags": [
+        "female",
+        "middle-aged",
+        "not determinable",
+        "businesswoman",
+        "smiling",
+        "blazer",
+        "pearl necklace",
+        "earrings",
+        "short",
+        "brunette",
+        "business",
+        "formal attire"
+      ]
+    },
+    {
+      "id": "avatar_066",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_sleevelessshirt_cartoon.webp",
+      "tags": [
+        "male",
+        "young",
+        "unknown",
+        "smiling",
+        "sleeveless shirt",
+        "short",
+        "dark",
+        "short hair",
+        "front-facing"
+      ]
+    },
+    {
+      "id": "avatar_067",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_teacher_purpletop_glasses.webp",
+      "tags": [
+        "female",
+        "middle-aged",
+        "unknown",
+        "teacher",
+        "smiling",
+        "purple top",
+        "glasses",
+        "earrings",
+        "short black",
+        "casual",
+        "friendly"
+      ]
+    },
+    {
+      "id": "avatar_068",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_businessman_orangeshirt.webp",
+      "tags": [
+        "male",
+        "middle-aged",
+        "caucasian",
+        "businessman",
+        "smiling",
+        "orange shirt",
+        "suspenders",
+        "short",
+        "dark",
+        "mustache"
+      ]
+    },
+    {
+      "id": "avatar_069",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_artist_beret_scarf.webp",
+      "tags": [
+        "female",
+        "young",
+        "unknown",
+        "artist",
+        "smiling",
+        "beret",
+        "scarf",
+        "coat",
+        "earrings",
+        "short",
+        "red"
+      ]
+    },
+    {
+      "id": "avatar_070",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_vest_cartoon.webp",
+      "tags": [
+        "male",
+        "young",
+        "unknown",
+        "smiling",
+        "vest",
+        "short",
+        "blonde"
+      ]
+    },
+    {
+      "id": "avatar_071",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_notspecified_artist_glasses.webp",
+      "tags": [
+        "female",
+        "young",
+        "not specified",
+        "artist",
+        "smiling",
+        "glasses",
+        "earrings",
+        "off-shoulder top",
+        "short",
+        "blue",
+        "shaved side",
+        "blue hair"
+      ]
+    },
+    {
+      "id": "avatar_072",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/purpleshirt_cartoon_20251008_172700.webp",
+      "tags": [
+        "unknown",
+        "young",
+        "smiling",
+        "purple shirt",
+        "curly",
+        "curly hair",
+        "front-facing"
+      ]
+    },
+    {
+      "id": "avatar_073",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/jacket_shirt_cartoon.webp",
+      "tags": [
+        "young",
+        "smiling",
+        "jacket",
+        "shirt",
+        "blonde",
+        "medium",
+        "blonde hair"
+      ]
+    },
+    {
+      "id": "avatar_074",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_caucasian_businesswoman_glasses.webp",
+      "tags": [
+        "female",
+        "middle-aged",
+        "caucasian",
+        "businesswoman",
+        "friendly",
+        "glasses",
+        "earrings",
+        "pearl necklace",
+        "shirt",
+        "blazer",
+        "blonde",
+        "short"
+      ]
+    },
+    {
+      "id": "avatar_075",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_pinktop_earrings_cartoon.webp",
+      "tags": [
+        "female",
+        "young",
+        "unknown",
+        "smiling",
+        "pink top",
+        "earrings",
+        "short",
+        "blonde",
+        "curly"
+      ]
+    },
+    {
+      "id": "avatar_076",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_black_teacher_glasses.webp",
+      "tags": [
+        "male",
+        "senior",
+        "black",
+        "teacher",
+        "smiling",
+        "glasses",
+        "green vest",
+        "white shirt",
+        "white",
+        "curly",
+        "white hair"
+      ]
+    },
+    {
+      "id": "avatar_077",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_retired_glasses_earrings.webp",
+      "tags": [
+        "female",
+        "senior",
+        "unknown",
+        "retired",
+        "friendly",
+        "glasses",
+        "earrings",
+        "collared shirt",
+        "sweater",
+        "short",
+        "curly",
+        "white",
+        "accessories"
+      ]
+    },
+    {
+      "id": "avatar_078",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/earring_casualshirt_cartoon.webp",
+      "tags": [
+        "unknown",
+        "young",
+        "smiling",
+        "earring",
+        "casual shirt",
+        "bald",
+        "front-facing"
+      ]
+    },
+    {
+      "id": "avatar_079",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/greenhat_whiteshirt_cartoon.webp",
+      "tags": [
+        "unknown",
+        "young",
+        "smiling",
+        "green hat",
+        "white shirt",
+        "green scarf",
+        "earrings",
+        "short",
+        "front-facing",
+        "youthful"
+      ]
+    },
+    {
+      "id": "avatar_080",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_caucasian_businessman_glasses.webp",
+      "tags": [
+        "female",
+        "young",
+        "caucasian",
+        "businessman",
+        "smiling",
+        "glasses",
+        "suit",
+        "earrings",
+        "brunette",
+        "tied-up",
+        "professional",
+        "friendly",
+        "confident",
+        "business attire"
+      ]
+    },
+    {
+      "id": "avatar_081",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_businessman_suit_20251008_172808.webp",
+      "tags": [
+        "male",
+        "middle-aged",
+        "caucasian",
+        "businessman",
+        "smiling",
+        "suit",
+        "tie",
+        "short",
+        "dark",
+        "mustache",
+        "formal",
+        "friendly",
+        "business"
+      ]
+    },
+    {
+      "id": "avatar_082",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_caucasian_teacher_redtop.webp",
+      "tags": [
+        "female",
+        "young",
+        "caucasian",
+        "teacher",
+        "smiling",
+        "red top",
+        "blonde",
+        "short",
+        "blonde hair",
+        "front-facing",
+        "solid background"
+      ]
+    },
+    {
+      "id": "avatar_083",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_unidentified_businessman_glasses.webp",
+      "tags": [
+        "male",
+        "young",
+        "unidentified",
+        "businessman",
+        "smiling",
+        "glasses",
+        "suit",
+        "tie",
+        "short",
+        "black",
+        "business",
+        "formal"
+      ]
+    },
+    {
+      "id": "avatar_084",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_glasses_cartoon.webp",
+      "tags": [
+        "male",
+        "young",
+        "unknown",
+        "neutral",
+        "glasses",
+        "short",
+        "dark",
+        "beard",
+        "neutral expression"
+      ]
+    },
+    {
+      "id": "avatar_085",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_businessman_suit_20251008_172833.webp",
+      "tags": [
+        "male",
+        "middle-aged",
+        "caucasian",
+        "businessman",
+        "smiling",
+        "suit",
+        "tie",
+        "red",
+        "short",
+        "red hair",
+        "short hair"
+      ]
+    },
+    {
+      "id": "avatar_086",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_whiteshirt_cartoon.webp",
+      "tags": [
+        "female",
+        "young",
+        "unknown",
+        "smiling",
+        "white shirt",
+        "short brunette",
+        "short hair"
+      ]
+    },
+    {
+      "id": "avatar_087",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_businessman_jacket_20251008_172851.webp",
+      "tags": [
+        "male",
+        "young",
+        "caucasian",
+        "businessman",
+        "smiling",
+        "jacket",
+        "sunglasses",
+        "short",
+        "curly",
+        "dark",
+        "curly hair"
+      ]
+    },
+    {
+      "id": "avatar_088",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_caucasian_retired_hat.webp",
+      "tags": [
+        "female",
+        "senior",
+        "caucasian",
+        "retired",
+        "smiling",
+        "hat",
+        "earrings",
+        "short",
+        "gray",
+        "gray hair"
+      ]
+    },
+    {
+      "id": "avatar_089",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_uncertain_tanktop_cartoon.webp",
+      "tags": [
+        "female",
+        "young",
+        "uncertain",
+        "smiling",
+        "tank top",
+        "short brunette",
+        "avatar",
+        "short hair"
+      ]
+    },
+    {
+      "id": "avatar_090",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_hispanic_businessman_redshirt.webp",
+      "tags": [
+        "male",
+        "middle-aged",
+        "hispanic",
+        "businessman",
+        "smiling",
+        "red shirt",
+        "short",
+        "black",
+        "mustache",
+        "solid background"
+      ]
+    },
+    {
+      "id": "avatar_091",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_caucasian_teacher_browntop.webp",
+      "tags": [
+        "female",
+        "young",
+        "caucasian",
+        "teacher",
+        "smiling",
+        "brown top",
+        "short",
+        "brunette",
+        "happy"
+      ]
+    },
+    {
+      "id": "avatar_092",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_student_blueshirt.webp",
+      "tags": [
+        "male",
+        "young",
+        "caucasian",
+        "student",
+        "smiling",
+        "blue shirt",
+        "white t-shirt",
+        "blonde"
+      ]
+    },
+    {
+      "id": "avatar_093",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/glasses_hoodie_cartoon.webp",
+      "tags": [
+        "unknown",
+        "young",
+        "friendly",
+        "glasses",
+        "hoodie",
+        "earring",
+        "short",
+        "gray",
+        "solid background"
+      ]
+    },
+    {
+      "id": "avatar_094",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_sleevelessdress_earrings_cartoon.webp",
+      "tags": [
+        "female",
+        "young",
+        "smiling",
+        "sleeveless dress",
+        "earrings",
+        "necklace",
+        "short",
+        "brunette",
+        "jewelry"
+      ]
+    },
+    {
+      "id": "avatar_095",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_student_bluejacket.webp",
+      "tags": [
+        "male",
+        "young",
+        "caucasian",
+        "student",
+        "smiling",
+        "blue jacket",
+        "white shirt",
+        "short blonde",
+        "youthful",
+        "friendly",
+        "animated",
+        "blonde hair"
+      ]
+    },
+    {
+      "id": "avatar_096",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_caucasian_teacher_hoodie.webp",
+      "tags": [
+        "female",
+        "young",
+        "caucasian",
+        "teacher",
+        "smiling",
+        "hoodie",
+        "earrings",
+        "short",
+        "red",
+        "red hair",
+        "front-facing"
+      ]
+    },
+    {
+      "id": "avatar_097",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_necklace_earrings_cartoon.webp",
+      "tags": [
+        "female",
+        "young",
+        "unknown",
+        "smiling",
+        "necklace",
+        "earrings",
+        "short",
+        "brunette",
+        "avatar",
+        "jewelry",
+        "smile",
+        "stylized"
+      ]
+    },
+    {
+      "id": "avatar_098",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_businessman_suit_glasses.webp",
+      "tags": [
+        "male",
+        "young",
+        "businessman",
+        "confident",
+        "suit",
+        "glasses",
+        "short",
+        "brunette",
+        "phone"
+      ]
+    },
+    {
+      "id": "avatar_099",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_businessman_shirt_20251008_173025.webp",
+      "tags": [
+        "male",
+        "young",
+        "caucasian",
+        "businessman",
+        "smiling",
+        "shirt",
+        "tie",
+        "short",
+        "black"
+      ]
+    },
+    {
+      "id": "avatar_100",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/hat_scarf_cartoon_20251008_173031.webp",
+      "tags": [
+        "smiling",
+        "hat",
+        "scarf",
+        "red",
+        "long",
+        "red hair",
+        "front-facing"
+      ]
+    },
+    {
+      "id": "avatar_101",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/greenshirt_cartoon_20251008_173043.webp",
+      "tags": [
+        "unknown",
+        "young",
+        "smiling",
+        "green shirt",
+        "short",
+        "curly",
+        "short curly hair"
+      ]
+    },
+    {
+      "id": "avatar_102",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_black_student_greenshirt.webp",
+      "tags": [
+        "male",
+        "young",
+        "black",
+        "student",
+        "smiling",
+        "green shirt",
+        "short",
+        "curly",
+        "youthful",
+        "smile",
+        "curly hair"
+      ]
+    },
+    {
+      "id": "avatar_103",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/jacket_earrings_cartoon.webp",
+      "tags": [
+        "unknown",
+        "young",
+        "smiling",
+        "jacket",
+        "earrings",
+        "blonde",
+        "styled",
+        "blonde hair"
+      ]
+    },
+    {
+      "id": "avatar_104",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/nonbinary_artist_leatherjacket_earring.webp",
+      "tags": [
+        "non-binary",
+        "young",
+        "unknown",
+        "artist",
+        "smiling",
+        "leather jacket",
+        "earring",
+        "short with pink mohawk",
+        "punk",
+        "alternative",
+        "joyful",
+        "modern"
+      ]
+    },
+    {
+      "id": "avatar_105",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_casual_redbeanie_jacket.webp",
+      "tags": [
+        "male",
+        "young",
+        "unknown",
+        "casual",
+        "smiling",
+        "red beanie",
+        "jacket",
+        "short",
+        "dark",
+        "beanie",
+        "smile",
+        "front-facing"
+      ]
+    },
+    {
+      "id": "avatar_106",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_pinkshirt_purplejacket_cartoon.webp",
+      "tags": [
+        "female",
+        "young",
+        "unknown",
+        "smiling",
+        "pink shirt",
+        "purple jacket",
+        "long brunette",
+        "front-facing",
+        "long brunette hair"
+      ]
+    },
+    {
+      "id": "avatar_107",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_caucasian_artist_tanktop.webp",
+      "tags": [
+        "male",
+        "young",
+        "caucasian",
+        "artist",
+        "neutral",
+        "tank top",
+        "short",
+        "dark",
+        "beard",
+        "casual",
+        "neutral expression",
+        "cartoon style",
+        "young adult"
+      ]
+    },
+    {
+      "id": "avatar_108",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_casual_redcap_tshirt.webp",
+      "tags": [
+        "male",
+        "young",
+        "casual",
+        "smiling",
+        "red cap",
+        "t-shirt",
+        "short",
+        "youthful",
+        "friendly",
+        "simple"
+      ]
+    },
+    {
+      "id": "avatar_109",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/female_black_teacher_glasses_20251008_173146.webp",
+      "tags": [
+        "female",
+        "young",
+        "black",
+        "teacher",
+        "friendly",
+        "glasses",
+        "earrings",
+        "sleeveless top",
+        "short",
+        "young female"
+      ]
+    },
+    {
+      "id": "avatar_110",
+      "url": "https://assets.speako.ai/staff-profiles/avatar/male_cartoon.webp",
+      "tags": [
+        "male",
+        "young",
+        "unknown",
+        "smiling",
+        "short brunette",
+        "short hair",
+        "front-facing"
+      ]
+    }
+  ]
+}
