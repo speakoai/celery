@@ -797,6 +797,94 @@ def booking_uploads():
                          uploaded_files=uploaded_files)
 
 # ----------------------------
+# Web Scrapper Route
+# ----------------------------
+@app.route("/scrapper", methods=["GET", "POST"])
+@restrict_ip
+def scrapper():
+    error_message = ""
+    success_message = ""
+    scraped_data = None
+    
+    if request.method == "POST":
+        try:
+            import requests
+            from bs4 import BeautifulSoup
+            
+            url = request.form.get("url", "").strip()
+            scrape_type = request.form.get("scrape_type", "text")
+            css_selector = request.form.get("css_selector", "").strip()
+            
+            if not url:
+                raise Exception("Please provide a valid URL")
+            
+            # Add timeout and user agent
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+            
+            # Fetch the webpage
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            
+            # Parse with BeautifulSoup
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # Extract data based on scrape type
+            if scrape_type == "text":
+                # Extract all text content
+                scraped_data = soup.get_text(separator='\n', strip=True)
+                success_message = "Text content extracted successfully!"
+                
+            elif scrape_type == "links":
+                # Extract all links
+                links = []
+                for link in soup.find_all('a', href=True):
+                    links.append({
+                        'text': link.get_text(strip=True),
+                        'url': link['href']
+                    })
+                scraped_data = json.dumps(links, indent=2, ensure_ascii=False)
+                success_message = f"Found {len(links)} links!"
+                
+            elif scrape_type == "images":
+                # Extract all images
+                images = []
+                for img in soup.find_all('img'):
+                    images.append({
+                        'src': img.get('src', ''),
+                        'alt': img.get('alt', '')
+                    })
+                scraped_data = json.dumps(images, indent=2, ensure_ascii=False)
+                success_message = f"Found {len(images)} images!"
+                
+            elif scrape_type == "custom":
+                # Use custom CSS selector
+                if not css_selector:
+                    raise Exception("Please provide a CSS selector for custom scraping")
+                
+                elements = soup.select(css_selector)
+                if not elements:
+                    raise Exception(f"No elements found matching selector: {css_selector}")
+                
+                results = []
+                for elem in elements:
+                    results.append(elem.get_text(strip=True))
+                
+                scraped_data = '\n\n'.join(results)
+                success_message = f"Found {len(results)} elements matching '{css_selector}'!"
+            
+        except requests.exceptions.RequestException as e:
+            error_message = f"Failed to fetch URL: {str(e)}"
+        except Exception as e:
+            error_message = str(e)
+    
+    return render_template("scrapper.html",
+                         error_message=error_message,
+                         success_message=success_message,
+                         scraped_data=scraped_data)
+
+# ----------------------------
 # App Entrypoint for Local Dev (Render uses gunicorn)
 # ----------------------------
 if __name__ == "__main__":

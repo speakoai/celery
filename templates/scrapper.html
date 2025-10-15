@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scrapper - Speako Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+        
+        .content {
+            padding: 40px;
+        }
+        
+        .form-group {
+            margin-bottom: 25px;
+        }
+        
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #333;
+        }
+        
+        input[type="text"],
+        input[type="url"],
+        textarea,
+        select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 1em;
+            transition: border-color 0.3s;
+        }
+        
+        input[type="text"]:focus,
+        input[type="url"]:focus,
+        textarea:focus,
+        select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        textarea {
+            min-height: 120px;
+            resize: vertical;
+            font-family: inherit;
+        }
+        
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 14px 30px;
+            border: none;
+            border-radius: 6px;
+            font-size: 1.1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            width: 100%;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn:active {
+            transform: translateY(0);
+        }
+        
+        .alert {
+            padding: 15px 20px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+        
+        .alert-success {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        
+        .alert-error {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        
+        .result-box {
+            background: #f8f9fa;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+        
+        .result-box h3 {
+            color: #667eea;
+            margin-bottom: 15px;
+        }
+        
+        .result-box pre {
+            background: white;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 0.9em;
+        }
+        
+        .back-link {
+            display: inline-block;
+            margin-top: 20px;
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        
+        .back-link:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔍 Web Scrapper</h1>
+            <p>Extract data from websites easily</p>
+        </div>
+        
+        <div class="content">
+            {% if error_message %}
+            <div class="alert alert-error">
+                <strong>Error:</strong> {{ error_message }}
+            </div>
+            {% endif %}
+            
+            {% if success_message %}
+            <div class="alert alert-success">
+                <strong>Success:</strong> {{ success_message }}
+            </div>
+            {% endif %}
+            
+            <form method="POST" action="{{ url_for('scrapper') }}">
+                <div class="form-group">
+                    <label for="url">Target URL:</label>
+                    <input 
+                        type="url" 
+                        id="url" 
+                        name="url" 
+                        placeholder="https://example.com" 
+                        required
+                        value="{{ request.form.get('url', '') }}"
+                    >
+                </div>
+                
+                <div class="form-group">
+                    <label for="scrape_type">Scrape Type:</label>
+                    <select id="scrape_type" name="scrape_type" required>
+                        <option value="text">Extract Text Content</option>
+                        <option value="links">Extract All Links</option>
+                        <option value="images">Extract All Images</option>
+                        <option value="custom">Custom CSS Selector</option>
+                    </select>
+                </div>
+                
+                <div class="form-group" id="selector-group" style="display: none;">
+                    <label for="css_selector">CSS Selector (for custom scraping):</label>
+                    <input 
+                        type="text" 
+                        id="css_selector" 
+                        name="css_selector" 
+                        placeholder="e.g., .article-title, #main-content, div.post"
+                        value="{{ request.form.get('css_selector', '') }}"
+                    >
+                </div>
+                
+                <button type="submit" class="btn">🚀 Start Scraping</button>
+            </form>
+            
+            {% if scraped_data %}
+            <div class="result-box">
+                <h3>Scraped Results:</h3>
+                <pre>{{ scraped_data }}</pre>
+            </div>
+            {% endif %}
+            
+            <a href="{{ url_for('home') }}" class="back-link">← Back to Dashboard</a>
+        </div>
+    </div>
+    
+    <script>
+        // Show/hide CSS selector input based on scrape type
+        document.getElementById('scrape_type').addEventListener('change', function() {
+            const selectorGroup = document.getElementById('selector-group');
+            if (this.value === 'custom') {
+                selectorGroup.style.display = 'block';
+            } else {
+                selectorGroup.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>
