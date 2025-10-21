@@ -12,9 +12,48 @@ from tasks.sms import (
     send_email_confirmation_customer_new, send_email_confirmation_customer_mod, send_email_confirmation_customer_can
 )
 from tasks.celery_app import app as celery_app
+# Additional imports for R2 uploads
+import boto3
+from werkzeug.utils import secure_filename
+from datetime import datetime
+import hashlib
+import time
 
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', "super-secret")
+
+# ----------------------------
+# Cloudflare R2 (S3-compatible) configuration for uploads
+# ----------------------------
+R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
+R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
+R2_ENDPOINT_URL = os.getenv("R2_ENDPOINT_URL")
+R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME")
+# Optional: custom CDN domain mapped to the bucket (defaults to assets.speako.ai)
+R2_PUBLIC_BASE_URL = os.getenv("R2_PUBLIC_BASE_URL", "https://assets.speako.ai")
+
+r2_client = boto3.client(
+    's3',
+    endpoint_url=R2_ENDPOINT_URL,
+    aws_access_key_id=R2_ACCESS_KEY_ID,
+    aws_secret_access_key=R2_SECRET_ACCESS_KEY,
+) if all([R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT_URL, R2_BUCKET_NAME]) else None
+
+
+def allowed_knowledge_file(filename: str) -> bool:
+    """Return True if filename has an allowed knowledge extension (doc/x, xls/x, pdf, csv, txt)."""
+    if not filename:
+        return False
+    allowed_ext = {'.doc', '.docx', '.xls', '.xlsx', '.pdf', '.csv', '.txt'}
+    ext = os.path.splitext(filename.lower())[1]
+    return ext in allowed_ext
+
+
+def generate_knowledge_filename(tenant_id: str, location_id: str, knowledge_type: str, file_extension: str) -> str:
+    """Generate deterministic unique filename for knowledge uploads."""
+    base = f"{tenant_id}_{location_id}_{knowledge_type}_{int(time.time())}"
+    digest = hashlib.md5(base.encode()).hexdigest()[:8]
+    return f"{tenant_id}_{location_id}_{knowledge_type}_{digest}{file_extension}"
 
 # Import avatar API functionality
 import sys
@@ -638,6 +677,115 @@ def api_health_check():
     }), 200
 
 
+@app.route('/api/knowledge/upload-knowledge-file', methods=['POST'])
+@require_api_key
+def api_upload_knowledge_file():
+    """
+    [aiknowledges] Upload a knowledge file to Cloudflare R2.
+
+    Expected multipart/form-data:
+    - tenant_id: string (required)
+    - location_id: string (required)
+    - knowledge_type: one of [menu, faq, policy, events] (required)
+    - file: The file to upload (required). Allowed types: Word (.doc, .docx), Excel (.xls, .xlsx), PDF (.pdf), CSV (.csv), Text (.txt)
+
+    Constraints:
+    - Max file size: 5MB
+
+    Upload path in bucket: knowledges/{tenant_id}/{location_id}/
+    """
+    try:
+        if not r2_client:
+            return jsonify({'error': 'Storage not configured', 'message': 'Cloudflare R2 credentials are missing'}), 500
+
+        # Validate required form fields
+        tenant_id = request.form.get('tenant_id')
+        location_id = request.form.get('location_id')
+        knowledge_type = request.form.get('knowledge_type')
+
+        missing = [k for k in ['tenant_id', 'location_id', 'knowledge_type'] if not request.form.get(k)]
+        if missing:
+            return jsonify({'error': 'Missing required fields', 'missing_fields': missing}), 400
+
+        # Validate knowledge_type
+        valid_types = ['menu', 'faq', 'policy', 'events']
+        if knowledge_type not in valid_types:
+            return jsonify({
+                'error': 'Invalid knowledge_type',
+                'message': f'knowledge_type must be one of: {", ".join(valid_types)}',
+                'provided': knowledge_type
+            }), 400
+
+        # Validate file presence
+        if 'file' not in request.files:
+            return jsonify({'error': 'File is required', 'message': 'No file part in the request'}), 400
+        file = request.files['file']
+
+        if file.filename == '':
+            return jsonify({'error': 'Invalid file', 'message': 'No selected file'}), 400
+
+        # Validate extension
+        if not allowed_knowledge_file(file.filename):
+            return jsonify({'error': 'Unsupported file type', 'message': 'Allowed: .doc, .docx, .xls, .xlsx, .pdf, .csv, .txt'}), 400
+
+        # Enforce 5MB limit
+        try:
+            file.stream.seek(0, os.SEEK_END)
+            size = file.stream.tell()
+            file.stream.seek(0)
+        except Exception:
+            # Fallback: read into memory
+            data_peek = file.read()
+            size = len(data_peek)
+            file.stream.seek(0)
+        if size > 5 * 1024 * 1024:
+            return jsonify({'error': 'File too large', 'message': 'File size must be less than or equal to 5MB'}), 400
+
+        # Prepare upload
+        file_extension = os.path.splitext(secure_filename(file.filename))[1].lower()
+        unique_filename = generate_knowledge_filename(tenant_id, location_id, knowledge_type, file_extension)
+        key = f"knowledges/{tenant_id}/{location_id}/{unique_filename}"
+
+        file_content = file.read()
+        content_type = file.mimetype or 'application/octet-stream'
+
+        # Upload to R2
+        r2_client.put_object(
+            Bucket=R2_BUCKET_NAME,
+            Key=key,
+            Body=file_content,
+            ContentType=content_type,
+            Metadata={
+                'original_filename': file.filename,
+                'upload_timestamp': datetime.utcnow().isoformat() + 'Z',
+                'tenant_id': str(tenant_id),
+                'location_id': str(location_id),
+                'knowledge_type': knowledge_type,
+                'group': 'aiknowledges'
+            }
+        )
+
+        public_url = f"{R2_PUBLIC_BASE_URL}/{key}"
+
+        return jsonify({
+            'success': True,
+            'message': 'Knowledge file uploaded successfully',
+            'data': {
+                'tenant_id': tenant_id,
+                'location_id': location_id,
+                'knowledge_type': knowledge_type,
+                'filename': unique_filename,
+                'key': key,
+                'url': public_url,
+                'size': len(file_content),
+                'content_type': content_type,
+            }
+        }), 201
+
+    except Exception as e:
+        return jsonify({'error': 'Internal server error', 'message': str(e)}), 500
+
+
 # =============================================================================
 # AVATAR API ENDPOINTS
 # =============================================================================
@@ -914,7 +1062,7 @@ def api_avatar_debug():
             debug_info["is_simplified_format"] = set(first_avatar.keys()) == {'id', 'url', 'tags'}
             debug_info["first_avatar_sample"] = {
                 "id": first_avatar.get("id"),
-                "url_length": len(first_avatar.get("url", "")),
+                "url": len(first_avatar.get("url", "")),
                 "tags_count": len(first_avatar.get("tags", []))
             }
         
