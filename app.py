@@ -21,8 +21,10 @@ import time
 # OpenAI SDK (optional)
 try:
     from openai import OpenAI
-except Exception:
+    _openai_import_error = None
+except Exception as _openai_e:
     OpenAI = None
+    _openai_import_error = repr(_openai_e)
 
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', "super-secret")
@@ -38,8 +40,9 @@ try:
         _openai_version = getattr(_openai_mod, '__version__', 'unknown')
     except Exception:
         _openai_version = None
-    app.logger.info(
-        f"[Startup] OpenAI client available: {_openai_client_available}; OPENAI_API_KEY set: {_openai_key_present}; model: {_openai_model}; sdk_version: {_openai_version}"
+    # Use warning level so it always shows in Render logs
+    app.logger.warning(
+        f"[Startup] OpenAI client available: {_openai_client_available}; OPENAI_API_KEY set: {_openai_key_present}; model: {_openai_model}; sdk_version: {_openai_version}; import_error: {_openai_import_error}"
     )
 except Exception as _e:
     print(f"[Startup] OpenAI debug logging failed: {_e}")
