@@ -825,7 +825,7 @@ def api_upload_knowledge_file():
                 try:
                     client = OpenAI(api_key=api_key)
                     # Upload file to OpenAI Files API
-                    uploaded = client.files.create(file=(unique_filename, file_content))
+                    uploaded = client.files.create(file=(unique_filename, file_content), purpose='assistants')
 
                     prompt = build_knowledge_prompt(knowledge_type)
                     # Use Responses API to attach the file
