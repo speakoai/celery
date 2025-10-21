@@ -38,6 +38,6 @@ python-dateutil
 tzdata
 twilio
 sendgrid
-openai
+openai>=1.41.0
 requests
 pathlib

@@ -32,8 +32,14 @@ try:
     _openai_client_available = OpenAI is not None
     _openai_key_present = bool(os.getenv('OPENAI_API_KEY'))
     _openai_model = os.getenv('OPENAI_KNOWLEDGE_MODEL', 'gpt-4o-mini')
+    # Try to detect SDK version even if OpenAI class import fails
+    try:
+        import openai as _openai_mod
+        _openai_version = getattr(_openai_mod, '__version__', 'unknown')
+    except Exception:
+        _openai_version = None
     app.logger.info(
-        f"[Startup] OpenAI client available: {_openai_client_available}; OPENAI_API_KEY set: {_openai_key_present}; model: {_openai_model}"
+        f"[Startup] OpenAI client available: {_openai_client_available}; OPENAI_API_KEY set: {_openai_key_present}; model: {_openai_model}; sdk_version: {_openai_version}"
     )
 except Exception as _e:
     print(f"[Startup] OpenAI debug logging failed: {_e}")
