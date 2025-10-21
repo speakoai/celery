@@ -27,6 +27,17 @@ except Exception:
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', "super-secret")
 
+# --- Startup debug for OpenAI config (does NOT print secrets) ---
+try:
+    _openai_client_available = OpenAI is not None
+    _openai_key_present = bool(os.getenv('OPENAI_API_KEY'))
+    _openai_model = os.getenv('OPENAI_KNOWLEDGE_MODEL', 'gpt-4o-mini')
+    app.logger.info(
+        f"[Startup] OpenAI client available: {_openai_client_available}; OPENAI_API_KEY set: {_openai_key_present}; model: {_openai_model}"
+    )
+except Exception as _e:
+    print(f"[Startup] OpenAI debug logging failed: {_e}")
+
 # ----------------------------
 # Cloudflare R2 (S3-compatible) configuration for uploads
 # ----------------------------
@@ -790,6 +801,13 @@ def api_upload_knowledge_file():
         if analysis_requested:
             api_key = os.getenv('OPENAI_API_KEY')
             if not api_key or OpenAI is None:
+                # Log why it was skipped without exposing secrets
+                try:
+                    app.logger.warning(
+                        f"[Analysis] Skipped OpenAI analysis. client_available={OpenAI is not None}; key_present={bool(api_key)}"
+                    )
+                except Exception:
+                    pass
                 response_data['analysis'] = {
                     'status': 'skipped',
                     'reason': 'OpenAI not configured'
