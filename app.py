@@ -18,6 +18,11 @@ from werkzeug.utils import secure_filename
 from datetime import datetime
 import hashlib
 import time
+# OpenAI SDK (optional)
+try:
+    from openai import OpenAI
+except Exception:
+    OpenAI = None
 
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', "super-secret")
@@ -767,19 +772,85 @@ def api_upload_knowledge_file():
 
         public_url = f"{R2_PUBLIC_BASE_URL}/{key}"
 
+        response_data = {
+            'tenant_id': tenant_id,
+            'location_id': location_id,
+            'knowledge_type': knowledge_type,
+            'filename': unique_filename,
+            'key': key,
+            'url': public_url,
+            'size': len(file_content),
+            'content_type': content_type,
+        }
+
+        # ----------------------------
+        # Optional: Analyze with OpenAI
+        # ----------------------------
+        analysis_requested = True  # set to True by default; adjust if you want to gate it later
+        if analysis_requested:
+            api_key = os.getenv('OPENAI_API_KEY')
+            if not api_key or OpenAI is None:
+                response_data['analysis'] = {
+                    'status': 'skipped',
+                    'reason': 'OpenAI not configured'
+                }
+            else:
+                try:
+                    client = OpenAI(api_key=api_key)
+                    # Upload file to OpenAI Files API
+                    uploaded = client.files.create(file=(unique_filename, file_content))
+
+                    prompt = build_knowledge_prompt(knowledge_type)
+                    # Use Responses API to attach the file
+                    resp = client.responses.create(
+                        model=os.getenv('OPENAI_KNOWLEDGE_MODEL', 'gpt-4o-mini'),
+                        input=[
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "input_text", "text": prompt},
+                                    {"type": "input_file", "file_id": uploaded.id}
+                                ]
+                            }
+                        ],
+                        temperature=0.2
+                    )
+                    # Extract text output
+                    analysis_text = resp.output_text if hasattr(resp, 'output_text') else (resp.choices[0].message.content if getattr(resp, 'choices', None) else None)
+
+                    # Try to parse JSON
+                    import json as _json
+                    parsed = None
+                    if analysis_text:
+                        # In case the model wraps JSON in code fences
+                        txt = analysis_text.strip()
+                        if txt.startswith('```'):
+                            txt = txt.strip('`')
+                            # remove potential language hint like json\n
+                            first_nl = txt.find('\n')
+                            if first_nl != -1:
+                                txt = txt[first_nl+1:]
+                        try:
+                            parsed = _json.loads(txt)
+                        except Exception:
+                            parsed = None
+
+                    response_data['analysis'] = {
+                        'status': 'success' if parsed else 'raw',
+                        'model': os.getenv('OPENAI_KNOWLEDGE_MODEL', 'gpt-4o-mini'),
+                        'file_id': uploaded.id,
+                        'result': parsed if parsed is not None else analysis_text
+                    }
+                except Exception as ae:
+                    response_data['analysis'] = {
+                        'status': 'error',
+                        'message': str(ae)
+                    }
+
         return jsonify({
             'success': True,
             'message': 'Knowledge file uploaded successfully',
-            'data': {
-                'tenant_id': tenant_id,
-                'location_id': location_id,
-                'knowledge_type': knowledge_type,
-                'filename': unique_filename,
-                'key': key,
-                'url': public_url,
-                'size': len(file_content),
-                'content_type': content_type,
-            }
+            'data': response_data
         }), 201
 
     except Exception as e:
@@ -1073,3 +1144,46 @@ def api_avatar_debug():
             "error": "Debug endpoint failed",
             "message": str(e)
         }), 500
+
+
+def build_knowledge_prompt(knowledge_type: str) -> str:
+    """Return a strict JSON-only extraction prompt per knowledge type."""
+    if knowledge_type == 'menu':
+        return (
+            "You are given a document that may contain a service or food menu. "
+            "Extract menu items into the following strict JSON schema. Output ONLY JSON, no prose.\n"
+            "{\n"
+            "  \"type\": \"menu\",\n"
+            "  \"items\": [\n"
+            "    {\n"
+            "      \"name\": string,\n"
+            "      \"description\": string|null,\n"
+            "      \"prices\": [ { \"label\": string|null, \"amount\": number, \"currency\": string|null } ],\n"
+            "      \"options\": [ { \"name\": string, \"price_delta\": number|null } ],\n"
+            "      \"allergens\": [ string ]\n"
+            "    }\n"
+            "  ],\n"
+            "  \"source_confidence\": number\n"
+            "}"
+        )
+    if knowledge_type == 'faq':
+        return (
+            "You are given a document that may contain FAQ content. "
+            "Extract FAQs into the following strict JSON schema. Output ONLY JSON.\n"
+            "{\n"
+            "  \"type\": \"faq\",\n"
+            "  \"faqs\": [ { \"question\": string, \"answer\": string } ],\n"
+            "  \"source_confidence\": number\n"
+            "}"
+        )
+    # policy
+    return (
+        "You are given a document that may contain policies and terms & conditions. "
+        "Extract into the following strict JSON schema. Output ONLY JSON.\n"
+        "{\n"
+        "  \"type\": \"policy\",\n"
+        "  \"policies\": [ { \"title\": string, \"body\": string } ],\n"
+        "  \"terms\": [ { \"title\": string, \"body\": string } ],\n"
+        "  \"source_confidence\": number\n"
+        "}"
+    )
