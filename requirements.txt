@@ -49,4 +49,5 @@ trafilatura
 readability-lxml
 beautifulsoup4
 markdownify
+playwright
 lxml

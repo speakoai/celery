@@ -37,6 +37,12 @@ from .utils.knowledge_utils import (
 
 logger = get_task_logger(__name__)
 
+# Optional JS rendering (Playwright)
+try:
+    from playwright.sync_api import sync_playwright
+except Exception:
+    sync_playwright = None
+
 
 def _get_r2_client():
     R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
@@ -71,6 +77,34 @@ def _fetch_url(url: str, timeout_ms: int) -> tuple[str, dict]:
     resp = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
     resp.raise_for_status()
     return resp.text, dict(resp.headers)
+
+
+def _render_page_with_js(url: str, timeout_ms: int, user_agent: str | None = None) -> str:
+    """Render a JS-heavy page using Playwright if available. Returns HTML string.
+
+    Note: Requires the 'playwright' Python package and browsers installed.
+    In Render, add a build step: `python -m playwright install --with-deps chromium`.
+    """
+    if sync_playwright is None:
+        raise RuntimeError('playwright_not_installed')
+    wait_timeout = max(1000, timeout_ms)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])  # type: ignore
+        context = browser.new_context(
+            user_agent=user_agent or os.getenv('SCRAPE_USER_AGENT', 'SpeakoBot/1.0 (+contact)'),
+            java_script_enabled=True,
+            viewport={"width": 1280, "height": 2000},
+        )
+        page = context.new_page()
+        page.goto(url, wait_until="networkidle", timeout=wait_timeout)
+        # Some sites render late; small additional delay if configured
+        extra_wait_ms = int(os.getenv('SCRAPE_JS_EXTRA_WAIT_MS', '0'))
+        if extra_wait_ms > 0:
+            page.wait_for_timeout(extra_wait_ms)
+        content = page.content()
+        context.close()
+        browser.close()
+        return content
 
 
 def _extract_main_html(html: str, base_url: str) -> tuple[str, str]:
@@ -159,6 +193,23 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
     try:
         timeout_ms = int(os.getenv('SCRAPE_TIMEOUT_MS', '15000'))
         html, headers = _fetch_url(url, timeout_ms)
+        # Detect JS-only pages or empty content and optionally render with Playwright
+        js_required_markers = [
+            'not available without javascript',
+            'enable javascript',
+            'requires javascript',
+        ]
+        should_try_js = os.getenv('SCRAPE_ENABLE_JS', 'false').lower() == 'true'
+        needs_js = (len((html or '').strip()) < 1000) or any(m in (html or '').lower() for m in js_required_markers)
+        if should_try_js and needs_js:
+            try:
+                rendered = _render_page_with_js(url, int(os.getenv('SCRAPE_JS_TIMEOUT_MS', '20000')),
+                                                os.getenv('SCRAPE_USER_AGENT', 'SpeakoBot/1.0 (+contact)'))
+                if rendered and len(rendered) > len(html):
+                    html = rendered
+                    headers['X-Scrape-Rendered'] = 'playwright'
+            except Exception as _js_e:
+                logger.warning(f"Playwright render skipped/failed: {_js_e}")
         title, main_html = _extract_main_html(html, url)
         markdown = _html_to_markdown(title, main_html, url)
 
@@ -182,7 +233,7 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
             'fetched_at': datetime.utcnow().isoformat() + 'Z',
             'headers': headers,
             'content_length': len(markdown.encode('utf-8')),
-            'extractor': 'trafilatura|readability|bs4',
+            'extractor': ('playwright|' if headers.get('X-Scrape-Rendered') == 'playwright' else '') + 'trafilatura|readability|bs4',
         }
         r2.put_object(
             Bucket=bucket,

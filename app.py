@@ -1229,9 +1229,14 @@ def api_scrape_url():
     Returns 202 with task_id for polling at /api/task/<task_id>.
     """
     try:
-        data = request.get_json()
+        # Be tolerant of clients missing Content-Type or sending invalid JSON
+        data = request.get_json(silent=True)
         if not data:
-            return jsonify({'error': 'JSON payload required'}), 400
+            return jsonify({
+                'error': 'JSON payload required',
+                'message': 'Send a valid JSON body with Content-Type: application/json',
+                'content_type': request.headers.get('Content-Type', None)
+            }), 400
 
         tenant_id = data.get('tenant_id')
         location_id = data.get('location_id')
