@@ -314,9 +314,14 @@ def api_generate_availability():
     }
     """
     try:
-        data = request.get_json()
+        # Be tolerant of clients missing Content-Type or sending invalid JSON
+        data = request.get_json(silent=True)
         if not data:
-            return jsonify({'error': 'JSON payload required'}), 400
+            return jsonify({
+                'error': 'JSON payload required',
+                'message': 'Send a valid JSON body with Content-Type: application/json',
+                'content_type': request.headers.get('Content-Type', None)
+            }), 400
         
         # Validate required fields
         required_fields = ['tenant_id', 'location_id', 'location_tz', 'business_type']
