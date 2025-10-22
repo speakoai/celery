@@ -60,18 +60,25 @@ def _host_allowed(url: str) -> bool:
 
 
 def _submit_async_job(url: str, *, render: bool = True, output_format: str | None = 'markdown', timeout_ms: int = 15000) -> tuple[str, str]:
-    """Submit an async job to ScraperAPI. Returns (job_id, status_url)."""
+    """Submit an async job to ScraperAPI. Returns (job_id, status_url).
+
+    Uses the documented async payload shape with 'urls' and 'apiParams'.
+    """
     api_key = os.getenv('SCRAPERAPI_KEY')
     if not api_key:
         raise RuntimeError('SCRAPERAPI_KEY not configured')
     timeout = max(1, timeout_ms // 1000)
+    api_params: dict = {}
+    if render:
+        api_params['render'] = 'true'
+    if output_format:
+        api_params['output_format'] = output_format
     payload: dict = {
         'apiKey': api_key,
-        'url': url,
-        'render': True if render else False,
+        'urls': [url],
     }
-    if output_format:
-        payload['output_format'] = output_format
+    if api_params:
+        payload['apiParams'] = api_params
     resp = requests.post('https://async.scraperapi.com/jobs', json=payload, timeout=timeout)
     resp.raise_for_status()
     data = resp.json()
