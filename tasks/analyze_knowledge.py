@@ -25,21 +25,39 @@ from .utils.knowledge_utils import (
 
 logger = get_task_logger(__name__)
 
+# Load .env if present (useful for local dev workers)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
 
 def _get_r2_client():
     R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
     R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
     R2_ENDPOINT_URL = os.getenv("R2_ENDPOINT_URL")
     R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME")
-    if not all([R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT_URL, R2_BUCKET_NAME]):
-        return None, None
+    missing = []
+    if not R2_ACCESS_KEY_ID:
+        missing.append("R2_ACCESS_KEY_ID")
+    if not R2_SECRET_ACCESS_KEY:
+        missing.append("R2_SECRET_ACCESS_KEY")
+    if not R2_ENDPOINT_URL:
+        missing.append("R2_ENDPOINT_URL")
+    if not R2_BUCKET_NAME:
+        missing.append("R2_BUCKET_NAME")
+
+    if missing:
+        logger.error("[R2] Missing environment variables: %s", ", ".join(missing))
+        return None, None, missing
     client = boto3.client(
         's3',
         endpoint_url=R2_ENDPOINT_URL,
         aws_access_key_id=R2_ACCESS_KEY_ID,
         aws_secret_access_key=R2_SECRET_ACCESS_KEY,
     )
-    return client, R2_BUCKET_NAME
+    return client, R2_BUCKET_NAME, []
 
 
 @app.task(bind=True)
@@ -53,13 +71,14 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
     start_ts = time.time()
     started_at = datetime.utcnow().isoformat() + 'Z'
 
-    client, bucket = _get_r2_client()
+    client, bucket, missing_env = _get_r2_client()
     if client is None or bucket is None:
         msg = "Cloudflare R2 not configured"
         logger.error(msg)
         return {
             'success': False,
             'error': msg,
+            'missing_env': missing_env if missing_env else None,
             'file': {
                 'tenant_id': tenant_id,
                 'location_id': location_id,

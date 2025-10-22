@@ -11,6 +11,17 @@ app = Celery('myapp', broker=os.getenv('CELERY_BROKER_URL'))
 #             broker=os.getenv('CELERY_BROKER_URL'),
 #             backend=os.getenv('CELERY_RESULT_BACKEND', os.getenv('CELERY_BROKER_URL')))
 
+# Enable a result backend so task states (e.g., STARTED) are persisted
+_result_backend = os.getenv('CELERY_RESULT_BACKEND', os.getenv('CELERY_BROKER_URL'))
+if _result_backend:
+	app.conf.update(result_backend=_result_backend)
+
+# Track when tasks start so polling can show STARTED (not only PENDING)
+app.conf.update(task_track_started=True)
+
+# Optionally emit task events for Flower/monitoring
+app.conf.update(worker_send_task_events=True, task_send_sent_event=True)
+
 # Configure Celery for better task persistence and monitoring
 # app.conf.update(
 #     result_expires=86400,  # Results expire after 24 hours

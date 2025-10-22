@@ -15,6 +15,15 @@ ALLOWED_ORIGINS=https://your-nextjs-app.render.com,http://localhost:3000
 DATABASE_URL=your-postgres-url
 REDIS_URL=your-redis-url
 FLASK_SECRET_KEY=your-flask-secret
+
+# For knowledge upload and analysis (must be set on BOTH web and worker services)
+R2_ACCESS_KEY_ID=...
+R2_SECRET_ACCESS_KEY=...
+R2_ENDPOINT_URL=...
+R2_BUCKET_NAME=...
+R2_PUBLIC_BASE_URL=https://assets.speako.ai
+OPENAI_API_KEY=...
+OPENAI_KNOWLEDGE_MODEL=gpt-4o-mini
 ```
 
 ## API Endpoints
@@ -132,6 +141,13 @@ GET /api/task/<celery-task-id>
 #   "success": true
 # }
 ```
+
+### Troubleshooting
+
+- If task result shows `{"analysis": {"status": "skipped", "reason": "storage_not_configured"}}`:
+  - Your Celery worker is missing one or more R2 env vars. Ensure `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ENDPOINT_URL`, and `R2_BUCKET_NAME` are set on the worker service (not just the web service).
+  - The task result may include a `missing_env` array to indicate which variables are absent.
+- If `OpenAI not configured` appears, set `OPENAI_API_KEY` (and optionally `OPENAI_KNOWLEDGE_MODEL`) on the worker service.
 
 ## Next.js Integration Example
 
