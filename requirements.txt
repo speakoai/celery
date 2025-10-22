@@ -41,3 +41,7 @@ sendgrid
 openai>=1.41.0
 requests
 pathlib
+python-docx
+pandas
+openpyxl
+xlrd

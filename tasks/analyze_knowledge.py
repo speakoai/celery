@@ -20,6 +20,7 @@ from .utils.knowledge_utils import (
     build_knowledge_prompt,
     parse_model_json_output,
     build_analysis_artifact_key,
+    preprocess_for_model,
 )
 
 
@@ -128,7 +129,10 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
             }
         }
 
-    # 2) Run OpenAI analysis
+    # 2) Preprocess file for model (decide text vs file mode)
+    prep = preprocess_for_model(file_content, unique_filename, content_type)
+
+    # 3) Run OpenAI analysis
     api_key = os.getenv('OPENAI_API_KEY')
     if not api_key or OpenAI is None:
         reason = f"OpenAI not configured. client_available={OpenAI is not None}; key_present={bool(api_key)}"
@@ -158,12 +162,15 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
 
     try:
         oa_client = OpenAI(api_key=api_key)
-        uploaded = oa_client.files.create(file=(unique_filename, file_content), purpose='assistants')
-
         prompt = build_knowledge_prompt(knowledge_type)
-        resp = oa_client.responses.create(
-            model=os.getenv('OPENAI_KNOWLEDGE_MODEL', 'gpt-4o-mini'),
-            input=[
+
+        model_name = os.getenv('OPENAI_KNOWLEDGE_MODEL', 'gpt-4o-mini')
+        uploaded = None
+
+        if prep.get('mode') == 'file':
+            # Keep PDF path: upload as file and reference it
+            uploaded = oa_client.files.create(file=(unique_filename, prep['file_bytes']), purpose='assistants')
+            input_payload = [
                 {
                     "role": "user",
                     "content": [
@@ -171,7 +178,30 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
                         {"type": "input_file", "file_id": uploaded.id}
                     ]
                 }
-            ],
+            ]
+        elif prep.get('mode') == 'text':
+            # Provide prompt and the extracted text as two text blocks
+            text_content = prep['text']
+            # Guardrail: limit very large text to avoid blowing token limits
+            max_bytes = int(os.getenv('KNOWLEDGE_MAX_TEXT_BYTES', '200000'))
+            if len(text_content.encode('utf-8', errors='ignore')) > max_bytes:
+                text_content = text_content.encode('utf-8', errors='ignore')[:max_bytes].decode('utf-8', errors='ignore')
+            input_payload = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": prompt},
+                        {"type": "input_text", "text": text_content}
+                    ]
+                }
+            ]
+        else:
+            # Unsupported type: record a clear error but continue to write an error artifact later
+            raise RuntimeError(f"Unsupported document type: {prep.get('reason', 'unknown')}")
+
+        resp = oa_client.responses.create(
+            model=model_name,
+            input=input_payload,
             temperature=0.2
         )
 
@@ -186,7 +216,7 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
 
         parsed, raw = parse_model_json_output(analysis_text)
         status = 'success' if parsed is not None else 'raw'
-        model_used = os.getenv('OPENAI_KNOWLEDGE_MODEL', 'gpt-4o-mini')
+        model_used = model_name
 
         # 3) Save analysis artifact to R2
         analysis_key = build_analysis_artifact_key(tenant_id, location_id, unique_filename)
@@ -223,7 +253,7 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
             'analysis': {
                 'status': status,
                 'model': model_used,
-                'file_id': uploaded.id,
+                **({ 'file_id': uploaded.id } if uploaded is not None else {})
             },
             'artifacts': {
                 'analysis_key': analysis_key,
