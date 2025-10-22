@@ -1,7 +1,7 @@
 import os
 import time
 from datetime import datetime
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse
 
 import requests
 # No HTML parsing needed when using ScraperAPI Markdown output
@@ -59,53 +59,68 @@ def _host_allowed(url: str) -> bool:
     return host in allowed_hosts
 
 
-def _fetch_markdown_via_scraperapi(url: str, timeout_ms: int) -> tuple[str, dict]:
-    """Fetch URL via ScraperAPI with JS rendering and Markdown output.
+def _submit_async_job(url: str, *, render: bool = True, output_format: str | None = 'markdown', timeout_ms: int = 15000) -> tuple[str, str]:
+    """Submit an async job to ScraperAPI. Returns (job_id, status_url)."""
+    api_key = os.getenv('SCRAPERAPI_KEY')
+    if not api_key:
+        raise RuntimeError('SCRAPERAPI_KEY not configured')
+    timeout = max(1, timeout_ms // 1000)
+    payload: dict = {
+        'apiKey': api_key,
+        'url': url,
+        'render': True if render else False,
+    }
+    if output_format:
+        payload['output_format'] = output_format
+    resp = requests.post('https://async.scraperapi.com/jobs', json=payload, timeout=timeout)
+    resp.raise_for_status()
+    data = resp.json()
+    job_id = data.get('id')
+    status_url = data.get('statusUrl')
+    if not job_id or not status_url:
+        raise RuntimeError(f'Invalid async job response: {data}')
+    return str(job_id), str(status_url)
 
-    Requires environment variable SCRAPERAPI_KEY.
-    Returns (markdown_text, meta_headers_dict).
+
+def _poll_async_job(status_url: str, *, per_req_timeout_ms: int = 10000, total_timeout_ms: int = 180000) -> dict:
+    """Poll ScraperAPI async job status until finished or timeout.
+
+    Returns the final JSON payload which should contain a 'response' object with 'body'.
     """
-    api_key = os.getenv('SCRAPERAPI_KEY')
-    if not api_key:
-        raise RuntimeError('SCRAPERAPI_KEY not configured')
-    timeout = max(1, timeout_ms // 1000)
-    params = {
-        'api_key': api_key,
-        'url': url,
-        'render': 'true',
-        'output_format': 'markdown',
-    }
-    resp = requests.get('https://api.scraperapi.com/', params=params, timeout=timeout, allow_redirects=True)
-    resp.raise_for_status()
-    # Build minimal synthetic headers/meta for traceability
-    meta = {
-        'X-ScraperAPI-Render': 'true',
-        'X-ScraperAPI-Output-Format': 'markdown',
-        'X-ScraperAPI-Status': str(resp.status_code),
-    }
-    return resp.text or '', meta
+    started = time.time()
+    attempt = 0
+    per_req_timeout = max(1, per_req_timeout_ms // 1000)
+    while True:
+        attempt += 1
+        resp = requests.get(status_url, timeout=per_req_timeout)
+        resp.raise_for_status()
+        data = resp.json()
+        status = data.get('status')
+        if status == 'finished':
+            return data
+        if status in ('failed', 'error'):
+            raise RuntimeError(f'Async job failed: {data}')
+        # backoff sleep
+        elapsed = time.time() - started
+        if elapsed * 1000 > total_timeout_ms:
+            raise TimeoutError(f'Async job timed out after {int(elapsed)}s: {status_url}')
+        sleep_s = min(5.0, 0.5 + attempt * 0.5)
+        time.sleep(sleep_s)
 
-
-def _fetch_html_via_scraperapi(url: str, timeout_ms: int) -> tuple[str, dict]:
-    """Optionally fetch raw HTML via ScraperAPI when save_raw_html is enabled."""
-    api_key = os.getenv('SCRAPERAPI_KEY')
-    if not api_key:
-        raise RuntimeError('SCRAPERAPI_KEY not configured')
-    timeout = max(1, timeout_ms // 1000)
-    params = {
-        'api_key': api_key,
-        'url': url,
-        'render': 'true',
-        # No output_format => defaults to HTML
-    }
-    resp = requests.get('https://api.scraperapi.com/', params=params, timeout=timeout, allow_redirects=True)
-    resp.raise_for_status()
+def _fetch_html_via_scraperapi_async(url: str, timeout_ms: int, total_timeout_ms: int) -> tuple[str, dict]:
+    """Fetch raw HTML via ScraperAPI Async (rendered)."""
+    job_id, status_url = _submit_async_job(url, render=True, output_format=None, timeout_ms=timeout_ms)
+    final = _poll_async_job(status_url, per_req_timeout_ms=timeout_ms, total_timeout_ms=total_timeout_ms)
+    resp_info = final.get('response', {}) or {}
+    body = resp_info.get('body', '') or ''
     meta = {
-        'X-ScraperAPI-Render': 'true',
+        'X-ScraperAPI-Async': 'true',
+        'X-ScraperAPI-StatusUrl': status_url,
+        'X-ScraperAPI-JobId': job_id,
         'X-ScraperAPI-Output-Format': 'html',
-        'X-ScraperAPI-Status': str(resp.status_code),
+        'X-ScraperAPI-StatusCode': str(resp_info.get('statusCode')) if resp_info.get('statusCode') is not None else None,
     }
-    return resp.text or '', meta
+    return body, meta
 
 
 def _render_page_with_js(url: str, timeout_ms: int, user_agent: str | None = None) -> str:
@@ -159,8 +174,19 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
 
     try:
         timeout_ms = int(os.getenv('SCRAPE_TIMEOUT_MS', '15000'))
-        # Fetch directly from ScraperAPI as Markdown
-        markdown, headers = _fetch_markdown_via_scraperapi(url, timeout_ms)
+        total_timeout_ms = int(os.getenv('SCRAPERAPI_POLL_TOTAL_TIMEOUT_MS', '180000'))
+        # Submit async job for Markdown output and poll until finished
+        job_id, status_url = _submit_async_job(url, render=True, output_format='markdown', timeout_ms=timeout_ms)
+        final = _poll_async_job(status_url, per_req_timeout_ms=timeout_ms, total_timeout_ms=total_timeout_ms)
+        resp_info = final.get('response', {}) or {}
+        markdown = (resp_info.get('body') or '').strip()
+        headers = {
+            'X-ScraperAPI-Async': 'true',
+            'X-ScraperAPI-StatusUrl': status_url,
+            'X-ScraperAPI-JobId': job_id,
+            'X-ScraperAPI-Output-Format': 'markdown',
+            'X-ScraperAPI-StatusCode': str(resp_info.get('statusCode')) if resp_info.get('statusCode') is not None else None,
+        }
 
         keys = build_scrape_artifact_paths(tenant_id, location_id, url)
         public_base = os.getenv('R2_PUBLIC_BASE_URL', 'https://assets.speako.ai')
@@ -194,7 +220,7 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
 
         if save_raw_html or os.getenv('SCRAPE_SAVE_RAW_HTML', 'false').lower() == 'true':
             try:
-                raw_html, _raw_headers = _fetch_html_via_scraperapi(url, timeout_ms)
+                raw_html, _raw_headers = _fetch_html_via_scraperapi_async(url, timeout_ms, total_timeout_ms)
                 r2.put_object(
                     Bucket=bucket,
                     Key=keys['raw_key'],
