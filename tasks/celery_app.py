@@ -37,3 +37,4 @@ app.autodiscover_tasks(['tasks'])
 import tasks.availability
 import tasks.sms
 import tasks.availability_gen_regen
+import tasks.analyze_knowledge

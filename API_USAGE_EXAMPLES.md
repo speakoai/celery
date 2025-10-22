@@ -77,6 +77,62 @@ GET /api/health
 # No authentication required
 ```
 
+### 5. Upload Knowledge File (background analysis)
+```bash
+POST /api/knowledge/upload-knowledge-file
+X-API-Key: your-api-key-here
+Content-Type: multipart/form-data
+
+Form fields:
+- tenant_id: string (required)
+- location_id: string (required)
+- knowledge_type: one of [menu, faq, policy, events] (required)
+- file: .doc/.docx/.xls/.xlsx/.pdf/.csv/.txt (<= 5MB)
+
+# Example using curl
+curl -X POST https://your-celery-app.render.com/api/knowledge/upload-knowledge-file \
+  -H "X-API-Key: your-api-key-here" \
+  -F tenant_id=123 \
+  -F location_id=456 \
+  -F knowledge_type=menu \
+  -F file=@/path/to/menu.pdf
+
+# Response (201):
+# {
+#   "success": true,
+#   "message": "Knowledge file uploaded successfully",
+#   "data": {
+#     "tenant_id": "123",
+#     "location_id": "456",
+#     "knowledge_type": "menu",
+#     "filename": "123_456_menu_ab12cd34.pdf",
+#     "key": "knowledges/123/456/123_456_menu_ab12cd34.pdf",
+#     "url": "https://assets.speako.ai/knowledges/123/456/123_456_menu_ab12cd34.pdf",
+#     "size": 102400,
+#     "content_type": "application/pdf",
+#     "analysis": { "status": "queued", "mode": "background", "task_id": "<celery-task-id>" }
+#   }
+# }
+
+# Poll the task status (until ready=true)
+GET /api/task/<celery-task-id>
+
+# When complete, task result includes analysis artifact location:
+# {
+#   "task_id": "...",
+#   "status": "SUCCESS",
+#   "ready": true,
+#   "result": {
+#     "success": true,
+#     "file": { ... },
+#     "analysis": { "status": "success|raw", "model": "gpt-4o-mini", "file_id": "file_..." },
+#     "artifacts": { "analysis_key": "knowledges/123/456/analysis/123_456_menu_ab12cd34.json", "analysis_url": "https://assets.speako.ai/knowledges/123/456/analysis/123_456_menu_ab12cd34.json" },
+#     "job": { "task_id": "...", "duration_ms": 12345 }
+#   },
+#   "success": true
+# }
+```
+
 ## Next.js Integration Example
 
 ```typescript

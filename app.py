@@ -12,6 +12,7 @@ from tasks.sms import (
     send_email_confirmation_customer_new, send_email_confirmation_customer_mod, send_email_confirmation_customer_can
 )
 from tasks.celery_app import app as celery_app
+from tasks.analyze_knowledge import analyze_knowledge_file
 # Additional imports for R2 uploads
 import boto3
 from werkzeug.utils import secure_filename
@@ -803,76 +804,30 @@ def api_upload_knowledge_file():
             'content_type': content_type,
         }
 
-        # ----------------------------
-        # Optional: Analyze with OpenAI
-        # ----------------------------
-        analysis_requested = True  # set to True by default; adjust if you want to gate it later
-        if analysis_requested:
-            api_key = os.getenv('OPENAI_API_KEY')
-            if not api_key or OpenAI is None:
-                # Log why it was skipped without exposing secrets
-                try:
-                    app.logger.warning(
-                        f"[Analysis] Skipped OpenAI analysis. client_available={OpenAI is not None}; key_present={bool(api_key)}"
-                    )
-                except Exception:
-                    pass
-                response_data['analysis'] = {
-                    'status': 'skipped',
-                    'reason': 'OpenAI not configured'
-                }
-            else:
-                try:
-                    client = OpenAI(api_key=api_key)
-                    # Upload file to OpenAI Files API
-                    uploaded = client.files.create(file=(unique_filename, file_content), purpose='assistants')
-
-                    prompt = build_knowledge_prompt(knowledge_type)
-                    # Use Responses API to attach the file
-                    resp = client.responses.create(
-                        model=os.getenv('OPENAI_KNOWLEDGE_MODEL', 'gpt-4o-mini'),
-                        input=[
-                            {
-                                "role": "user",
-                                "content": [
-                                    {"type": "input_text", "text": prompt},
-                                    {"type": "input_file", "file_id": uploaded.id}
-                                ]
-                            }
-                        ],
-                        temperature=0.2
-                    )
-                    # Extract text output
-                    analysis_text = resp.output_text if hasattr(resp, 'output_text') else (resp.choices[0].message.content if getattr(resp, 'choices', None) else None)
-
-                    # Try to parse JSON
-                    import json as _json
-                    parsed = None
-                    if analysis_text:
-                        # In case the model wraps JSON in code fences
-                        txt = analysis_text.strip()
-                        if txt.startswith('```'):
-                            txt = txt.strip('`')
-                            # remove potential language hint like json\n
-                            first_nl = txt.find('\n')
-                            if first_nl != -1:
-                                txt = txt[first_nl+1:]
-                        try:
-                            parsed = _json.loads(txt)
-                        except Exception:
-                            parsed = None
-
-                    response_data['analysis'] = {
-                        'status': 'success' if parsed else 'raw',
-                        'model': os.getenv('OPENAI_KNOWLEDGE_MODEL', 'gpt-4o-mini'),
-                        'file_id': uploaded.id,
-                        'result': parsed if parsed is not None else analysis_text
-                    }
-                except Exception as ae:
-                    response_data['analysis'] = {
-                        'status': 'error',
-                        'message': str(ae)
-                    }
+        # Enqueue background analysis task
+        try:
+            task = analyze_knowledge_file.delay(
+                tenant_id=tenant_id,
+                location_id=location_id,
+                knowledge_type=knowledge_type,
+                key=key,
+                unique_filename=unique_filename,
+                content_type=content_type,
+                public_url=public_url,
+            )
+            response_data['analysis'] = {
+                'status': 'queued',
+                'mode': 'background',
+                'task_id': task.id
+            }
+        except Exception as ae:
+            # If enqueue fails, return upload success but analysis enqueue error
+            app.logger.error(f"Failed to enqueue analysis task: {ae}")
+            response_data['analysis'] = {
+                'status': 'error',
+                'message': 'Failed to enqueue analysis task',
+                'detail': str(ae)
+            }
 
         return jsonify({
             'success': True,
