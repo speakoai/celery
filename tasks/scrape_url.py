@@ -4,22 +4,14 @@ from datetime import datetime
 from urllib.parse import urlparse, urljoin
 
 import requests
-from bs4 import BeautifulSoup
-from markdownify import markdownify as md
+# No HTML parsing needed when using ScraperAPI Markdown output
 
 from celery.utils.log import get_task_logger
 from tasks.celery_app import app
 import boto3
 
-try:
-    import trafilatura
-except Exception:
-    trafilatura = None
-
-try:
-    from readability import Document
-except Exception:
-    Document = None
+trafilatura = None
+Document = None
 
 try:
     from openai import OpenAI
@@ -37,11 +29,9 @@ from .utils.knowledge_utils import (
 
 logger = get_task_logger(__name__)
 
-# Optional JS rendering (Playwright)
-try:
-    from playwright.sync_api import sync_playwright
-except Exception:
-    sync_playwright = None
+# Note: We are switching to ScraperAPI for fetching rendered content in Markdown.
+# Any Playwright-based rendering paths are no longer used.
+sync_playwright = None
 
 
 def _get_r2_client():
@@ -69,91 +59,68 @@ def _host_allowed(url: str) -> bool:
     return host in allowed_hosts
 
 
-def _fetch_url(url: str, timeout_ms: int) -> tuple[str, dict]:
-    headers = {
-        'User-Agent': os.getenv('SCRAPE_USER_AGENT', 'SpeakoBot/1.0 (+contact)')
-    }
+def _fetch_markdown_via_scraperapi(url: str, timeout_ms: int) -> tuple[str, dict]:
+    """Fetch URL via ScraperAPI with JS rendering and Markdown output.
+
+    Requires environment variable SCRAPERAPI_KEY.
+    Returns (markdown_text, meta_headers_dict).
+    """
+    api_key = os.getenv('SCRAPERAPI_KEY')
+    if not api_key:
+        raise RuntimeError('SCRAPERAPI_KEY not configured')
     timeout = max(1, timeout_ms // 1000)
-    resp = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
+    params = {
+        'api_key': api_key,
+        'url': url,
+        'render': 'true',
+        'output_format': 'markdown',
+    }
+    resp = requests.get('https://api.scraperapi.com/', params=params, timeout=timeout, allow_redirects=True)
     resp.raise_for_status()
-    return resp.text, dict(resp.headers)
+    # Build minimal synthetic headers/meta for traceability
+    meta = {
+        'X-ScraperAPI-Render': 'true',
+        'X-ScraperAPI-Output-Format': 'markdown',
+        'X-ScraperAPI-Status': str(resp.status_code),
+    }
+    return resp.text or '', meta
+
+
+def _fetch_html_via_scraperapi(url: str, timeout_ms: int) -> tuple[str, dict]:
+    """Optionally fetch raw HTML via ScraperAPI when save_raw_html is enabled."""
+    api_key = os.getenv('SCRAPERAPI_KEY')
+    if not api_key:
+        raise RuntimeError('SCRAPERAPI_KEY not configured')
+    timeout = max(1, timeout_ms // 1000)
+    params = {
+        'api_key': api_key,
+        'url': url,
+        'render': 'true',
+        # No output_format => defaults to HTML
+    }
+    resp = requests.get('https://api.scraperapi.com/', params=params, timeout=timeout, allow_redirects=True)
+    resp.raise_for_status()
+    meta = {
+        'X-ScraperAPI-Render': 'true',
+        'X-ScraperAPI-Output-Format': 'html',
+        'X-ScraperAPI-Status': str(resp.status_code),
+    }
+    return resp.text or '', meta
 
 
 def _render_page_with_js(url: str, timeout_ms: int, user_agent: str | None = None) -> str:
-    """Render a JS-heavy page using Playwright if available. Returns HTML string.
-
-    Note: Requires the 'playwright' Python package and browsers installed.
-    In Render, add a build step: `python -m playwright install --with-deps chromium`.
-    """
-    if sync_playwright is None:
-        raise RuntimeError('playwright_not_installed')
-    wait_timeout = max(1000, timeout_ms)
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])  # type: ignore
-        context = browser.new_context(
-            user_agent=user_agent or os.getenv('SCRAPE_USER_AGENT', 'SpeakoBot/1.0 (+contact)'),
-            java_script_enabled=True,
-            viewport={"width": 1280, "height": 2000},
-        )
-        page = context.new_page()
-        page.goto(url, wait_until="networkidle", timeout=wait_timeout)
-        # Some sites render late; small additional delay if configured
-        extra_wait_ms = int(os.getenv('SCRAPE_JS_EXTRA_WAIT_MS', '0'))
-        if extra_wait_ms > 0:
-            page.wait_for_timeout(extra_wait_ms)
-        content = page.content()
-        context.close()
-        browser.close()
-        return content
+    """Deprecated: JS rendering is handled by ScraperAPI (render=true)."""
+    raise RuntimeError('playwright_render_deprecated')
 
 
 def _extract_main_html(html: str, base_url: str) -> tuple[str, str]:
-    """Return (title, main_html) using trafilatura or readability as fallback."""
-    # Try trafilatura first if available
-    if trafilatura is not None:
-        try:
-            extracted = trafilatura.extract(html, include_comments=False, include_tables=True, favor_recall=True)
-            if extracted and len(extracted) > 200:
-                # Trafilatura returns plain text; wrap minimal HTML for markdownify
-                meta = trafilatura.extract_metadata(html)
-                title = meta.title if meta else ''
-                para_html = extracted.replace("\n", "</p><p>")
-                main_html = f"<article><h1>{title or ''}</h1><p>{para_html}</p></article>"
-                return title or '', main_html
-        except Exception:
-            pass
-
-    # Fallback to readability
-    if Document is not None:
-        try:
-            doc = Document(html)
-            title = doc.short_title() or ''
-            main_html = doc.summary()
-            return title, main_html
-        except Exception:
-            pass
-
-    # Last resort: strip scripts and use body
-    soup = BeautifulSoup(html, 'lxml')
-    for tag in soup(['script', 'style', 'noscript']):
-        tag.decompose()
-    title = (soup.title.string if soup.title and soup.title.string else '').strip()
-    body = soup.body or soup
-    return title, str(body)
+    """Deprecated: We now receive Markdown directly from ScraperAPI."""
+    return '', html
 
 
 def _html_to_markdown(title: str, html: str, base_url: str) -> str:
-    # Convert relative links to absolute
-    soup = BeautifulSoup(html, 'lxml')
-    for a in soup.find_all('a', href=True):
-        a['href'] = urljoin(base_url, a['href'])
-    for img in soup.find_all('img', src=True):
-        img['src'] = urljoin(base_url, img['src'])
-
-    final_html = str(soup)
-    content_md = md(final_html, heading_style="ATX")
-    header = f"# {title}\n\n" if title else ""
-    return header + content_md
+    """Deprecated: ScraperAPI returns Markdown directly; passthrough."""
+    return html
 
 
 @app.task(bind=True)
@@ -192,26 +159,8 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
 
     try:
         timeout_ms = int(os.getenv('SCRAPE_TIMEOUT_MS', '15000'))
-        html, headers = _fetch_url(url, timeout_ms)
-        # Detect JS-only pages or empty content and optionally render with Playwright
-        js_required_markers = [
-            'not available without javascript',
-            'enable javascript',
-            'requires javascript',
-        ]
-        should_try_js = os.getenv('SCRAPE_ENABLE_JS', 'false').lower() == 'true'
-        needs_js = (len((html or '').strip()) < 1000) or any(m in (html or '').lower() for m in js_required_markers)
-        if should_try_js and needs_js:
-            try:
-                rendered = _render_page_with_js(url, int(os.getenv('SCRAPE_JS_TIMEOUT_MS', '20000')),
-                                                os.getenv('SCRAPE_USER_AGENT', 'SpeakoBot/1.0 (+contact)'))
-                if rendered and len(rendered) > len(html):
-                    html = rendered
-                    headers['X-Scrape-Rendered'] = 'playwright'
-            except Exception as _js_e:
-                logger.warning(f"Playwright render skipped/failed: {_js_e}")
-        title, main_html = _extract_main_html(html, url)
-        markdown = _html_to_markdown(title, main_html, url)
+        # Fetch directly from ScraperAPI as Markdown
+        markdown, headers = _fetch_markdown_via_scraperapi(url, timeout_ms)
 
         keys = build_scrape_artifact_paths(tenant_id, location_id, url)
         public_base = os.getenv('R2_PUBLIC_BASE_URL', 'https://assets.speako.ai')
@@ -229,11 +178,11 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
         import json as _json
         meta = {
             'url': url,
-            'title': title,
+            'title': None,
             'fetched_at': datetime.utcnow().isoformat() + 'Z',
             'headers': headers,
             'content_length': len(markdown.encode('utf-8')),
-            'extractor': ('playwright|' if headers.get('X-Scrape-Rendered') == 'playwright' else '') + 'trafilatura|readability|bs4',
+            'extractor': 'scraperapi',
         }
         r2.put_object(
             Bucket=bucket,
@@ -244,13 +193,17 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
         )
 
         if save_raw_html or os.getenv('SCRAPE_SAVE_RAW_HTML', 'false').lower() == 'true':
-            r2.put_object(
-                Bucket=bucket,
-                Key=keys['raw_key'],
-                Body=html.encode('utf-8', errors='ignore'),
-                ContentType='text/html',
-                Metadata={'tenant_id': str(tenant_id), 'location_id': str(location_id), 'source': 'scrape'}
-            )
+            try:
+                raw_html, _raw_headers = _fetch_html_via_scraperapi(url, timeout_ms)
+                r2.put_object(
+                    Bucket=bucket,
+                    Key=keys['raw_key'],
+                    Body=raw_html.encode('utf-8', errors='ignore'),
+                    ContentType='text/html',
+                    Metadata={'tenant_id': str(tenant_id), 'location_id': str(location_id), 'source': 'scrape'}
+                )
+            except Exception as _raw_e:
+                logger.warning(f"Saving raw HTML via ScraperAPI failed: {_raw_e}")
 
         artifacts = {
             'markdown_key': keys['markdown_key'],
