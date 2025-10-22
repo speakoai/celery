@@ -80,9 +80,11 @@ def _extract_main_html(html: str, base_url: str) -> tuple[str, str]:
         try:
             extracted = trafilatura.extract(html, include_comments=False, include_tables=True, favor_recall=True)
             if extracted and len(extracted) > 200:
-                # Trafilatura returns text; wrap minimal HTML for markdownify
-                title = trafilatura.extract_metadata(html).title if trafilatura.extract_metadata(html) else ''
-                main_html = f"<article><h1>{title or ''}</h1><p>{extracted.replace('\n', '</p><p>')}</p></article>"
+                # Trafilatura returns plain text; wrap minimal HTML for markdownify
+                meta = trafilatura.extract_metadata(html)
+                title = meta.title if meta else ''
+                para_html = extracted.replace("\n", "</p><p>")
+                main_html = f"<article><h1>{title or ''}</h1><p>{para_html}</p></article>"
                 return title or '', main_html
         except Exception:
             pass
