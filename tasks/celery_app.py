@@ -49,3 +49,4 @@ import tasks.availability
 import tasks.sms
 import tasks.availability_gen_regen
 import tasks.analyze_knowledge
+import tasks.scrape_url

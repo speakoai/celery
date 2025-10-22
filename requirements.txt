@@ -45,3 +45,8 @@ python-docx
 pandas
 openpyxl
 xlrd
+trafilatura
+readability-lxml
+beautifulsoup4
+markdownify
+lxml

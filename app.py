@@ -13,6 +13,7 @@ from tasks.sms import (
 )
 from tasks.celery_app import app as celery_app
 from tasks.analyze_knowledge import analyze_knowledge_file
+from tasks.scrape_url import scrape_url_to_markdown
 # Additional imports for R2 uploads
 import boto3
 from werkzeug.utils import secure_filename
@@ -1158,6 +1159,39 @@ def build_knowledge_prompt(knowledge_type: str) -> str:
             "  \"source_confidence\": number\n"
             "}"
         )
+    if knowledge_type == 'events' or knowledge_type == 'event' or knowledge_type == 'promotions':
+        return (
+            "You are given a document that may contain information about events and/or promotions. "
+            "Extract items into the following strict JSON schema. Output ONLY JSON. Do NOT include prose.\n"
+            "{\n"
+            "  \"type\": \"events_promotions\",\n"
+            "  \"items\": [\n"
+            "    {\n"
+            "      \"title\": string,\n"
+            "      \"category\": \"event\" | \"promotion\",\n"
+            "      \"description\": string|null,\n"
+            "      \"start_datetime\": string|null,  // ISO8601 if available, else null\n"
+            "      \"end_datetime\": string|null,    // ISO8601 if available, else null\n"
+            "      \"dates\": [ string ],            // optional list of ISO dates for multiple occurrences\n"
+            "      \"recurrence\": { \"rule\": string|null, \"notes\": string|null } | null,\n"
+            "      \"location\": { \"venue\": string|null, \"address\": string|null, \"city\": string|null },\n"
+            "      \"price\": { \"amount\": number|null, \"currency\": string|null } | null,\n"
+            "      \"promotion\": {\n"
+            "         \"discount_type\": \"percentage\" | \"amount\" | null,\n"
+            "         \"value\": number|null,\n"
+            "         \"promo_code\": string|null,\n"
+            "         \"conditions\": string|null,\n"
+            "         \"valid_from\": string|null,   // ISO8601 date or datetime\n"
+            "         \"valid_until\": string|null    // ISO8601 date or datetime\n"
+            "      } | null,\n"
+            "      \"audience\": string|null,\n"
+            "      \"url\": string|null,\n"
+            "      \"tags\": [ string ]\n"
+            "    }\n"
+            "  ],\n"
+            "  \"source_confidence\": number\n"
+            "}"
+        )
     # policy
     return (
         "You are given a document that may contain policies and terms & conditions. "
@@ -1169,3 +1203,73 @@ def build_knowledge_prompt(knowledge_type: str) -> str:
         "  \"source_confidence\": number\n"
         "}"
     )
+
+
+@app.route('/api/knowledge/scrape-url', methods=['POST'])
+@require_api_key
+def api_scrape_url():
+    """
+    [aiknowledges] Scrape a public URL into LLM-ready Markdown and store artifacts in R2.
+
+    Expected JSON payload:
+    {
+      "tenant_id": "123",           // required
+      "location_id": "456",         // required
+      "url": "https://...",         // required
+      "pipeline": "markdown-only" | "analyze", // optional, default: markdown-only
+      "knowledge_type": "menu|faq|policy|events", // required if pipeline=analyze
+      "save_raw_html": false          // optional
+    }
+
+    Returns 202 with task_id for polling at /api/task/<task_id>.
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'JSON payload required'}), 400
+
+        tenant_id = data.get('tenant_id')
+        location_id = data.get('location_id')
+        url = data.get('url')
+        pipeline = data.get('pipeline', 'markdown-only')
+        knowledge_type = data.get('knowledge_type')
+        save_raw_html = bool(data.get('save_raw_html', False))
+
+        missing = [k for k in ['tenant_id', 'location_id', 'url'] if not data.get(k)]
+        if missing:
+            return jsonify({'error': 'Missing required fields', 'missing_fields': missing}), 400
+
+        if pipeline not in ['markdown-only', 'analyze']:
+            return jsonify({'error': 'Invalid pipeline', 'message': 'pipeline must be markdown-only or analyze'}), 400
+
+        if pipeline == 'analyze':
+            valid_types = ['menu', 'faq', 'policy', 'events']
+            if knowledge_type not in valid_types:
+                return jsonify({
+                    'error': 'Invalid or missing knowledge_type',
+                    'message': f'knowledge_type required for analyze; one of: {", ".join(valid_types)}'
+                }), 400
+
+        # Enqueue scrape task
+        task = scrape_url_to_markdown.delay(
+            tenant_id=tenant_id,
+            location_id=location_id,
+            url=url,
+            pipeline=pipeline,
+            knowledge_type=knowledge_type,
+            save_raw_html=save_raw_html,
+        )
+
+        return jsonify({
+            'task_id': task.id,
+            'status': 'pending',
+            'message': 'URL scrape task started',
+            'tenant_id': tenant_id,
+            'location_id': location_id,
+            'url': url,
+            'pipeline': pipeline,
+            'knowledge_type': knowledge_type,
+        }), 202
+
+    except Exception as e:
+        return jsonify({'error': 'Internal server error', 'message': str(e)}), 500

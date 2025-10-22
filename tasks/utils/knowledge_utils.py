@@ -36,6 +36,39 @@ def build_knowledge_prompt(knowledge_type: str) -> str:
             "  \"source_confidence\": number\n"
             "}"
         )
+    if knowledge_type == 'events' or knowledge_type == 'event' or knowledge_type == 'promotions':
+        return (
+            "You are given a document that may contain information about events and/or promotions. "
+            "Extract items into the following strict JSON schema. Output ONLY JSON. Do NOT include prose.\n"
+            "{\n"
+            "  \"type\": \"events_promotions\",\n"
+            "  \"items\": [\n"
+            "    {\n"
+            "      \"title\": string,\n"
+            "      \"category\": \"event\" | \"promotion\",\n"
+            "      \"description\": string|null,\n"
+            "      \"start_datetime\": string|null,  // ISO8601 if available, else null\n"
+            "      \"end_datetime\": string|null,    // ISO8601 if available, else null\n"
+            "      \"dates\": [ string ],            // optional list of ISO dates for multiple occurrences\n"
+            "      \"recurrence\": { \"rule\": string|null, \"notes\": string|null } | null,\n"
+            "      \"location\": { \"venue\": string|null, \"address\": string|null, \"city\": string|null },\n"
+            "      \"price\": { \"amount\": number|null, \"currency\": string|null } | null,\n"
+            "      \"promotion\": {\n"
+            "         \"discount_type\": \"percentage\" | \"amount\" | null,\n"
+            "         \"value\": number|null,\n"
+            "         \"promo_code\": string|null,\n"
+            "         \"conditions\": string|null,\n"
+            "         \"valid_from\": string|null,   // ISO8601 date or datetime\n"
+            "         \"valid_until\": string|null    // ISO8601 date or datetime\n"
+            "      } | null,\n"
+            "      \"audience\": string|null,\n"
+            "      \"url\": string|null,\n"
+            "      \"tags\": [ string ]\n"
+            "    }\n"
+            "  ],\n"
+            "  \"source_confidence\": number\n"
+            "}"
+        )
     # policy
     return (
         "You are given a document that may contain policies and terms & conditions. "
@@ -162,4 +195,21 @@ def preprocess_for_model(file_bytes: bytes, filename: str, content_type: str) ->
 
     # Default: try as text
     return { 'mode': 'text', 'text': _bytes_to_text(file_bytes), 'note': 'default-text' }
+
+
+def build_scrape_artifact_paths(tenant_id: str, location_id: str, url: str) -> dict:
+    """Return R2 keys for storing scraped markdown and metadata.
+
+    Uses an md5 digest of the URL for path stability.
+    """
+    h = hashlib.md5(url.encode('utf-8')).hexdigest()[:16]
+    base = f"knowledges/{tenant_id}/{location_id}/scrapes/{h}"
+    return {
+        'markdown_key': f"{base}/content.md",
+        'meta_key': f"{base}/meta.json",
+        'raw_key': f"{base}/raw.html",
+        'analysis_key': f"{base}/analysis.json",
+        'base': base,
+        'digest': h,
+    }
 
