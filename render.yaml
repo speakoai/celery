@@ -3,7 +3,7 @@ services:
     name: celery-worker
     region: virginia
     runtime: python
-    buildCommand: "pip install -r requirements.txt && python -m playwright install --with-deps chromium"
+    buildCommand: "pip install -r requirements.txt"
     startCommand: "celery --app tasks.celery_app worker --loglevel info --concurrency 4 --events"
     autoDeploy: true
     envVars:
@@ -26,37 +26,6 @@ services:
           name: celery-redis
           type: redis
           property: connectionString
-      # OpenAI (worker-only)
-      - key: OPENAI_API_KEY
-        fromSecret: OPENAI_API_KEY
-      - key: OPENAI_KNOWLEDGE_MODEL
-        value: gpt-4o-mini
-      # Cloudflare R2 (S3-compatible)
-      - key: R2_ACCESS_KEY_ID
-        fromSecret: R2_ACCESS_KEY_ID
-      - key: R2_SECRET_ACCESS_KEY
-        fromSecret: R2_SECRET_ACCESS_KEY
-      - key: R2_ENDPOINT_URL
-        sync: false
-      - key: R2_BUCKET_NAME
-        sync: false
-      - key: R2_PUBLIC_BASE_URL
-        value: https://assets.speako.ai
-      # Scraping controls (worker-only)
-      - key: SCRAPE_ALLOWED_HOSTS
-        sync: false
-      - key: SCRAPE_TIMEOUT_MS
-        value: "20000"
-      - key: SCRAPE_USER_AGENT
-        sync: false
-      - key: SCRAPE_SAVE_RAW_HTML
-        value: "false"
-      - key: SCRAPE_ENABLE_JS
-        value: "false"
-      - key: SCRAPE_JS_TIMEOUT_MS
-        value: "30000"
-      - key: SCRAPE_JS_EXTRA_WAIT_MS
-        value: "1000"
   - type: web
     name: app
     region: virginia
@@ -75,20 +44,6 @@ services:
           name: celery-redis
           type: redis
           property: connectionString
-      # API auth
-      - key: API_SECRET_KEY
-        fromSecret: API_SECRET_KEY
-      # Cloudflare R2 for uploads (web needs these)
-      - key: R2_ACCESS_KEY_ID
-        fromSecret: R2_ACCESS_KEY_ID
-      - key: R2_SECRET_ACCESS_KEY
-        fromSecret: R2_SECRET_ACCESS_KEY
-      - key: R2_ENDPOINT_URL
-        sync: false
-      - key: R2_BUCKET_NAME
-        sync: false
-      - key: R2_PUBLIC_BASE_URL
-        value: https://assets.speako.ai
 
   - type: web
     name: flower
