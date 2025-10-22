@@ -82,10 +82,19 @@ def _submit_async_job(url: str, *, render: bool = True, output_format: str | Non
     resp = requests.post('https://async.scraperapi.com/jobs', json=payload, timeout=timeout)
     resp.raise_for_status()
     data = resp.json()
-    job_id = data.get('id')
-    status_url = data.get('statusUrl')
+    job_id = None
+    status_url = None
+    # Response may be a dict or a list of job objects when using 'urls'
+    if isinstance(data, dict):
+        job_id = data.get('id') or data.get('jobId')
+        status_url = data.get('statusUrl') or data.get('statusURL')
+    elif isinstance(data, list) and data:
+        first = data[0]
+        if isinstance(first, dict):
+            job_id = first.get('id') or first.get('jobId')
+            status_url = first.get('statusUrl') or first.get('statusURL')
     if not job_id or not status_url:
-        raise RuntimeError(f'Invalid async job response: {data}')
+        raise RuntimeError(f'Invalid async job response shape: {data}')
     return str(job_id), str(status_url)
 
 
@@ -118,7 +127,7 @@ def _fetch_html_via_scraperapi_async(url: str, timeout_ms: int, total_timeout_ms
     """Fetch raw HTML via ScraperAPI Async (rendered)."""
     job_id, status_url = _submit_async_job(url, render=True, output_format=None, timeout_ms=timeout_ms)
     final = _poll_async_job(status_url, per_req_timeout_ms=timeout_ms, total_timeout_ms=total_timeout_ms)
-    resp_info = final.get('response', {}) or {}
+    resp_info = _extract_async_response_info(final) or {}
     body = resp_info.get('body', '') or ''
     meta = {
         'X-ScraperAPI-Async': 'true',
