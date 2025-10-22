@@ -130,6 +130,50 @@ def _fetch_html_via_scraperapi_async(url: str, timeout_ms: int, total_timeout_ms
     return body, meta
 
 
+def _extract_async_response_info(data: object) -> dict:
+    """Return a uniform response info dict from ScraperAPI async job result.
+
+    Handles shapes:
+    - { response: { body, statusCode, headers, ... } }
+    - { response: [ { body, ... }, ... ] }
+    - { results: [ { response: { ... } }, ... ] }
+    - [ { response: { ... } }, ... ]
+    Returns an empty dict if nothing matches.
+    """
+    try:
+        # Dict shapes
+        if isinstance(data, dict):
+            resp = data.get('response')  # type: ignore[attr-defined]
+            if isinstance(resp, dict):
+                return resp
+            if isinstance(resp, list) and resp:
+                first = resp[0]
+                if isinstance(first, dict):
+                    return first
+            results = data.get('results')  # type: ignore[attr-defined]
+            if isinstance(results, list) and results:
+                for item in results:
+                    if isinstance(item, dict) and isinstance(item.get('response'), dict):
+                        return item['response']
+                # fallback to first item if no response key found
+                first_item = results[0]
+                if isinstance(first_item, dict):
+                    maybe_resp = first_item.get('response')
+                    if isinstance(maybe_resp, dict):
+                        return maybe_resp
+                return {}
+        # List shape
+        if isinstance(data, list) and data:
+            first = data[0]
+            if isinstance(first, dict):
+                if isinstance(first.get('response'), dict):
+                    return first['response']
+                return first
+        return {}
+    except Exception:
+        return {}
+
+
 def _render_page_with_js(url: str, timeout_ms: int, user_agent: str | None = None) -> str:
     """Deprecated: JS rendering is handled by ScraperAPI (render=true)."""
     raise RuntimeError('playwright_render_deprecated')
@@ -185,7 +229,7 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
         # Submit async job for Markdown output and poll until finished
         job_id, status_url = _submit_async_job(url, render=True, output_format='markdown', timeout_ms=timeout_ms)
         final = _poll_async_job(status_url, per_req_timeout_ms=timeout_ms, total_timeout_ms=total_timeout_ms)
-        resp_info = final.get('response', {}) or {}
+        resp_info = _extract_async_response_info(final) or {}
         markdown = (resp_info.get('body') or '').strip()
         headers = {
             'X-ScraperAPI-Async': 'true',
