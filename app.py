@@ -712,7 +712,7 @@ def api_health_check():
     }), 200
 
 
-@app.route('/api/knowledge/upload-knowledge-file', methods=['POST'])
+@app.route('/api/knowledge/analyze-knowledge-file', methods=['POST'])
 @require_api_key
 def api_upload_knowledge_file():
     """
