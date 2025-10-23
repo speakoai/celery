@@ -24,6 +24,8 @@ from .utils.knowledge_utils import (
     build_analysis_artifact_key,
     preprocess_for_model,
 )
+# New: DB helper to mark tasks running
+from .utils.task_db import mark_task_running
 
 
 logger = get_task_logger(__name__)
@@ -110,6 +112,27 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
                 'duration_ms': int((time.time() - start_ts) * 1000),
             }
         }
+
+    # Mark task as running once pre-checks pass
+    if speako_task_id:
+        try:
+            mark_task_running(
+                task_id=speako_task_id,
+                celery_task_id=self.request.id,
+                message="Analysis started",
+                details={
+                    'tenant_id': tenant_id,
+                    'location_id': location_id,
+                    'knowledge_type': knowledge_type,
+                    'key': key,
+                    'filename': unique_filename,
+                    'content_type': content_type,
+                    'source_url': chosen_url,
+                    'started_at': started_at,
+                },
+            )
+        except Exception as _e:
+            logger.warning("[tasks] mark_task_running failed: %s", _e)
 
     # 1) Get the original file: from URL if provided, else from R2
     try:
