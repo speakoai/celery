@@ -24,8 +24,8 @@ from .utils.knowledge_utils import (
     build_analysis_artifact_key,
     preprocess_for_model,
 )
-# New: DB helper to mark tasks running
-from .utils.task_db import mark_task_running
+# New: DB helpers for task lifecycle and artifacts
+from .utils.task_db import mark_task_running, mark_task_failed, mark_task_succeeded, record_task_artifact
 
 
 logger = get_task_logger(__name__)
@@ -89,6 +89,28 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
     if client is None or bucket is None:
         msg = "Cloudflare R2 not configured"
         logger.error(msg)
+        # Mark failed (early exit)
+        if speako_task_id:
+            try:
+                mark_task_failed(
+                    task_id=str(speako_task_id),
+                    celery_task_id=str(self.request.id),
+                    error_code='r2_not_configured',
+                    error_message=msg,
+                    details={
+                        'tenant_id': tenant_id,
+                        'location_id': location_id,
+                        'knowledge_type': knowledge_type,
+                        'key': key,
+                        'filename': unique_filename,
+                        'url': chosen_url,
+                        'content_type': content_type,
+                        'started_at': started_at,
+                    },
+                    actor='celery'
+                )
+            except Exception as db_e:
+                logger.warning("[tasks] mark_task_failed (r2_not_configured) failed: %s", db_e)
         return {
             'success': False,
             'error': msg,
@@ -102,7 +124,7 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
                 'url': chosen_url,
                 'content_type': content_type,
             },
-            'analysis': {'status': 'skipped', 'reason': 'storage_not_configured'},
+            'analysis': {'status': 'error', 'reason': 'storage_not_configured'},
             'artifacts': None,
             'job': {
                 'task_id': self.request.id,
@@ -147,6 +169,27 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
             size = len(file_content)
     except Exception as e:
         logger.exception("Failed to download file from %s", 'URL' if file_url else 'R2')
+        # Mark failed (download)
+        if speako_task_id:
+            try:
+                mark_task_failed(
+                    task_id=str(speako_task_id),
+                    celery_task_id=str(self.request.id),
+                    error_code='download_failed',
+                    error_message=str(e),
+                    details={
+                        'tenant_id': tenant_id,
+                        'location_id': location_id,
+                        'knowledge_type': knowledge_type,
+                        'key': key,
+                        'filename': unique_filename,
+                        'url': chosen_url,
+                        'content_type': content_type,
+                    },
+                    actor='celery'
+                )
+            except Exception as db_e:
+                logger.warning("[tasks] mark_task_failed (download_failed) failed: %s", db_e)
         return {
             'success': False,
             'error': f"Failed to download file from {'URL' if file_url else 'R2'}: {e}",
@@ -171,6 +214,29 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
             }
         }
 
+    # Record source artifact (original file in R2)
+    public_base = os.getenv('R2_PUBLIC_BASE_URL', 'https://assets.speako.ai')
+    if speako_task_id:
+        try:
+            record_task_artifact(
+                task_id=str(speako_task_id),
+                kind='source',
+                uri=f"{public_base}/{key}",
+                bucket=bucket,
+                object_key=key,
+                mime_type=content_type,
+                size_bytes=size,
+                metadata={
+                    'tenant_id': str(tenant_id),
+                    'location_id': str(location_id),
+                    'knowledge_type': knowledge_type,
+                    'filename': unique_filename,
+                    'source_url': chosen_url,
+                }
+            )
+        except Exception as db_e:
+            logger.warning("[tasks] record_task_artifact(source) failed: %s", db_e)
+
     # 2) Preprocess file for model (decide text vs file mode)
     prep = preprocess_for_model(file_content, unique_filename, content_type)
 
@@ -179,6 +245,23 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
     if not api_key or OpenAI is None:
         reason = f"OpenAI not configured. client_available={OpenAI is not None}; key_present={bool(api_key)}"
         logger.warning("[Analysis] %s", reason)
+        # Fatal: mark failed and return
+        if speako_task_id:
+            try:
+                mark_task_failed(
+                    task_id=str(speako_task_id),
+                    celery_task_id=str(self.request.id),
+                    error_code='openai_not_configured',
+                    error_message='OpenAI not configured',
+                    details={
+                        'client_available': OpenAI is not None,
+                        'key_present': bool(api_key),
+                        'model_env': os.getenv('OPENAI_KNOWLEDGE_MODEL', 'gpt-4o-mini')
+                    },
+                    actor='celery'
+                )
+            except Exception as db_e:
+                logger.warning("[tasks] mark_task_failed (openai_not_configured) failed: %s", db_e)
         return {
             'success': False,
             'error': 'OpenAI not configured',
@@ -192,7 +275,7 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
                 'size': size,
                 'content_type': content_type,
             },
-            'analysis': {'status': 'skipped', 'reason': 'openai_not_configured'},
+            'analysis': {'status': 'error', 'reason': 'openai_not_configured'},
             'artifacts': None,
             'job': {
                 'task_id': self.request.id,
@@ -268,10 +351,11 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
         analysis_key = build_analysis_artifact_key(tenant_id, location_id, unique_filename)
         import json as _json
         payload = parsed if parsed is not None else {"raw": raw}
-        client.put_object(
+        payload_bytes = _json.dumps(payload).encode('utf-8')
+        put_analysis = client.put_object(
             Bucket=bucket,
             Key=analysis_key,
-            Body=_json.dumps(payload).encode('utf-8'),
+            Body=payload_bytes,
             ContentType='application/json',
             Metadata={
                 'tenant_id': str(tenant_id),
@@ -283,6 +367,47 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
 
         public_base = os.getenv('R2_PUBLIC_BASE_URL', 'https://assets.speako.ai')
         analysis_url = f"{public_base}/{analysis_key}"
+
+        # Record analysis artifact and mark succeeded
+        if speako_task_id:
+            try:
+                record_task_artifact(
+                    task_id=str(speako_task_id),
+                    kind='analysis',
+                    uri=analysis_url,
+                    bucket=bucket,
+                    object_key=analysis_key,
+                    mime_type='application/json',
+                    size_bytes=len(payload_bytes),
+                    etag=(put_analysis or {}).get('ETag') if isinstance(put_analysis, dict) else None,
+                    version_id=(put_analysis or {}).get('VersionId') if isinstance(put_analysis, dict) else None,
+                    metadata={'tenant_id': str(tenant_id), 'location_id': str(location_id), 'knowledge_type': knowledge_type, 'source': 'openai'}
+                )
+            except Exception as db_e:
+                logger.warning("[tasks] record_task_artifact(analysis) failed: %s", db_e)
+            try:
+                mark_task_succeeded(
+                    task_id=str(speako_task_id),
+                    celery_task_id=str(self.request.id),
+                    details={
+                        'file': {
+                            'tenant_id': tenant_id,
+                            'location_id': location_id,
+                            'knowledge_type': knowledge_type,
+                            'key': key,
+                            'filename': unique_filename,
+                            'url': chosen_url,
+                            'size': size,
+                            'content_type': content_type,
+                        },
+                        'analysis': {'status': status, 'model': model_used},
+                        'artifacts': {'analysis_key': analysis_key, 'analysis_url': analysis_url}
+                    },
+                    actor='celery',
+                    progress=100
+                )
+            except Exception as db_e:
+                logger.warning("[tasks] mark_task_succeeded failed: %s", db_e)
 
         return {
             'success': True,
@@ -320,10 +445,11 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
         try:
             analysis_key = build_analysis_artifact_key(tenant_id, location_id, unique_filename)
             import json as _json
-            client.put_object(
+            error_payload_bytes = _json.dumps({"error": str(e)}).encode('utf-8')
+            put_err = client.put_object(
                 Bucket=bucket,
                 Key=analysis_key,
-                Body=_json.dumps({"error": str(e)}).encode('utf-8'),
+                Body=error_payload_bytes,
                 ContentType='application/json',
                 Metadata={
                     'tenant_id': str(tenant_id),
@@ -334,9 +460,44 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
             )
             public_base = os.getenv('R2_PUBLIC_BASE_URL', 'https://assets.speako.ai')
             analysis_url = f"{public_base}/{analysis_key}"
+            # Record analysis_error artifact
+            if speako_task_id:
+                try:
+                    record_task_artifact(
+                        task_id=str(speako_task_id),
+                        kind='analysis_error',
+                        uri=analysis_url,
+                        bucket=bucket,
+                        object_key=analysis_key,
+                        mime_type='application/json',
+                        size_bytes=len(error_payload_bytes),
+                        etag=(put_err or {}).get('ETag') if isinstance(put_err, dict) else None,
+                        version_id=(put_err or {}).get('VersionId') if isinstance(put_err, dict) else None,
+                        metadata={'tenant_id': str(tenant_id), 'location_id': str(location_id), 'knowledge_type': knowledge_type, 'source': 'openai'}
+                    )
+                except Exception as db_e:
+                    logger.warning("[tasks] record_task_artifact(analysis_error) failed: %s", db_e)
         except Exception:
             analysis_key = None
             analysis_url = None
+
+        # Mark failed (analysis error)
+        if speako_task_id:
+            try:
+                mark_task_failed(
+                    task_id=str(speako_task_id),
+                    celery_task_id=str(self.request.id),
+                    error_code='analysis_error',
+                    error_message=str(e),
+                    details={
+                        'model': os.getenv('OPENAI_KNOWLEDGE_MODEL', 'gpt-4o-mini'),
+                        'analysis_key': analysis_key,
+                        'analysis_url': analysis_url,
+                    },
+                    actor='celery'
+                )
+            except Exception as db_e:
+                logger.warning("[tasks] mark_task_failed (analysis_error) failed: %s", db_e)
 
         return {
             'success': False,
