@@ -25,7 +25,7 @@ from .utils.knowledge_utils import (
     build_knowledge_prompt,
     parse_model_json_output,
 )
-from .utils.task_db import mark_task_running
+from .utils.task_db import mark_task_running, mark_task_failed, mark_task_succeeded
 
 logger = get_task_logger(__name__)
 
@@ -207,6 +207,14 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
     started_at = datetime.utcnow().isoformat() + 'Z'
 
     if not _host_allowed(url):
+        # Early exit: mark failed if speako_task_id present
+        if speako_task_id:
+            try:
+                mark_task_failed(task_id=str(speako_task_id), celery_task_id=str(self.request.id),
+                                 error_code='host_not_allowed', error_message='Host not allowed',
+                                 details={'url': url}, actor='celery')
+            except Exception as db_e:
+                logger.warning(f"mark_task_failed (host_not_allowed) failed: {db_e}")
         return {
             'success': False,
             'error': 'Host not allowed',
@@ -222,6 +230,14 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
 
     r2, bucket = _get_r2_client()
     if r2 is None:
+        # Early exit: mark failed if speako_task_id present
+        if speako_task_id:
+            try:
+                mark_task_failed(task_id=str(speako_task_id), celery_task_id=str(self.request.id),
+                                 error_code='r2_not_configured', error_message='Cloudflare R2 not configured',
+                                 details={'url': url}, actor='celery')
+            except Exception as db_e:
+                logger.warning(f"mark_task_failed (r2_not_configured) failed: {db_e}")
         return {
             'success': False,
             'error': 'Cloudflare R2 not configured',
@@ -356,6 +372,15 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
                     logger.exception("Scrape analysis failed")
                     analysis = {'status': 'error', 'message': str(ae)}
 
+            # Mark succeeded before returning
+            if speako_task_id:
+                try:
+                    mark_task_succeeded(task_id=str(speako_task_id), celery_task_id=str(self.request.id),
+                                        details={'url': url, 'artifacts': artifacts, 'pipeline': pipeline, 'knowledge_type': knowledge_type},
+                                        actor='celery', progress=100)
+                except Exception as db_e:
+                    logger.warning(f"mark_task_succeeded failed: {db_e}")
+
             return {
                 'success': True,
                 'url': url,
@@ -370,7 +395,15 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
                 }
             }
 
-        # Markdown-only
+        # Markdown-only success: mark succeeded before returning
+        if speako_task_id:
+            try:
+                mark_task_succeeded(task_id=str(speako_task_id), celery_task_id=str(self.request.id),
+                                    details={'url': url, 'artifacts': artifacts, 'pipeline': pipeline},
+                                    actor='celery', progress=100)
+            except Exception as db_e:
+                logger.warning(f"mark_task_succeeded failed: {db_e}")
+
         return {
             'success': True,
             'url': url,
@@ -386,6 +419,15 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
 
     except Exception as e:
         logger.exception("Scrape failed")
+        # Mark failed (timeout or other error)
+        if speako_task_id:
+            try:
+                error_code = 'timeout' if isinstance(e, TimeoutError) else 'error'
+                mark_task_failed(task_id=str(speako_task_id), celery_task_id=str(self.request.id),
+                                 error_code=error_code, error_message=str(e),
+                                 details={'url': url}, actor='celery')
+            except Exception as db_e:
+                logger.warning(f"mark_task_failed failed: {db_e}")
         return {
             'success': False,
             'error': str(e),

@@ -61,3 +61,103 @@ def mark_task_running(*, task_id: str, celery_task_id: str, message: Optional[st
             conn.close()
         except Exception:
             pass
+
+
+def mark_task_failed(*, task_id: str, celery_task_id: str, error_code: Optional[str] = None,
+                     error_message: Optional[str] = None, details: Optional[Dict[str, Any]] = None,
+                     actor: str = "celery", progress: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    """Set tasks.status='failed' and add a 'failed' event into task_events."""
+    if not task_id:
+        return None
+
+    details = details.copy() if details else {}
+    details.setdefault('celery_task_id', celery_task_id)
+    if error_code and 'error_code' not in details:
+        details['error_code'] = error_code
+
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE public.tasks t
+                    SET
+                        status = 'failed'::task_status,
+                        finished_at = now(),
+                        updated_at = now(),
+                        celery_task_id = COALESCE(celery_task_id, %s),
+                        error_code = COALESCE(%s, error_code),
+                        error_message = COALESCE(%s, error_message),
+                        progress = COALESCE(%s, progress)
+                    WHERE t.task_id = %s
+                    RETURNING t.task_id, t.attempts
+                    """,
+                    (celery_task_id, error_code, error_message, progress, task_id)
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                canonical_task_id, attempts = row[0], row[1]
+
+                cur.execute(
+                    """
+                    INSERT INTO public.task_events (task_id, status, progress, message, details, actor, attempt)
+                    VALUES (%s, 'failed'::task_status, %s, %s, %s, %s, %s)
+                    """,
+                    (canonical_task_id, progress, error_message, Json(details), actor, attempts)
+                )
+                return {"task_id": str(canonical_task_id), "attempt": attempts}
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def mark_task_succeeded(*, task_id: str, celery_task_id: str, details: Optional[Dict[str, Any]] = None,
+                        actor: str = "celery", progress: int = 100, output: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    """Set tasks.status='succeeded' and add a 'succeeded' event into task_events."""
+    if not task_id:
+        return None
+
+    details = details.copy() if details else {}
+    details.setdefault('celery_task_id', celery_task_id)
+
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE public.tasks t
+                    SET
+                        status = 'succeeded'::task_status,
+                        finished_at = now(),
+                        updated_at = now(),
+                        celery_task_id = COALESCE(celery_task_id, %s),
+                        progress = %s,
+                        output = COALESCE(%s, output)
+                    WHERE t.task_id = %s
+                    RETURNING t.task_id, t.attempts
+                    """,
+                    (celery_task_id, progress, Json(output) if output is not None else None, task_id)
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                canonical_task_id, attempts = row[0], row[1]
+
+                cur.execute(
+                    """
+                    INSERT INTO public.task_events (task_id, status, progress, message, details, actor, attempt)
+                    VALUES (%s, 'succeeded'::task_status, %s, %s, %s, %s, %s)
+                    """,
+                    (canonical_task_id, progress, 'Completed', Json(details), actor, attempts)
+                )
+                return {"task_id": str(canonical_task_id), "attempt": attempts}
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
