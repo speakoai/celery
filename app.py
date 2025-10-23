@@ -800,6 +800,7 @@ def api_upload_knowledge_file():
                     content_type=content_type,
                     public_url=file_url,
                     file_url=file_url,
+                    speako_task_id=speako_task_id,
                 )
                 response_data['analysis'] = {
                     'status': 'queued',
@@ -898,6 +899,7 @@ def api_upload_knowledge_file():
                 unique_filename=unique_filename,
                 content_type=content_type,
                 public_url=public_url,
+                speako_task_id=speako_task_id,
             )
             response_data['analysis'] = {
                 'status': 'queued',
@@ -1348,18 +1350,27 @@ def api_scrape_url():
             pipeline=pipeline,
             knowledge_type=knowledge_type,
             save_raw_html=save_raw_html,
+            speako_task_id=speako_task_id,
         )
 
+        # Align response shape with analyze_knowledge endpoint
         return jsonify({
-            'celery_task_id': task.id,
-            'status': 'pending',
+            'success': True,
             'message': 'URL scrape task started',
-            'tenant_id': tenant_id,
-            'location_id': location_id,
-            'url': url,
-            'pipeline': pipeline,
-            'knowledge_type': knowledge_type,
-            **({'speako_task_id': speako_task_id} if speako_task_id else {})
+            'data': {
+                'analysis': {
+                    'status': 'queued',
+                    'mode': 'background',
+                    'celery_task_id': task.id
+                },
+                'tenant_id': tenant_id,
+                'location_id': location_id,
+                'knowledge_type': knowledge_type,
+                'url': url,
+                'source': 'scrape_url',
+                'pipeline': pipeline,
+                **({'speako_task_id': speako_task_id} if speako_task_id else {})
+            }
         }), 202
 
     except Exception as e:
