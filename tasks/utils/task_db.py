@@ -2,6 +2,7 @@ import os
 import psycopg2
 from psycopg2.extras import Json
 from typing import Optional, Dict, Any
+from datetime import datetime
 
 
 def _get_conn():
@@ -156,6 +157,61 @@ def mark_task_succeeded(*, task_id: str, celery_task_id: str, details: Optional[
                     (canonical_task_id, progress, 'Completed', Json(details), actor, attempts)
                 )
                 return {"task_id": str(canonical_task_id), "attempt": attempts}
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def record_task_artifact(*, task_id: str, kind: str, uri: str,
+                         provider: str = 'cloudflare_r2',
+                         bucket: Optional[str] = None,
+                         object_key: Optional[str] = None,
+                         version_id: Optional[str] = None,
+                         etag: Optional[str] = None,
+                         mime_type: Optional[str] = None,
+                         size_bytes: Optional[int] = None,
+                         checksum: Optional[str] = None,
+                         expires_at: Optional[datetime] = None,
+                         metadata: Optional[Dict[str, Any]] = None) -> Optional[int]:
+    """Insert a task artifact row and return the artifact_id.
+
+    Required: task_id, kind, uri. Provider defaults to 'cloudflare_r2'.
+    """
+    if not task_id or not kind or not uri:
+        return None
+
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO public.task_artifacts
+                        (task_id, kind, uri, provider, bucket, object_key, version_id, etag, mime_type, bytes, checksum, expires_at, metadata)
+                    VALUES
+                        (%s, %s, %s, %s::storage_provider, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING artifact_id
+                    """,
+                    (
+                        task_id,
+                        kind,
+                        uri,
+                        provider,
+                        bucket,
+                        object_key,
+                        version_id,
+                        etag,
+                        mime_type,
+                        size_bytes,
+                        checksum,
+                        expires_at,
+                        Json(metadata or {})
+                    )
+                )
+                row = cur.fetchone()
+                return int(row[0]) if row else None
     finally:
         try:
             conn.close()

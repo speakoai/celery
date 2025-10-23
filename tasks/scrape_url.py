@@ -25,7 +25,7 @@ from .utils.knowledge_utils import (
     build_knowledge_prompt,
     parse_model_json_output,
 )
-from .utils.task_db import mark_task_running, mark_task_failed, mark_task_succeeded
+from .utils.task_db import mark_task_running, mark_task_failed, mark_task_succeeded, record_task_artifact
 
 logger = get_task_logger(__name__)
 
@@ -279,13 +279,30 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
         public_base = os.getenv('R2_PUBLIC_BASE_URL', 'https://assets.speako.ai')
 
         # Save markdown
-        r2.put_object(
+        md_bytes = markdown.encode('utf-8')
+        put_md = r2.put_object(
             Bucket=bucket,
             Key=keys['markdown_key'],
-            Body=markdown.encode('utf-8'),
+            Body=md_bytes,
             ContentType='text/markdown',
             Metadata={'tenant_id': str(tenant_id), 'location_id': str(location_id), 'source': 'scrape'}
         )
+        if speako_task_id:
+            try:
+                record_task_artifact(
+                    task_id=str(speako_task_id),
+                    kind='markdown',
+                    uri=f"{public_base}/{keys['markdown_key']}",
+                    bucket=bucket,
+                    object_key=keys['markdown_key'],
+                    mime_type='text/markdown',
+                    size_bytes=len(md_bytes),
+                    etag=(put_md or {}).get('ETag') if isinstance(put_md, dict) else None,
+                    version_id=(put_md or {}).get('VersionId') if isinstance(put_md, dict) else None,
+                    metadata={'tenant_id': str(tenant_id), 'location_id': str(location_id), 'source': 'scrape'}
+                )
+            except Exception as db_e:
+                logger.warning(f"record_task_artifact(markdown) failed: {db_e}")
 
         # Save metadata
         import json as _json
@@ -294,27 +311,61 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
             'title': None,
             'fetched_at': datetime.utcnow().isoformat() + 'Z',
             'headers': headers,
-            'content_length': len(markdown.encode('utf-8')),
+            'content_length': len(md_bytes),
             'extractor': 'scraperapi',
         }
-        r2.put_object(
+        meta_bytes = _json.dumps(meta).encode('utf-8')
+        put_meta = r2.put_object(
             Bucket=bucket,
             Key=keys['meta_key'],
-            Body=_json.dumps(meta).encode('utf-8'),
+            Body=meta_bytes,
             ContentType='application/json',
             Metadata={'tenant_id': str(tenant_id), 'location_id': str(location_id), 'source': 'scrape'}
         )
+        if speako_task_id:
+            try:
+                record_task_artifact(
+                    task_id=str(speako_task_id),
+                    kind='metadata',
+                    uri=f"{public_base}/{keys['meta_key']}",
+                    bucket=bucket,
+                    object_key=keys['meta_key'],
+                    mime_type='application/json',
+                    size_bytes=len(meta_bytes),
+                    etag=(put_meta or {}).get('ETag') if isinstance(put_meta, dict) else None,
+                    version_id=(put_meta or {}).get('VersionId') if isinstance(put_meta, dict) else None,
+                    metadata={'tenant_id': str(tenant_id), 'location_id': str(location_id), 'source': 'scrape'}
+                )
+            except Exception as db_e:
+                logger.warning(f"record_task_artifact(metadata) failed: {db_e}")
 
         if save_raw_html or os.getenv('SCRAPE_SAVE_RAW_HTML', 'false').lower() == 'true':
             try:
                 raw_html, _raw_headers = _fetch_html_via_scraperapi_async(url, timeout_ms, total_timeout_ms)
-                r2.put_object(
+                raw_bytes = raw_html.encode('utf-8', errors='ignore')
+                put_raw = r2.put_object(
                     Bucket=bucket,
                     Key=keys['raw_key'],
-                    Body=raw_html.encode('utf-8', errors='ignore'),
+                    Body=raw_bytes,
                     ContentType='text/html',
                     Metadata={'tenant_id': str(tenant_id), 'location_id': str(location_id), 'source': 'scrape'}
                 )
+                if speako_task_id:
+                    try:
+                        record_task_artifact(
+                            task_id=str(speako_task_id),
+                            kind='raw_html',
+                            uri=f"{public_base}/{keys['raw_key']}",
+                            bucket=bucket,
+                            object_key=keys['raw_key'],
+                            mime_type='text/html',
+                            size_bytes=len(raw_bytes),
+                            etag=(put_raw or {}).get('ETag') if isinstance(put_raw, dict) else None,
+                            version_id=(put_raw or {}).get('VersionId') if isinstance(put_raw, dict) else None,
+                            metadata={'tenant_id': str(tenant_id), 'location_id': str(location_id), 'source': 'scrape'}
+                        )
+                    except Exception as db_e:
+                        logger.warning(f"record_task_artifact(raw_html) failed: {db_e}")
             except Exception as _raw_e:
                 logger.warning(f"Saving raw HTML via ScraperAPI failed: {_raw_e}")
 
@@ -358,13 +409,30 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
                             analysis_text = None
                     parsed, raw = parse_model_json_output(analysis_text)
                     payload = parsed if parsed is not None else {"raw": raw}
-                    r2.put_object(
+                    payload_bytes = _json.dumps(payload).encode('utf-8')
+                    put_analysis = r2.put_object(
                         Bucket=bucket,
                         Key=keys['analysis_key'],
-                        Body=_json.dumps(payload).encode('utf-8'),
+                        Body=payload_bytes,
                         ContentType='application/json',
                         Metadata={'tenant_id': str(tenant_id), 'location_id': str(location_id), 'source': 'openai'}
                     )
+                    if speako_task_id:
+                        try:
+                            record_task_artifact(
+                                task_id=str(speako_task_id),
+                                kind='analysis',
+                                uri=f"{public_base}/{keys['analysis_key']}",
+                                bucket=bucket,
+                                object_key=keys['analysis_key'],
+                                mime_type='application/json',
+                                size_bytes=len(payload_bytes),
+                                etag=(put_analysis or {}).get('ETag') if isinstance(put_analysis, dict) else None,
+                                version_id=(put_analysis or {}).get('VersionId') if isinstance(put_analysis, dict) else None,
+                                metadata={'tenant_id': str(tenant_id), 'location_id': str(location_id), 'source': 'openai'}
+                            )
+                        except Exception as db_e:
+                            logger.warning(f"record_task_artifact(analysis) failed: {db_e}")
                     artifacts['analysis_key'] = keys['analysis_key']
                     artifacts['analysis_url'] = f"{public_base}/{keys['analysis_key']}"
                     analysis = {'status': 'success' if parsed is not None else 'raw'}
