@@ -25,7 +25,7 @@ from .utils.knowledge_utils import (
     build_knowledge_prompt,
     parse_model_json_output,
 )
-
+from .utils.task_db import mark_task_running
 
 logger = get_task_logger(__name__)
 
@@ -234,6 +234,14 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
                 'duration_ms': int((time.time() - start_ts) * 1000),
             }
         }
+
+    # Mark task as running in DB (best-effort)
+    if speako_task_id:
+        try:
+            mark_task_running(task_id=str(speako_task_id), celery_task_id=str(self.request.id),
+                              message='Scrape started', details={'url': url}, actor='celery')
+        except Exception as db_e:
+            logger.warning(f"mark_task_running failed: {db_e}")
 
     try:
         timeout_ms = int(os.getenv('SCRAPE_TIMEOUT_MS', '15000'))
