@@ -67,7 +67,8 @@ def _get_r2_client():
 def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_type: str,
                            key: str, unique_filename: str, content_type: str,
                            public_url: str | None = None,
-                           file_url: str | None = None) -> dict:
+                           file_url: str | None = None,
+                           speako_task_id: str | None = None) -> dict:
     """Celery task to analyze a knowledge file using OpenAI, then save JSON analysis back to R2.
 
     Source file selection:
@@ -103,6 +104,7 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
             'artifacts': None,
             'job': {
                 'task_id': self.request.id,
+                'speako_task_id': speako_task_id,
                 'started_at': started_at,
                 'completed_at': datetime.utcnow().isoformat() + 'Z',
                 'duration_ms': int((time.time() - start_ts) * 1000),
@@ -139,6 +141,7 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
             'artifacts': None,
             'job': {
                 'task_id': self.request.id,
+                'speako_task_id': speako_task_id,
                 'started_at': started_at,
                 'completed_at': datetime.utcnow().isoformat() + 'Z',
                 'duration_ms': int((time.time() - start_ts) * 1000),
@@ -170,6 +173,7 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
             'artifacts': None,
             'job': {
                 'task_id': self.request.id,
+                'speako_task_id': speako_task_id,
                 'started_at': started_at,
                 'completed_at': datetime.utcnow().isoformat() + 'Z',
                 'duration_ms': int((time.time() - start_ts) * 1000),
@@ -280,6 +284,7 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
             },
             'job': {
                 'task_id': self.request.id,
+                'speako_task_id': speako_task_id,
                 'started_at': started_at,
                 'completed_at': datetime.utcnow().isoformat() + 'Z',
                 'duration_ms': int((time.time() - start_ts) * 1000),
@@ -333,6 +338,7 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
             } if analysis_key else None,
             'job': {
                 'task_id': self.request.id,
+                'speako_task_id': speako_task_id,
                 'started_at': started_at,
                 'completed_at': datetime.utcnow().isoformat() + 'Z',
                 'duration_ms': int((time.time() - start_ts) * 1000),

@@ -721,6 +721,7 @@ def api_upload_knowledge_file():
     Accepts either:
     - multipart/form-data with fields: tenant_id, location_id, knowledge_type, file (binary)
     - JSON or form-data with fields: tenant_id, location_id, knowledge_type, file_url (string)
+    - Optional: speako_task_id (string) for client correlation
 
     Constraints for file uploads:
     - Allowed types: .doc/.docx, .xls/.xlsx, .pdf, .csv, .txt
@@ -732,6 +733,7 @@ def api_upload_knowledge_file():
         # Gather inputs from form or JSON
         data_json = request.get_json(silent=True) or {}
         file_url = request.form.get('file_url') or data_json.get('file_url')
+        speako_task_id = request.form.get('speako_task_id') or data_json.get('speako_task_id')
 
         tenant_id = request.form.get('tenant_id') or data_json.get('tenant_id')
         location_id = request.form.get('location_id') or data_json.get('location_id')
@@ -783,7 +785,8 @@ def api_upload_knowledge_file():
                 'url': file_url,
                 'size': None,
                 'content_type': content_type,
-                'source': 'file_url'
+                'source': 'file_url',
+                **({'speako_task_id': speako_task_id} if speako_task_id else {})
             }
 
             # Enqueue background analysis task using the remote URL
@@ -801,7 +804,7 @@ def api_upload_knowledge_file():
                 response_data['analysis'] = {
                     'status': 'queued',
                     'mode': 'background',
-                    'task_id': task.id
+                    'celery_task_id': task.id
                 }
             except Exception as ae:
                 app.logger.error(f"Failed to enqueue analysis task (file_url mode): {ae}")
@@ -881,7 +884,8 @@ def api_upload_knowledge_file():
             'url': public_url,
             'size': len(file_content),
             'content_type': content_type,
-            'source': 'upload'
+            'source': 'upload',
+            **({'speako_task_id': speako_task_id} if speako_task_id else {})
         }
 
         # Enqueue background analysis task
@@ -898,7 +902,7 @@ def api_upload_knowledge_file():
             response_data['analysis'] = {
                 'status': 'queued',
                 'mode': 'background',
-                'task_id': task.id
+                'celery_task_id': task.id
             }
         except Exception as ae:
             # If enqueue fails, return upload success but analysis enqueue error
@@ -1297,10 +1301,11 @@ def api_scrape_url():
       "url": "https://...",         // required
       "pipeline": "markdown-only" | "analyze", // optional, default: markdown-only
       "knowledge_type": "menu|faq|policy|events", // required if pipeline=analyze
-      "save_raw_html": false          // optional
+      "save_raw_html": false,          // optional
+      "speako_task_id": "abc-123"    // optional correlation ID
     }
 
-    Returns 202 with task_id for polling at /api/task/<task_id>.
+    Returns 202 with celery_task_id for polling at /api/task/<task_id>.
     """
     try:
         # Be tolerant of clients missing Content-Type or sending invalid JSON
@@ -1318,6 +1323,7 @@ def api_scrape_url():
         pipeline = data.get('pipeline', 'markdown-only')
         knowledge_type = data.get('knowledge_type')
         save_raw_html = bool(data.get('save_raw_html', False))
+        speako_task_id = data.get('speako_task_id')
 
         missing = [k for k in ['tenant_id', 'location_id', 'url'] if not data.get(k)]
         if missing:
@@ -1345,7 +1351,7 @@ def api_scrape_url():
         )
 
         return jsonify({
-            'task_id': task.id,
+            'celery_task_id': task.id,
             'status': 'pending',
             'message': 'URL scrape task started',
             'tenant_id': tenant_id,
@@ -1353,6 +1359,7 @@ def api_scrape_url():
             'url': url,
             'pipeline': pipeline,
             'knowledge_type': knowledge_type,
+            **({'speako_task_id': speako_task_id} if speako_task_id else {})
         }), 202
 
     except Exception as e:

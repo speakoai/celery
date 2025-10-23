@@ -201,7 +201,8 @@ def _html_to_markdown(title: str, html: str, base_url: str) -> str:
 @app.task(bind=True)
 def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
                            pipeline: str = 'markdown-only', knowledge_type: str | None = None,
-                           save_raw_html: bool = False) -> dict:
+                           save_raw_html: bool = False,
+                           speako_task_id: str | None = None) -> dict:
     start_ts = time.time()
     started_at = datetime.utcnow().isoformat() + 'Z'
 
@@ -212,6 +213,7 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
             'url': url,
             'job': {
                 'task_id': self.request.id,
+                'speako_task_id': speako_task_id,
                 'started_at': started_at,
                 'completed_at': datetime.utcnow().isoformat() + 'Z',
                 'duration_ms': int((time.time() - start_ts) * 1000),
@@ -226,6 +228,7 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
             'url': url,
             'job': {
                 'task_id': self.request.id,
+                'speako_task_id': speako_task_id,
                 'started_at': started_at,
                 'completed_at': datetime.utcnow().isoformat() + 'Z',
                 'duration_ms': int((time.time() - start_ts) * 1000),
@@ -352,6 +355,7 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
                 'analysis': analysis,
                 'job': {
                     'task_id': self.request.id,
+                    'speako_task_id': speako_task_id,
                     'started_at': started_at,
                     'completed_at': datetime.utcnow().isoformat() + 'Z',
                     'duration_ms': int((time.time() - start_ts) * 1000),
@@ -365,6 +369,7 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
             'artifacts': artifacts,
             'job': {
                 'task_id': self.request.id,
+                'speako_task_id': speako_task_id,
                 'started_at': started_at,
                 'completed_at': datetime.utcnow().isoformat() + 'Z',
                 'duration_ms': int((time.time() - start_ts) * 1000),
@@ -379,6 +384,7 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
             'url': url,
             'job': {
                 'task_id': self.request.id,
+                'speako_task_id': speako_task_id,
                 'started_at': started_at,
                 'completed_at': datetime.utcnow().isoformat() + 'Z',
                 'duration_ms': int((time.time() - start_ts) * 1000),
