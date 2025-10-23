@@ -7,6 +7,8 @@ from tasks.celery_app import app
 
 # R2 / S3 client
 import boto3
+# New: HTTP download support when file_url is provided
+import requests
 
 # OpenAI SDK (optional)
 try:
@@ -64,13 +66,21 @@ def _get_r2_client():
 @app.task(bind=True)
 def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_type: str,
                            key: str, unique_filename: str, content_type: str,
-                           public_url: str | None = None) -> dict:
-    """Celery task to analyze a knowledge file stored in R2 using OpenAI, then save JSON analysis back to R2.
+                           public_url: str | None = None,
+                           file_url: str | None = None) -> dict:
+    """Celery task to analyze a knowledge file using OpenAI, then save JSON analysis back to R2.
+
+    Source file selection:
+    - If file_url is provided, the file will be downloaded via HTTP(S) from that URL.
+    - Otherwise, the file will be downloaded from R2 using the provided key.
 
     Returns a dict with artifact locations and analysis status. Poll via GET /api/task/<task_id>.
     """
     start_ts = time.time()
     started_at = datetime.utcnow().isoformat() + 'Z'
+
+    # Prefer given file_url for the file source when available
+    chosen_url = file_url or public_url
 
     client, bucket, missing_env = _get_r2_client()
     if client is None or bucket is None:
@@ -86,7 +96,7 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
                 'knowledge_type': knowledge_type,
                 'key': key,
                 'filename': unique_filename,
-                'url': public_url,
+                'url': chosen_url,
                 'content_type': content_type,
             },
             'analysis': {'status': 'skipped', 'reason': 'storage_not_configured'},
@@ -99,23 +109,29 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
             }
         }
 
-    # 1) Download the original file from R2
+    # 1) Get the original file: from URL if provided, else from R2
     try:
-        obj = client.get_object(Bucket=bucket, Key=key)
-        file_content = obj['Body'].read()
-        size = len(file_content)
+        if file_url:
+            resp = requests.get(file_url, timeout=30)
+            resp.raise_for_status()
+            file_content = resp.content
+            size = len(file_content)
+        else:
+            obj = client.get_object(Bucket=bucket, Key=key)
+            file_content = obj['Body'].read()
+            size = len(file_content)
     except Exception as e:
-        logger.exception("Failed to download file from R2")
+        logger.exception("Failed to download file from %s", 'URL' if file_url else 'R2')
         return {
             'success': False,
-            'error': f'Failed to download file from R2: {e}',
+            'error': f"Failed to download file from {'URL' if file_url else 'R2'}: {e}",
             'file': {
                 'tenant_id': tenant_id,
                 'location_id': location_id,
                 'knowledge_type': knowledge_type,
                 'key': key,
                 'filename': unique_filename,
-                'url': public_url,
+                'url': chosen_url,
                 'size': None,
                 'content_type': content_type,
             },
@@ -146,7 +162,7 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
                 'knowledge_type': knowledge_type,
                 'key': key,
                 'filename': unique_filename,
-                'url': public_url,
+                'url': chosen_url,
                 'size': size,
                 'content_type': content_type,
             },
@@ -169,7 +185,10 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
 
         if prep.get('mode') == 'file':
             # Keep PDF path: upload as file and reference it
-            uploaded = oa_client.files.create(file=(unique_filename, prep['file_bytes']), purpose='assistants')
+            uploaded = oa_client.files.create(file=(
+                unique_filename,
+                prep['file_bytes']
+            ), purpose='assistants')
             input_payload = [
                 {
                     "role": "user",
@@ -246,7 +265,7 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
                 'knowledge_type': knowledge_type,
                 'key': key,
                 'filename': unique_filename,
-                'url': public_url,
+                'url': chosen_url,
                 'size': size,
                 'content_type': content_type,
             },
@@ -300,7 +319,7 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
                 'knowledge_type': knowledge_type,
                 'key': key,
                 'filename': unique_filename,
-                'url': public_url,
+                'url': chosen_url,
                 'size': size,
                 'content_type': content_type,
             },

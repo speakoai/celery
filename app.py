@@ -27,6 +27,9 @@ try:
 except Exception as _openai_e:
     OpenAI = None
     _openai_import_error = repr(_openai_e)
+# New: helpers for file_url mode
+import mimetypes
+from urllib.parse import urlparse
 
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', "super-secret")
@@ -713,29 +716,33 @@ def api_health_check():
 @require_api_key
 def api_upload_knowledge_file():
     """
-    [aiknowledges] Upload a knowledge file to Cloudflare R2.
+    [aiknowledges] Upload a knowledge file to Cloudflare R2 OR provide a remote file_url for analysis.
 
-    Expected multipart/form-data:
-    - tenant_id: string (required)
-    - location_id: string (required)
-    - knowledge_type: one of [menu, faq, policy, events] (required)
-    - file: The file to upload (required). Allowed types: Word (.doc, .docx), Excel (.xls, .xlsx), PDF (.pdf), CSV (.csv), Text (.txt)
+    Accepts either:
+    - multipart/form-data with fields: tenant_id, location_id, knowledge_type, file (binary)
+    - JSON or form-data with fields: tenant_id, location_id, knowledge_type, file_url (string)
 
-    Constraints:
-    - Max file size: 5MB
+    Constraints for file uploads:
+    - Allowed types: .doc/.docx, .xls/.xlsx, .pdf, .csv, .txt
+    - Max size: 5MB
 
     Upload path in bucket: knowledges/{tenant_id}/{location_id}/
     """
     try:
-        if not r2_client:
-            return jsonify({'error': 'Storage not configured', 'message': 'Cloudflare R2 credentials are missing'}), 500
+        # Gather inputs from form or JSON
+        data_json = request.get_json(silent=True) or {}
+        file_url = request.form.get('file_url') or data_json.get('file_url')
 
-        # Validate required form fields
-        tenant_id = request.form.get('tenant_id')
-        location_id = request.form.get('location_id')
-        knowledge_type = request.form.get('knowledge_type')
+        tenant_id = request.form.get('tenant_id') or data_json.get('tenant_id')
+        location_id = request.form.get('location_id') or data_json.get('location_id')
+        knowledge_type = request.form.get('knowledge_type') or data_json.get('knowledge_type')
 
-        missing = [k for k in ['tenant_id', 'location_id', 'knowledge_type'] if not request.form.get(k)]
+        # Validate required fields
+        missing = [k for k, v in {
+            'tenant_id': tenant_id,
+            'location_id': location_id,
+            'knowledge_type': knowledge_type,
+        }.items() if not v]
         if missing:
             return jsonify({'error': 'Missing required fields', 'missing_fields': missing}), 400
 
@@ -747,6 +754,72 @@ def api_upload_knowledge_file():
                 'message': f'knowledge_type must be one of: {", ".join(valid_types)}',
                 'provided': knowledge_type
             }), 400
+
+        # Branch: file_url mode (skip R2 upload)
+        if file_url:
+            parsed = urlparse(file_url)
+            ext = os.path.splitext(parsed.path.lower())[1]
+
+            # Optional: enforce allowed extensions when present in URL
+            if ext and not allowed_knowledge_file(f"dummy{ext}"):
+                return jsonify({'error': 'Unsupported file type', 'message': 'Allowed: .doc, .docx, .xls, .xlsx, .pdf, .csv, .txt', 'provided_ext': ext}), 400
+
+            # Guess content type and extension when missing
+            guessed_ct, _ = mimetypes.guess_type(parsed.path)
+            content_type = data_json.get('content_type') or guessed_ct or 'application/octet-stream'
+            if not ext:
+                guessed_ext = mimetypes.guess_extension(content_type) or '.bin'
+                ext = guessed_ext
+
+            unique_filename = generate_knowledge_filename(tenant_id, location_id, knowledge_type, ext)
+            key = f"knowledges/{tenant_id}/{location_id}/{unique_filename}"
+
+            response_data = {
+                'tenant_id': tenant_id,
+                'location_id': location_id,
+                'knowledge_type': knowledge_type,
+                'filename': unique_filename,
+                'key': key,
+                'url': file_url,
+                'size': None,
+                'content_type': content_type,
+                'source': 'file_url'
+            }
+
+            # Enqueue background analysis task using the remote URL
+            try:
+                task = analyze_knowledge_file.delay(
+                    tenant_id=tenant_id,
+                    location_id=location_id,
+                    knowledge_type=knowledge_type,
+                    key=key,
+                    unique_filename=unique_filename,
+                    content_type=content_type,
+                    public_url=file_url,
+                    file_url=file_url,
+                )
+                response_data['analysis'] = {
+                    'status': 'queued',
+                    'mode': 'background',
+                    'task_id': task.id
+                }
+            except Exception as ae:
+                app.logger.error(f"Failed to enqueue analysis task (file_url mode): {ae}")
+                response_data['analysis'] = {
+                    'status': 'error',
+                    'message': 'Failed to enqueue analysis task',
+                    'detail': str(ae)
+                }
+
+            return jsonify({
+                'success': True,
+                'message': 'Knowledge analysis started from remote URL',
+                'data': response_data
+            }), 202
+
+        # Otherwise: file upload mode (requires R2)
+        if not r2_client:
+            return jsonify({'error': 'Storage not configured', 'message': 'Cloudflare R2 credentials are missing'}), 500
 
         # Validate file presence
         if 'file' not in request.files:
@@ -808,6 +881,7 @@ def api_upload_knowledge_file():
             'url': public_url,
             'size': len(file_content),
             'content_type': content_type,
+            'source': 'upload'
         }
 
         # Enqueue background analysis task
