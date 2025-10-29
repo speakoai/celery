@@ -485,20 +485,90 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
             }
         }
 
-    except Exception as e:
-        logger.exception("Scrape failed")
-        # Mark failed (timeout or other error)
+    except TimeoutError as e:
+        error_msg = f"Scraping job timed out for URL: {url}"
+        logger.error(f"⏱️  {error_msg} - Exceeded maximum wait time. Consider increasing SCRAPERAPI_POLL_TOTAL_TIMEOUT_MS.")
         if speako_task_id:
             try:
-                error_code = 'timeout' if isinstance(e, TimeoutError) else 'error'
                 mark_task_failed(task_id=str(speako_task_id), celery_task_id=str(self.request.id),
-                                 error_code=error_code, error_message=str(e),
-                                 details={'url': url}, actor='celery')
+                                 error_code='timeout', error_message=error_msg,
+                                 details={'url': url, 'timeout_ms': total_timeout_ms}, actor='celery')
             except Exception as db_e:
                 logger.warning(f"mark_task_failed failed: {db_e}")
         return {
             'success': False,
-            'error': str(e),
+            'error': 'Scraping timed out - the page took too long to process',
+            'error_type': 'timeout',
+            'url': url,
+            'job': {
+                'task_id': self.request.id,
+                'speako_task_id': speako_task_id,
+                'started_at': started_at,
+                'completed_at': datetime.utcnow().isoformat() + 'Z',
+                'duration_ms': int((time.time() - start_ts) * 1000),
+            }
+        }
+    except requests.exceptions.ReadTimeout as e:
+        error_msg = f"Network timeout while checking scraping status for URL: {url}"
+        logger.error(f"🌐 {error_msg} - ScraperAPI status endpoint did not respond in time. Consider increasing SCRAPE_TIMEOUT_MS.")
+        if speako_task_id:
+            try:
+                mark_task_failed(task_id=str(speako_task_id), celery_task_id=str(self.request.id),
+                                 error_code='network_timeout', error_message=error_msg,
+                                 details={'url': url, 'timeout_ms': timeout_ms}, actor='celery')
+            except Exception as db_e:
+                logger.warning(f"mark_task_failed failed: {db_e}")
+        return {
+            'success': False,
+            'error': 'Network timeout - unable to connect to scraping service',
+            'error_type': 'network_timeout',
+            'url': url,
+            'job': {
+                'task_id': self.request.id,
+                'speako_task_id': speako_task_id,
+                'started_at': started_at,
+                'completed_at': datetime.utcnow().isoformat() + 'Z',
+                'duration_ms': int((time.time() - start_ts) * 1000),
+            }
+        }
+    except requests.exceptions.RequestException as e:
+        error_msg = f"Network error while scraping URL: {url}"
+        logger.error(f"🔌 {error_msg} - {type(e).__name__}: {str(e)}")
+        if speako_task_id:
+            try:
+                mark_task_failed(task_id=str(speako_task_id), celery_task_id=str(self.request.id),
+                                 error_code='network_error', error_message=error_msg,
+                                 details={'url': url, 'error_type': type(e).__name__}, actor='celery')
+            except Exception as db_e:
+                logger.warning(f"mark_task_failed failed: {db_e}")
+        return {
+            'success': False,
+            'error': f'Network error - {type(e).__name__}',
+            'error_type': 'network_error',
+            'url': url,
+            'job': {
+                'task_id': self.request.id,
+                'speako_task_id': speako_task_id,
+                'started_at': started_at,
+                'completed_at': datetime.utcnow().isoformat() + 'Z',
+                'duration_ms': int((time.time() - start_ts) * 1000),
+            }
+        }
+    except Exception as e:
+        error_msg = f"Unexpected error while scraping URL: {url}"
+        logger.error(f"❌ {error_msg} - {type(e).__name__}: {str(e)}")
+        logger.exception("Full traceback:")
+        if speako_task_id:
+            try:
+                mark_task_failed(task_id=str(speako_task_id), celery_task_id=str(self.request.id),
+                                 error_code='error', error_message=str(e),
+                                 details={'url': url, 'error_type': type(e).__name__}, actor='celery')
+            except Exception as db_e:
+                logger.warning(f"mark_task_failed failed: {db_e}")
+        return {
+            'success': False,
+            'error': f'Scraping failed - {type(e).__name__}',
+            'error_type': 'unexpected_error',
             'url': url,
             'job': {
                 'task_id': self.request.id,
