@@ -285,3 +285,55 @@ def upsert_tenant_integration_param(*, tenant_integration_param: Optional[Dict[s
             conn.close()
         except Exception:
             pass
+
+
+def get_ai_knowledge_type_by_key(key: str) -> Optional[Dict[str, Any]]:
+    """Get AI knowledge type configuration from ai_knowledge_types table by key.
+    
+    Returns a dict with knowledge type details if found and active, None otherwise.
+    """
+    if not key:
+        return None
+    
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT 
+                        id, category, key, name, description, is_active,
+                        created_at, updated_at, display_order, category_display_name,
+                        color_code, icon, schema_template, allowed_source, ai_prompt
+                    FROM public.ai_knowledge_types
+                    WHERE key = %s AND is_active = true
+                    LIMIT 1
+                    """,
+                    (key,)
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                
+                return {
+                    'id': row[0],
+                    'category': row[1],
+                    'key': row[2],
+                    'name': row[3],
+                    'description': row[4],
+                    'is_active': row[5],
+                    'created_at': row[6],
+                    'updated_at': row[7],
+                    'display_order': row[8],
+                    'category_display_name': row[9],
+                    'color_code': row[10],
+                    'icon': row[11],
+                    'schema_template': row[12],
+                    'allowed_source': row[13],
+                    'ai_prompt': row[14],
+                }
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass

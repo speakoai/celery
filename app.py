@@ -753,7 +753,7 @@ def api_upload_knowledge_file():
             return jsonify({'error': 'Missing required fields', 'missing_fields': missing}), 400
 
         # Validate knowledge_type
-        valid_types = ['menu', 'faq', 'policy', 'events']
+        valid_types = ['business_info', 'service_menu', 'food_menu', 'locations', 'staff', 'faq', 'service_policy', 'special_promotion', 'custom_message']
         if knowledge_type not in valid_types:
             return jsonify({
                 'error': 'Invalid knowledge_type',
@@ -1343,7 +1343,7 @@ def api_scrape_url():
             return jsonify({'error': 'Invalid pipeline', 'message': 'pipeline must be markdown-only or analyze'}), 400
 
         if pipeline == 'analyze':
-            valid_types = ['menu', 'faq', 'policy', 'events']
+            valid_types = ['business_info', 'service_menu', 'food_menu', 'locations', 'staff', 'faq', 'service_policy', 'special_promotion', 'custom_message']
             if knowledge_type not in valid_types:
                 return jsonify({
                     'error': 'Invalid or missing knowledge_type',

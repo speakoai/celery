@@ -1,83 +1,55 @@
 import os
 import io
 import hashlib
+import logging
+
+# Get logger for this module
+logger = logging.getLogger(__name__)
 
 
 def build_knowledge_prompt(knowledge_type: str) -> str:
     """Return a strict JSON-only extraction prompt per knowledge type.
 
-    This mirrors the prompt logic used in app.py but lives here for reuse by Celery tasks.
+    Dynamically retrieves the prompt from ai_knowledge_types table.
+    Falls back to a generic prompt if knowledge_type not found or database error occurs.
     """
-    if knowledge_type == 'menu':
-        return (
-            "You are given a document that may contain a service or food menu. "
-            "Extract menu items into the following strict JSON schema. Output ONLY JSON, no prose.\n"
-            "{\n"
-            "  \"type\": \"menu\",\n"
-            "  \"items\": [\n"
-            "    {\n"
-            "      \"name\": string,\n"
-            "      \"description\": string|null,\n"
-            "      \"prices\": [ { \"label\": string|null, \"amount\": number, \"currency\": string|null } ],\n"
-            "      \"options\": [ { \"name\": string, \"price_delta\": number|null } ],\n"
-            "      \"allergens\": [ string ]\n"
-            "    }\n"
-            "  ],\n"
-            "  \"source_confidence\": number\n"
-            "}"
-        )
-    if knowledge_type == 'faq':
-        return (
-            "You are given a document that may contain FAQ content. "
-            "Extract FAQs into the following strict JSON schema. Output ONLY JSON.\n"
-            "{\n"
-            "  \"type\": \"faq\",\n"
-            "  \"faqs\": [ { \"question\": string, \"answer\": string } ],\n"
-            "  \"source_confidence\": number\n"
-            "}"
-        )
-    if knowledge_type == 'events' or knowledge_type == 'event' or knowledge_type == 'promotions':
-        return (
-            "You are given a document that may contain information about events and/or promotions. "
-            "Extract items into the following strict JSON schema. Output ONLY JSON. Do NOT include prose.\n"
-            "{\n"
-            "  \"type\": \"events_promotions\",\n"
-            "  \"items\": [\n"
-            "    {\n"
-            "      \"title\": string,\n"
-            "      \"category\": \"event\" | \"promotion\",\n"
-            "      \"description\": string|null,\n"
-            "      \"start_datetime\": string|null,  // ISO8601 if available, else null\n"
-            "      \"end_datetime\": string|null,    // ISO8601 if available, else null\n"
-            "      \"dates\": [ string ],            // optional list of ISO dates for multiple occurrences\n"
-            "      \"recurrence\": { \"rule\": string|null, \"notes\": string|null } | null,\n"
-            "      \"location\": { \"venue\": string|null, \"address\": string|null, \"city\": string|null },\n"
-            "      \"price\": { \"amount\": number|null, \"currency\": string|null } | null,\n"
-            "      \"promotion\": {\n"
-            "         \"discount_type\": \"percentage\" | \"amount\" | null,\n"
-            "         \"value\": number|null,\n"
-            "         \"promo_code\": string|null,\n"
-            "         \"conditions\": string|null,\n"
-            "         \"valid_from\": string|null,   // ISO8601 date or datetime\n"
-            "         \"valid_until\": string|null    // ISO8601 date or datetime\n"
-            "      } | null,\n"
-            "      \"audience\": string|null,\n"
-            "      \"url\": string|null,\n"
-            "      \"tags\": [ string ]\n"
-            "    }\n"
-            "  ],\n"
-            "  \"source_confidence\": number\n"
-            "}"
-        )
-    # policy
+    # Import here to avoid circular dependency
+    from .task_db import get_ai_knowledge_type_by_key
+    
+    try:
+        # Query database for the knowledge type configuration
+        kt_config = get_ai_knowledge_type_by_key(knowledge_type)
+        
+        # Return ai_prompt if found and not empty
+        if kt_config and kt_config.get('ai_prompt'):
+            logger.info(f"📋 Using ai_prompt from database for knowledge_type '{knowledge_type}'")
+            return kt_config['ai_prompt']
+        
+        # Log warning if knowledge type not found
+        if not kt_config:
+            logger.warning(f"⚠️ Knowledge type '{knowledge_type}' not found in ai_knowledge_types table, using generic prompt")
+        else:
+            logger.warning(f"⚠️ Knowledge type '{knowledge_type}' found but ai_prompt is empty, using generic prompt")
+    
+    except Exception as e:
+        # Database error - log and fall back to generic prompt
+        logger.error(f"❌ Error querying ai_knowledge_types for '{knowledge_type}': {e}")
+    
+    # Fallback: return generic extraction prompt
+    return _build_generic_extraction_prompt(knowledge_type)
+
+
+def _build_generic_extraction_prompt(knowledge_type: str) -> str:
+    """Generic fallback prompt for any knowledge type when database lookup fails."""
     return (
-        "You are given a document that may contain policies and terms & conditions. "
-        "Extract into the following strict JSON schema. Output ONLY JSON.\n"
+        f"You are given a document related to '{knowledge_type}'. "
+        "Extract all relevant information into a structured JSON format. "
+        "Output ONLY valid JSON, no prose or explanations.\n"
         "{\n"
-        "  \"type\": \"policy\",\n"
-        "  \"policies\": [ { \"title\": string, \"body\": string } ],\n"
-        "  \"terms\": [ { \"title\": string, \"body\": string } ],\n"
-        "  \"source_confidence\": number\n"
+        f"  \"type\": \"{knowledge_type}\",\n"
+        "  \"extracted_data\": {},\n"
+        "  \"source_confidence\": 0.0,\n"
+        "  \"notes\": \"Extracted using generic prompt\"\n"
         "}"
     )
 
