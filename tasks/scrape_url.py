@@ -25,7 +25,7 @@ from .utils.knowledge_utils import (
     build_knowledge_prompt,
     parse_model_json_output,
 )
-from .utils.task_db import mark_task_running, mark_task_failed, mark_task_succeeded, record_task_artifact
+from .utils.task_db import mark_task_running, mark_task_failed, mark_task_succeeded, record_task_artifact, upsert_tenant_integration_param
 
 logger = get_task_logger(__name__)
 
@@ -449,6 +449,16 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
 
             # Mark succeeded before returning
             if speako_task_id:
+                # Update tenant_integration_params table to mark as configured
+                try:
+                    param_id = upsert_tenant_integration_param(tenant_integration_param=tenant_integration_param)
+                    if param_id:
+                        logger.info(f"✅ [scrape_url_to_markdown] Updated tenant_integration_param (param_id={param_id}) status to 'configured'")
+                    else:
+                        logger.warning(f"⚠️ [scrape_url_to_markdown] Failed to update tenant_integration_param - no param_id returned")
+                except Exception as tip_e:
+                    logger.warning(f"[tasks] upsert_tenant_integration_param failed: {tip_e}")
+                
                 try:
                     mark_task_succeeded(task_id=str(speako_task_id), celery_task_id=str(self.request.id),
                                         details={'url': url, 'artifacts': artifacts, 'pipeline': pipeline, 'knowledge_type': knowledge_type},
@@ -472,6 +482,16 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
 
         # Markdown-only success: mark succeeded before returning
         if speako_task_id:
+            # Update tenant_integration_params table to mark as configured
+            try:
+                param_id = upsert_tenant_integration_param(tenant_integration_param=tenant_integration_param)
+                if param_id:
+                    logger.info(f"✅ [scrape_url_to_markdown] Updated tenant_integration_param (param_id={param_id}) status to 'configured'")
+                else:
+                    logger.warning(f"⚠️ [scrape_url_to_markdown] Failed to update tenant_integration_param - no param_id returned")
+            except Exception as tip_e:
+                logger.warning(f"[tasks] upsert_tenant_integration_param failed: {tip_e}")
+            
             try:
                 mark_task_succeeded(task_id=str(speako_task_id), celery_task_id=str(self.request.id),
                                     details={'url': url, 'artifacts': artifacts, 'pipeline': pipeline},

@@ -25,7 +25,7 @@ from .utils.knowledge_utils import (
     preprocess_for_model,
 )
 # New: DB helpers for task lifecycle and artifacts
-from .utils.task_db import mark_task_running, mark_task_failed, mark_task_succeeded, record_task_artifact
+from .utils.task_db import mark_task_running, mark_task_failed, mark_task_succeeded, record_task_artifact, upsert_tenant_integration_param
 
 
 logger = get_task_logger(__name__)
@@ -392,6 +392,17 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
                 )
             except Exception as db_e:
                 logger.warning("[tasks] record_task_artifact(analysis) failed: %s", db_e)
+            
+            # Update tenant_integration_params table to mark as configured
+            try:
+                param_id = upsert_tenant_integration_param(tenant_integration_param=tenant_integration_param)
+                if param_id:
+                    logger.info(f"✅ [analyze_knowledge_file] Updated tenant_integration_param (param_id={param_id}) status to 'configured'")
+                else:
+                    logger.warning(f"⚠️ [analyze_knowledge_file] Failed to update tenant_integration_param - no param_id returned")
+            except Exception as tip_e:
+                logger.warning(f"[tasks] upsert_tenant_integration_param failed: {tip_e}")
+            
             try:
                 mark_task_succeeded(
                     task_id=str(speako_task_id),

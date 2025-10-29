@@ -217,3 +217,71 @@ def record_task_artifact(*, task_id: str, kind: str, uri: str,
             conn.close()
         except Exception:
             pass
+
+
+def upsert_tenant_integration_param(*, tenant_integration_param: Optional[Dict[str, Any]] = None) -> Optional[int]:
+    """Upsert tenant_integration_params table based on the provided parameter dict.
+    
+    If param_id is present: UPDATE the existing row and set status='configured'
+    If param_id is missing: INSERT a new row with status='configured' and empty JSON value
+    
+    Returns the param_id if successful, None otherwise.
+    """
+    if not tenant_integration_param:
+        return None
+    
+    # Extract fields from the dict (handle both camelCase from API and snake_case)
+    param_id = tenant_integration_param.get('paramId') or tenant_integration_param.get('param_id')
+    tenant_id = tenant_integration_param.get('tenantId') or tenant_integration_param.get('tenant_id')
+    location_id = tenant_integration_param.get('locationId') or tenant_integration_param.get('location_id')
+    provider = tenant_integration_param.get('provider')
+    service = tenant_integration_param.get('service')
+    param_code = tenant_integration_param.get('paramCode') or tenant_integration_param.get('param_code')
+    param_kind = tenant_integration_param.get('paramKind') or tenant_integration_param.get('param_kind')
+    
+    # Validate required fields
+    if not tenant_id or not provider or not param_code or not param_kind:
+        return None
+    
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                if param_id:
+                    # UPDATE existing row
+                    cur.execute(
+                        """
+                        UPDATE public.tenant_integration_params
+                        SET
+                            status = 'configured'::integration_status,
+                            updated_at = now()
+                        WHERE param_id = %s
+                        RETURNING param_id
+                        """,
+                        (param_id,)
+                    )
+                    row = cur.fetchone()
+                    return int(row[0]) if row else None
+                else:
+                    # INSERT new row with ON CONFLICT handling
+                    cur.execute(
+                        """
+                        INSERT INTO public.tenant_integration_params
+                            (tenant_id, location_id, provider, service, param_code, param_kind, value_json, status)
+                        VALUES
+                            (%s, %s, %s, %s, %s, %s, %s, 'configured'::integration_status)
+                        ON CONFLICT (tenant_id, location_id, provider, service, param_code, param_kind, value_text, value_numeric, value_boolean, value_json)
+                        DO UPDATE SET
+                            status = 'configured'::integration_status,
+                            updated_at = now()
+                        RETURNING param_id
+                        """,
+                        (tenant_id, location_id, provider, service, param_code, param_kind, Json({}))
+                    )
+                    row = cur.fetchone()
+                    return int(row[0]) if row else None
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
