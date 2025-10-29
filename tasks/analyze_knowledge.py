@@ -70,7 +70,8 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
                            key: str, unique_filename: str, content_type: str,
                            public_url: str | None = None,
                            file_url: str | None = None,
-                           speako_task_id: str | None = None) -> dict:
+                           speako_task_id: str | None = None,
+                           tenant_integration_param: dict | None = None) -> dict:
     """Celery task to analyze a knowledge file using OpenAI, then save JSON analysis back to R2.
 
     Source file selection:
@@ -81,6 +82,12 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
     """
     start_ts = time.time()
     started_at = datetime.utcnow().isoformat() + 'Z'
+
+    # Log tenant integration param if provided
+    if tenant_integration_param:
+        logger.info(f"📋 [analyze_knowledge_file] tenantIntegrationParam received: {tenant_integration_param}")
+    else:
+        logger.info(f"📋 [analyze_knowledge_file] No tenantIntegrationParam provided")
 
     # Prefer given file_url for the file source when available
     chosen_url = file_url or public_url

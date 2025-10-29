@@ -202,9 +202,16 @@ def _html_to_markdown(title: str, html: str, base_url: str) -> str:
 def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
                            pipeline: str = 'markdown-only', knowledge_type: str | None = None,
                            save_raw_html: bool = False,
-                           speako_task_id: str | None = None) -> dict:
+                           speako_task_id: str | None = None,
+                           tenant_integration_param: dict | None = None) -> dict:
     start_ts = time.time()
     started_at = datetime.utcnow().isoformat() + 'Z'
+
+    # Log tenant integration param if provided
+    if tenant_integration_param:
+        logger.info(f"📋 [scrape_url_to_markdown] tenantIntegrationParam received: {tenant_integration_param}")
+    else:
+        logger.info(f"📋 [scrape_url_to_markdown] No tenantIntegrationParam provided")
 
     if not _host_allowed(url):
         # Early exit: mark failed if speako_task_id present

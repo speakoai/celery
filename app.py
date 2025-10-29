@@ -722,6 +722,7 @@ def api_upload_knowledge_file():
     - multipart/form-data with fields: tenant_id, location_id, knowledge_type, file (binary)
     - JSON or form-data with fields: tenant_id, location_id, knowledge_type, file_url (string)
     - Optional: speako_task_id (string) for client correlation
+    - Optional: tenantIntegrationParam (object) for integration metadata
 
     Constraints for file uploads:
     - Allowed types: .doc/.docx, .xls/.xlsx, .pdf, .csv, .txt
@@ -734,6 +735,9 @@ def api_upload_knowledge_file():
         data_json = request.get_json(silent=True) or {}
         file_url = request.form.get('file_url') or data_json.get('file_url')
         speako_task_id = request.form.get('speako_task_id') or data_json.get('speako_task_id')
+        
+        # Extract tenantIntegrationParam (only available in JSON mode)
+        tenant_integration_param = data_json.get('tenantIntegrationParam')
 
         tenant_id = request.form.get('tenant_id') or data_json.get('tenant_id')
         location_id = request.form.get('location_id') or data_json.get('location_id')
@@ -801,6 +805,7 @@ def api_upload_knowledge_file():
                     public_url=file_url,
                     file_url=file_url,
                     speako_task_id=speako_task_id,
+                    tenant_integration_param=tenant_integration_param,
                 )
                 response_data['analysis'] = {
                     'status': 'queued',
@@ -900,6 +905,7 @@ def api_upload_knowledge_file():
                 content_type=content_type,
                 public_url=public_url,
                 speako_task_id=speako_task_id,
+                tenant_integration_param=tenant_integration_param,
             )
             response_data['analysis'] = {
                 'status': 'queued',
@@ -1304,7 +1310,8 @@ def api_scrape_url():
       "pipeline": "markdown-only" | "analyze", // optional, default: markdown-only
       "knowledge_type": "menu|faq|policy|events", // required if pipeline=analyze
       "save_raw_html": false,          // optional
-      "speako_task_id": "abc-123"    // optional correlation ID
+      "speako_task_id": "abc-123",    // optional correlation ID
+      "tenantIntegrationParam": {...}  // optional integration metadata
     }
 
     Returns 202 with celery_task_id for polling at /api/task/<task_id>.
@@ -1326,6 +1333,7 @@ def api_scrape_url():
         knowledge_type = data.get('knowledge_type')
         save_raw_html = bool(data.get('save_raw_html', False))
         speako_task_id = data.get('speako_task_id')
+        tenant_integration_param = data.get('tenantIntegrationParam')
 
         missing = [k for k in ['tenant_id', 'location_id', 'url'] if not data.get(k)]
         if missing:
@@ -1351,6 +1359,7 @@ def api_scrape_url():
             knowledge_type=knowledge_type,
             save_raw_html=save_raw_html,
             speako_task_id=speako_task_id,
+            tenant_integration_param=tenant_integration_param,
         )
 
         # Align response shape with analyze_knowledge endpoint
