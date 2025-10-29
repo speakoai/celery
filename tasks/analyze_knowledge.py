@@ -393,11 +393,26 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
             except Exception as db_e:
                 logger.warning("[tasks] record_task_artifact(analysis) failed: %s", db_e)
             
-            # Update tenant_integration_params table to mark as configured
+            # Generate AI description from the analysis result
+            ai_description = None
             try:
-                param_id = upsert_tenant_integration_param(tenant_integration_param=tenant_integration_param)
+                from .utils.knowledge_utils import generate_ai_description
+                ai_description = generate_ai_description(payload, knowledge_type)
+                if ai_description:
+                    logger.info(f"📝 [analyze_knowledge_file] Generated AI description ({len(ai_description)} chars)")
+            except Exception as desc_e:
+                logger.warning(f"⚠️ [analyze_knowledge_file] Failed to generate AI description: {desc_e}")
+            
+            # Update tenant_integration_params table to mark as configured and save analysis result
+            try:
+                param_id = upsert_tenant_integration_param(
+                    tenant_integration_param=tenant_integration_param,
+                    analysis_result=payload,  # Save the OpenAI analysis JSON
+                    ai_description=ai_description  # Save the AI-generated description
+                )
                 if param_id:
-                    logger.info(f"✅ [analyze_knowledge_file] Updated tenant_integration_param (param_id={param_id}) status to 'configured'")
+                    desc_msg = " with AI description" if ai_description else ""
+                    logger.info(f"✅ [analyze_knowledge_file] Updated tenant_integration_param (param_id={param_id}) status to 'configured' with analysis result{desc_msg}")
                 else:
                     logger.warning(f"⚠️ [analyze_knowledge_file] Failed to update tenant_integration_param - no param_id returned")
             except Exception as tip_e:

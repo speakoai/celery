@@ -54,6 +54,70 @@ def _build_generic_extraction_prompt(knowledge_type: str) -> str:
     )
 
 
+def generate_ai_description(analysis_json: dict, knowledge_type: str) -> str:
+    """Generate a short AI description (<200 words) from the analysis JSON.
+    
+    Args:
+        analysis_json: The parsed JSON analysis from OpenAI
+        knowledge_type: The type of knowledge being analyzed
+        
+    Returns:
+        A short description string, or None if generation fails
+    """
+    try:
+        # Check if OpenAI is available
+        try:
+            from openai import OpenAI
+        except ImportError:
+            logger.warning("⚠️ OpenAI library not available for description generation")
+            return None
+        
+        api_key = os.getenv('OPENAI_API_KEY')
+        if not api_key:
+            logger.warning("⚠️ OPENAI_API_KEY not set, skipping description generation")
+            return None
+        
+        # Prepare the analysis data as a string
+        import json as _json
+        analysis_str = _json.dumps(analysis_json, indent=2)
+        
+        # Create the prompt for description generation
+        prompt = (
+            f"Based on the following {knowledge_type} analysis data, "
+            "write a clear, concise summary in less than 200 words. "
+            "Focus on the key information that would be most useful for someone "
+            "managing this knowledge base. Be specific and actionable.\n\n"
+            f"Analysis Data:\n{analysis_str}\n\n"
+            "Summary:"
+        )
+        
+        # Call OpenAI API
+        client = OpenAI(api_key=api_key)
+        response = client.chat.completions.create(
+            model=os.getenv('OPENAI_DESCRIPTION_MODEL', 'gpt-4o-mini'),
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant that creates concise, informative summaries of knowledge base content."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            max_tokens=300,
+            temperature=0.3
+        )
+        
+        description = response.choices[0].message.content.strip()
+        logger.info(f"✅ Generated AI description ({len(description)} chars) for knowledge_type '{knowledge_type}'")
+        return description
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to generate AI description: {e}")
+        return None
+
+
 def parse_model_json_output(analysis_text: str):
     """Try to parse JSON text that may be wrapped in code fences.
 

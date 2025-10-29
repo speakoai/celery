@@ -449,11 +449,32 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
 
             # Mark succeeded before returning
             if speako_task_id:
+                # Generate AI description if analysis was performed
+                ai_description = None
+                if pipeline == 'analyze' and 'payload' in locals() and payload:
+                    try:
+                        from .utils.knowledge_utils import generate_ai_description
+                        ai_description = generate_ai_description(payload, knowledge_type)
+                        if ai_description:
+                            logger.info(f"📝 [scrape_url_to_markdown] Generated AI description ({len(ai_description)} chars)")
+                    except Exception as desc_e:
+                        logger.warning(f"⚠️ [scrape_url_to_markdown] Failed to generate AI description: {desc_e}")
+                
                 # Update tenant_integration_params table to mark as configured
                 try:
-                    param_id = upsert_tenant_integration_param(tenant_integration_param=tenant_integration_param)
+                    # If analysis was performed, save the analysis result to value_json
+                    analysis_to_save = payload if (pipeline == 'analyze' and 'payload' in locals() and payload) else None
+                    param_id = upsert_tenant_integration_param(
+                        tenant_integration_param=tenant_integration_param,
+                        analysis_result=analysis_to_save,
+                        ai_description=ai_description
+                    )
                     if param_id:
-                        logger.info(f"✅ [scrape_url_to_markdown] Updated tenant_integration_param (param_id={param_id}) status to 'configured'")
+                        if analysis_to_save:
+                            desc_msg = " and AI description" if ai_description else ""
+                            logger.info(f"✅ [scrape_url_to_markdown] Updated tenant_integration_param (param_id={param_id}) status to 'configured' with analysis JSON{desc_msg} saved")
+                        else:
+                            logger.info(f"✅ [scrape_url_to_markdown] Updated tenant_integration_param (param_id={param_id}) status to 'configured'")
                     else:
                         logger.warning(f"⚠️ [scrape_url_to_markdown] Failed to update tenant_integration_param - no param_id returned")
                 except Exception as tip_e:

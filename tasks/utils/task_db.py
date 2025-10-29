@@ -219,11 +219,18 @@ def record_task_artifact(*, task_id: str, kind: str, uri: str,
             pass
 
 
-def upsert_tenant_integration_param(*, tenant_integration_param: Optional[Dict[str, Any]] = None) -> Optional[int]:
+def upsert_tenant_integration_param(*, tenant_integration_param: Optional[Dict[str, Any]] = None,
+                                    analysis_result: Optional[Dict[str, Any]] = None,
+                                    ai_description: Optional[str] = None) -> Optional[int]:
     """Upsert tenant_integration_params table based on the provided parameter dict.
     
-    If param_id is present: UPDATE the existing row and set status='configured'
-    If param_id is missing: INSERT a new row with status='configured' and empty JSON value
+    If param_id is present: UPDATE the existing row and set status='configured', optionally update value_json and ai_description
+    If param_id is missing: INSERT a new row with status='configured' and optional analysis result and description
+    
+    Args:
+        tenant_integration_param: Dict containing integration parameter info
+        analysis_result: Optional dict containing the OpenAI analysis result to store in value_json
+        ai_description: Optional string containing AI-generated description to store in ai_description field
     
     Returns the param_id if successful, None otherwise.
     """
@@ -243,40 +250,81 @@ def upsert_tenant_integration_param(*, tenant_integration_param: Optional[Dict[s
     if not tenant_id or not provider or not param_code or not param_kind:
         return None
     
+    # Prepare value_json - use analysis_result if provided, otherwise empty dict
+    value_json_data = analysis_result if analysis_result else {}
+    
     conn = _get_conn()
     try:
         with conn:
             with conn.cursor() as cur:
                 if param_id:
                     # UPDATE existing row
-                    cur.execute(
-                        """
-                        UPDATE public.tenant_integration_params
-                        SET
-                            status = 'configured'::integration_status,
-                            updated_at = now()
-                        WHERE param_id = %s
-                        RETURNING param_id
-                        """,
-                        (param_id,)
-                    )
+                    if analysis_result or ai_description:
+                        # Build SET clause dynamically based on what we have
+                        set_clauses = ["status = 'configured'::integration_status", "updated_at = now()"]
+                        params = []
+                        
+                        if analysis_result:
+                            set_clauses.append("value_json = %s")
+                            params.append(Json(value_json_data))
+                        
+                        if ai_description:
+                            set_clauses.append("ai_description = %s")
+                            params.append(ai_description)
+                        
+                        params.append(param_id)
+                        
+                        cur.execute(
+                            f"""
+                            UPDATE public.tenant_integration_params
+                            SET {', '.join(set_clauses)}
+                            WHERE param_id = %s
+                            RETURNING param_id
+                            """,
+                            tuple(params)
+                        )
+                    else:
+                        # Update without changing value_json or ai_description
+                        cur.execute(
+                            """
+                            UPDATE public.tenant_integration_params
+                            SET
+                                status = 'configured'::integration_status,
+                                updated_at = now()
+                            WHERE param_id = %s
+                            RETURNING param_id
+                            """,
+                            (param_id,)
+                        )
                     row = cur.fetchone()
                     return int(row[0]) if row else None
                 else:
                     # INSERT new row with ON CONFLICT handling
+                    # Build INSERT dynamically based on optional fields
+                    insert_fields = ["tenant_id", "location_id", "provider", "service", "param_code", "param_kind", "value_json", "status"]
+                    insert_values = [tenant_id, location_id, provider, service, param_code, param_kind, Json(value_json_data), 'configured']
+                    
+                    update_clauses = ["status = 'configured'::integration_status", "value_json = EXCLUDED.value_json", "updated_at = now()"]
+                    
+                    if ai_description:
+                        insert_fields.append("ai_description")
+                        insert_values.append(ai_description)
+                        update_clauses.append("ai_description = EXCLUDED.ai_description")
+                    
+                    placeholders = ', '.join(['%s'] * len(insert_values))
+                    
                     cur.execute(
-                        """
+                        f"""
                         INSERT INTO public.tenant_integration_params
-                            (tenant_id, location_id, provider, service, param_code, param_kind, value_json, status)
+                            ({', '.join(insert_fields)})
                         VALUES
-                            (%s, %s, %s, %s, %s, %s, %s, 'configured'::integration_status)
+                            ({placeholders})
                         ON CONFLICT (tenant_id, location_id, provider, service, param_code, param_kind, value_text, value_numeric, value_boolean, value_json)
                         DO UPDATE SET
-                            status = 'configured'::integration_status,
-                            updated_at = now()
+                            {', '.join(update_clauses)}
                         RETURNING param_id
                         """,
-                        (tenant_id, location_id, provider, service, param_code, param_kind, Json({}))
+                        tuple(insert_values)
                     )
                     row = cur.fetchone()
                     return int(row[0]) if row else None
