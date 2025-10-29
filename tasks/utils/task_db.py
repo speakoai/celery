@@ -299,17 +299,14 @@ def upsert_tenant_integration_param(*, tenant_integration_param: Optional[Dict[s
                     row = cur.fetchone()
                     return int(row[0]) if row else None
                 else:
-                    # INSERT new row with ON CONFLICT handling
+                    # INSERT new row (no unique constraint, so no ON CONFLICT needed)
                     # Build INSERT dynamically based on optional fields
                     insert_fields = ["tenant_id", "location_id", "provider", "service", "param_code", "param_kind", "value_json", "status"]
                     insert_values = [tenant_id, location_id, provider, service, param_code, param_kind, Json(value_json_data), 'configured']
                     
-                    update_clauses = ["status = 'configured'::integration_status", "value_json = EXCLUDED.value_json", "updated_at = now()"]
-                    
                     if ai_description:
                         insert_fields.append("ai_description")
                         insert_values.append(ai_description)
-                        update_clauses.append("ai_description = EXCLUDED.ai_description")
                     
                     placeholders = ', '.join(['%s'] * len(insert_values))
                     
@@ -319,9 +316,6 @@ def upsert_tenant_integration_param(*, tenant_integration_param: Optional[Dict[s
                             ({', '.join(insert_fields)})
                         VALUES
                             ({placeholders})
-                        ON CONFLICT (tenant_id, location_id, provider, service, param_code, param_kind, value_text, value_numeric, value_boolean, value_json)
-                        DO UPDATE SET
-                            {', '.join(update_clauses)}
                         RETURNING param_id
                         """,
                         tuple(insert_values)

@@ -55,7 +55,7 @@ def _build_generic_extraction_prompt(knowledge_type: str) -> str:
 
 
 def generate_ai_description(analysis_json: dict, knowledge_type: str) -> str:
-    """Generate a short AI description (<200 words) from the analysis JSON.
+    """Generate a short AI description (below 40 words) from the analysis JSON.
     
     Args:
         analysis_json: The parsed JSON analysis from OpenAI
@@ -84,11 +84,11 @@ def generate_ai_description(analysis_json: dict, knowledge_type: str) -> str:
         # Create the prompt for description generation
         prompt = (
             f"Based on the following {knowledge_type} analysis data, "
-            "write a clear, concise summary in less than 200 words. "
-            "Focus on the key information that would be most useful for someone "
-            "managing this knowledge base. Be specific and actionable.\n\n"
+            "write a brief description in LESS THAN 40 WORDS that describes what this knowledge contains. "
+            "Start with 'This knowledge contains' or 'This knowledge provides' and focus on the key information extracted. "
+            "Be specific about what data is available (e.g., shop name, opening hours, menu items, prices, policies, etc.).\n\n"
             f"Analysis Data:\n{analysis_str}\n\n"
-            "Summary:"
+            "Description (under 40 words):"
         )
         
         # Call OpenAI API
@@ -98,19 +98,21 @@ def generate_ai_description(analysis_json: dict, knowledge_type: str) -> str:
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a helpful assistant that creates concise, informative summaries of knowledge base content."
+                    "content": "You are a helpful assistant that creates ultra-concise descriptions. Always keep responses under 40 words and focus on describing what information the knowledge contains."
                 },
                 {
                     "role": "user",
                     "content": prompt
                 }
             ],
-            max_tokens=300,
+            max_tokens=80,
             temperature=0.3
         )
         
         description = response.choices[0].message.content.strip()
-        logger.info(f"✅ Generated AI description ({len(description)} chars) for knowledge_type '{knowledge_type}'")
+        # Count words to verify
+        word_count = len(description.split())
+        logger.info(f"✅ Generated AI description ({word_count} words, {len(description)} chars) for knowledge_type '{knowledge_type}'")
         return description
         
     except Exception as e:
