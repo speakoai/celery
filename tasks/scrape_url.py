@@ -449,26 +449,51 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
 
             # Mark succeeded before returning
             if speako_task_id:
+                logger.info(f"🔍 [DEBUG] Starting database update - speako_task_id: {speako_task_id}")
+                logger.info(f"🔍 [DEBUG] Pipeline: {pipeline}, knowledge_type: {knowledge_type}")
+                logger.info(f"🔍 [DEBUG] tenant_integration_param: {tenant_integration_param}")
+                
                 # Generate AI description if analysis was performed
                 ai_description = None
+                logger.info(f"🔍 [DEBUG] Checking if should generate AI description - pipeline: {pipeline}, 'payload' in locals(): {'payload' in locals()}")
                 if pipeline == 'analyze' and 'payload' in locals() and payload:
+                    logger.info(f"🔍 [DEBUG] Attempting to generate AI description - payload type: {type(payload)}, payload keys: {payload.keys() if isinstance(payload, dict) else 'not a dict'}")
                     try:
                         from .utils.knowledge_utils import generate_ai_description
                         ai_description = generate_ai_description(payload, knowledge_type)
                         if ai_description:
                             logger.info(f"📝 [scrape_url_to_markdown] Generated AI description ({len(ai_description)} chars)")
+                            logger.info(f"🔍 [DEBUG] AI description content: {ai_description[:100]}...")
+                        else:
+                            logger.warning(f"🔍 [DEBUG] generate_ai_description returned None/empty")
                     except Exception as desc_e:
                         logger.warning(f"⚠️ [scrape_url_to_markdown] Failed to generate AI description: {desc_e}")
+                        logger.exception(f"🔍 [DEBUG] Full traceback for AI description generation:")
+                else:
+                    logger.info(f"🔍 [DEBUG] Skipping AI description generation")
                 
                 # Update tenant_integration_params table to mark as configured
+                logger.info(f"🔍 [DEBUG] Preparing to update tenant_integration_params")
                 try:
                     # If analysis was performed, save the analysis result to value_json
                     analysis_to_save = payload if (pipeline == 'analyze' and 'payload' in locals() and payload) else None
+                    logger.info(f"🔍 [DEBUG] analysis_to_save: {type(analysis_to_save)} - is None: {analysis_to_save is None}")
+                    if analysis_to_save:
+                        logger.info(f"🔍 [DEBUG] analysis_to_save keys: {analysis_to_save.keys() if isinstance(analysis_to_save, dict) else 'not a dict'}")
+                    
+                    logger.info(f"🔍 [DEBUG] Calling upsert_tenant_integration_param with:")
+                    logger.info(f"🔍 [DEBUG]   - tenant_integration_param: {tenant_integration_param}")
+                    logger.info(f"🔍 [DEBUG]   - analysis_result type: {type(analysis_to_save)}")
+                    logger.info(f"🔍 [DEBUG]   - ai_description length: {len(ai_description) if ai_description else 0}")
+                    
                     param_id = upsert_tenant_integration_param(
                         tenant_integration_param=tenant_integration_param,
                         analysis_result=analysis_to_save,
                         ai_description=ai_description
                     )
+                    
+                    logger.info(f"🔍 [DEBUG] upsert_tenant_integration_param returned: {param_id} (type: {type(param_id)})")
+                    
                     if param_id:
                         if analysis_to_save:
                             desc_msg = " and AI description" if ai_description else ""
@@ -477,15 +502,20 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
                             logger.info(f"✅ [scrape_url_to_markdown] Updated tenant_integration_param (param_id={param_id}) status to 'configured'")
                     else:
                         logger.warning(f"⚠️ [scrape_url_to_markdown] Failed to update tenant_integration_param - no param_id returned")
+                        logger.warning(f"🔍 [DEBUG] This means upsert function returned None - check validation in upsert_tenant_integration_param")
                 except Exception as tip_e:
-                    logger.warning(f"[tasks] upsert_tenant_integration_param failed: {tip_e}")
+                    logger.error(f"❌ [scrape_url_to_markdown] upsert_tenant_integration_param failed: {tip_e}")
+                    logger.exception(f"🔍 [DEBUG] Full traceback for upsert failure:")
                 
                 try:
+                    logger.info(f"🔍 [DEBUG] Calling mark_task_succeeded for speako_task_id: {speako_task_id}")
                     mark_task_succeeded(task_id=str(speako_task_id), celery_task_id=str(self.request.id),
                                         details={'url': url, 'artifacts': artifacts, 'pipeline': pipeline, 'knowledge_type': knowledge_type},
                                         actor='celery', progress=100)
+                    logger.info(f"🔍 [DEBUG] mark_task_succeeded completed successfully")
                 except Exception as db_e:
                     logger.warning(f"mark_task_succeeded failed: {db_e}")
+                    logger.exception(f"🔍 [DEBUG] Full traceback for mark_task_succeeded failure:")
 
             return {
                 'success': True,
@@ -503,22 +533,33 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
 
         # Markdown-only success: mark succeeded before returning
         if speako_task_id:
+            logger.info(f"🔍 [DEBUG] Markdown-only pipeline - Starting database update")
+            logger.info(f"🔍 [DEBUG] tenant_integration_param: {tenant_integration_param}")
+            
             # Update tenant_integration_params table to mark as configured
             try:
+                logger.info(f"🔍 [DEBUG] Calling upsert_tenant_integration_param (markdown-only)")
                 param_id = upsert_tenant_integration_param(tenant_integration_param=tenant_integration_param)
+                logger.info(f"🔍 [DEBUG] upsert returned param_id: {param_id}")
+                
                 if param_id:
                     logger.info(f"✅ [scrape_url_to_markdown] Updated tenant_integration_param (param_id={param_id}) status to 'configured'")
                 else:
                     logger.warning(f"⚠️ [scrape_url_to_markdown] Failed to update tenant_integration_param - no param_id returned")
+                    logger.warning(f"🔍 [DEBUG] Check if tenant_integration_param has all required fields (tenant_id, provider, param_code, param_kind)")
             except Exception as tip_e:
-                logger.warning(f"[tasks] upsert_tenant_integration_param failed: {tip_e}")
+                logger.error(f"❌ [scrape_url_to_markdown] upsert_tenant_integration_param failed: {tip_e}")
+                logger.exception(f"🔍 [DEBUG] Full traceback for upsert failure:")
             
             try:
+                logger.info(f"🔍 [DEBUG] Calling mark_task_succeeded (markdown-only)")
                 mark_task_succeeded(task_id=str(speako_task_id), celery_task_id=str(self.request.id),
                                     details={'url': url, 'artifacts': artifacts, 'pipeline': pipeline},
                                     actor='celery', progress=100)
+                logger.info(f"🔍 [DEBUG] mark_task_succeeded completed successfully")
             except Exception as db_e:
                 logger.warning(f"mark_task_succeeded failed: {db_e}")
+                logger.exception(f"🔍 [DEBUG] Full traceback for mark_task_succeeded failure:")
 
         return {
             'success': True,

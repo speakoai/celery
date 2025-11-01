@@ -234,7 +234,16 @@ def upsert_tenant_integration_param(*, tenant_integration_param: Optional[Dict[s
     
     Returns the param_id if successful, None otherwise.
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"🔍 [DB DEBUG] upsert_tenant_integration_param called")
+    logger.info(f"🔍 [DB DEBUG] tenant_integration_param: {tenant_integration_param}")
+    logger.info(f"🔍 [DB DEBUG] analysis_result type: {type(analysis_result)}, is None: {analysis_result is None}")
+    logger.info(f"🔍 [DB DEBUG] ai_description length: {len(ai_description) if ai_description else 0}")
+    
     if not tenant_integration_param:
+        logger.warning(f"🔍 [DB DEBUG] tenant_integration_param is None/empty - returning None")
         return None
     
     # Extract fields from the dict (handle both camelCase from API and snake_case)
@@ -246,20 +255,41 @@ def upsert_tenant_integration_param(*, tenant_integration_param: Optional[Dict[s
     param_code = tenant_integration_param.get('paramCode') or tenant_integration_param.get('param_code')
     param_kind = tenant_integration_param.get('paramKind') or tenant_integration_param.get('param_kind')
     
+    logger.info(f"🔍 [DB DEBUG] Extracted fields:")
+    logger.info(f"🔍 [DB DEBUG]   param_id: {param_id}")
+    logger.info(f"🔍 [DB DEBUG]   tenant_id: {tenant_id}")
+    logger.info(f"🔍 [DB DEBUG]   location_id: {location_id}")
+    logger.info(f"🔍 [DB DEBUG]   provider: {provider}")
+    logger.info(f"🔍 [DB DEBUG]   service: {service}")
+    logger.info(f"🔍 [DB DEBUG]   param_code: {param_code}")
+    logger.info(f"🔍 [DB DEBUG]   param_kind: {param_kind}")
+    
     # Validate required fields
     if not tenant_id or not provider or not param_code or not param_kind:
+        logger.warning(f"🔍 [DB DEBUG] Validation FAILED - missing required fields:")
+        logger.warning(f"🔍 [DB DEBUG]   tenant_id present: {bool(tenant_id)}")
+        logger.warning(f"🔍 [DB DEBUG]   provider present: {bool(provider)}")
+        logger.warning(f"🔍 [DB DEBUG]   param_code present: {bool(param_code)}")
+        logger.warning(f"🔍 [DB DEBUG]   param_kind present: {bool(param_kind)}")
         return None
+    
+    logger.info(f"🔍 [DB DEBUG] Validation PASSED - all required fields present")
     
     # Prepare value_json - use analysis_result if provided, otherwise empty dict
     value_json_data = analysis_result if analysis_result else {}
+    logger.info(f"🔍 [DB DEBUG] value_json_data type: {type(value_json_data)}, size: {len(str(value_json_data))}")
     
     conn = _get_conn()
+    logger.info(f"🔍 [DB DEBUG] Database connection obtained: {conn is not None}")
+    
     try:
         with conn:
             with conn.cursor() as cur:
                 if param_id:
+                    logger.info(f"🔍 [DB DEBUG] UPDATE path - param_id exists: {param_id}")
                     # UPDATE existing row
                     if analysis_result or ai_description:
+                        logger.info(f"🔍 [DB DEBUG] UPDATE with analysis_result or ai_description")
                         # Build SET clause dynamically based on what we have
                         set_clauses = ["status = 'configured'::integration_status", "updated_at = now()"]
                         params = []
@@ -267,38 +297,45 @@ def upsert_tenant_integration_param(*, tenant_integration_param: Optional[Dict[s
                         if analysis_result:
                             set_clauses.append("value_json = %s")
                             params.append(Json(value_json_data))
+                            logger.info(f"🔍 [DB DEBUG] Adding value_json to UPDATE")
                         
                         if ai_description:
                             set_clauses.append("ai_description = %s")
                             params.append(ai_description)
+                            logger.info(f"🔍 [DB DEBUG] Adding ai_description to UPDATE")
                         
                         params.append(param_id)
                         
-                        cur.execute(
-                            f"""
+                        sql = f"""
                             UPDATE public.tenant_integration_params
                             SET {', '.join(set_clauses)}
                             WHERE param_id = %s
                             RETURNING param_id
-                            """,
-                            tuple(params)
-                        )
-                    else:
-                        # Update without changing value_json or ai_description
-                        cur.execute(
                             """
+                        logger.info(f"🔍 [DB DEBUG] Executing UPDATE SQL: {sql}")
+                        logger.info(f"🔍 [DB DEBUG] With params count: {len(params)}")
+                        
+                        cur.execute(sql, tuple(params))
+                    else:
+                        logger.info(f"🔍 [DB DEBUG] UPDATE status only (no analysis/description)")
+                        sql = """
                             UPDATE public.tenant_integration_params
                             SET
                                 status = 'configured'::integration_status,
                                 updated_at = now()
                             WHERE param_id = %s
                             RETURNING param_id
-                            """,
-                            (param_id,)
-                        )
+                            """
+                        logger.info(f"🔍 [DB DEBUG] Executing UPDATE SQL: {sql}")
+                        cur.execute(sql, (param_id,))
+                    
                     row = cur.fetchone()
-                    return int(row[0]) if row else None
+                    logger.info(f"🔍 [DB DEBUG] UPDATE result row: {row}")
+                    result = int(row[0]) if row else None
+                    logger.info(f"🔍 [DB DEBUG] UPDATE returning param_id: {result}")
+                    return result
                 else:
+                    logger.info(f"🔍 [DB DEBUG] INSERT path - no param_id provided")
                     # INSERT new row (no unique constraint, so no ON CONFLICT needed)
                     # Build INSERT dynamically based on optional fields
                     insert_fields = ["tenant_id", "location_id", "provider", "service", "param_code", "param_kind", "value_json", "status"]
@@ -307,26 +344,36 @@ def upsert_tenant_integration_param(*, tenant_integration_param: Optional[Dict[s
                     if ai_description:
                         insert_fields.append("ai_description")
                         insert_values.append(ai_description)
+                        logger.info(f"🔍 [DB DEBUG] Adding ai_description to INSERT")
                     
                     placeholders = ', '.join(['%s'] * len(insert_values))
                     
-                    cur.execute(
-                        f"""
+                    sql = f"""
                         INSERT INTO public.tenant_integration_params
                             ({', '.join(insert_fields)})
                         VALUES
                             ({placeholders})
                         RETURNING param_id
-                        """,
-                        tuple(insert_values)
-                    )
+                        """
+                    logger.info(f"🔍 [DB DEBUG] Executing INSERT SQL: {sql}")
+                    logger.info(f"🔍 [DB DEBUG] With values count: {len(insert_values)}")
+                    
+                    cur.execute(sql, tuple(insert_values))
                     row = cur.fetchone()
-                    return int(row[0]) if row else None
+                    logger.info(f"🔍 [DB DEBUG] INSERT result row: {row}")
+                    result = int(row[0]) if row else None
+                    logger.info(f"🔍 [DB DEBUG] INSERT returning param_id: {result}")
+                    return result
+    except Exception as e:
+        logger.error(f"❌ [DB DEBUG] Database error in upsert_tenant_integration_param: {e}")
+        logger.exception(f"🔍 [DB DEBUG] Full traceback:")
+        return None
     finally:
         try:
             conn.close()
-        except Exception:
-            pass
+            logger.info(f"🔍 [DB DEBUG] Database connection closed")
+        except Exception as close_e:
+            logger.warning(f"🔍 [DB DEBUG] Error closing connection: {close_e}")
 
 
 def get_ai_knowledge_type_by_key(key: str) -> Optional[Dict[str, Any]]:
