@@ -404,28 +404,19 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
                 logger.warning(f"⚠️ [analyze_knowledge_file] Failed to generate AI description: {desc_e}")
             
             # Update tenant_integration_params table to mark as configured and save analysis result
-            logger.info(f"🔍 [DEBUG] About to call upsert_tenant_integration_param")
-            logger.info(f"🔍 [DEBUG] tenant_integration_param: {tenant_integration_param}")
-            logger.info(f"🔍 [DEBUG] analysis_result type: {type(payload)}, is None: {payload is None}")
-            logger.info(f"🔍 [DEBUG] ai_description length: {len(ai_description) if ai_description else 0}")
-            
             try:
                 param_id = upsert_tenant_integration_param(
                     tenant_integration_param=tenant_integration_param,
                     analysis_result=payload,  # Save the OpenAI analysis JSON
                     ai_description=ai_description  # Save the AI-generated description
                 )
-                logger.info(f"🔍 [DEBUG] upsert_tenant_integration_param returned: {param_id} (type: {type(param_id)})")
-                
                 if param_id:
                     desc_msg = " with AI description" if ai_description else ""
                     logger.info(f"✅ [analyze_knowledge_file] Updated tenant_integration_param (param_id={param_id}) status to 'configured' with analysis result{desc_msg}")
                 else:
                     logger.warning(f"⚠️ [analyze_knowledge_file] Failed to update tenant_integration_param - no param_id returned")
-                    logger.warning(f"🔍 [DEBUG] Check if tenant_integration_param has all required fields")
             except Exception as tip_e:
-                logger.error(f"❌ [analyze_knowledge_file] upsert_tenant_integration_param failed: {tip_e}")
-                logger.exception(f"🔍 [DEBUG] Full traceback:")
+                logger.warning(f"[tasks] upsert_tenant_integration_param failed: {tip_e}")
             
             try:
                 mark_task_succeeded(

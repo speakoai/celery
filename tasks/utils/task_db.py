@@ -234,14 +234,7 @@ def upsert_tenant_integration_param(*, tenant_integration_param: Optional[Dict[s
     
     Returns the param_id if successful, None otherwise.
     """
-    import logging
-    logger = logging.getLogger(__name__)
-    
-    logger.info(f"🔍 [DB] upsert_tenant_integration_param called")
-    logger.info(f"🔍 [DB] tenant_integration_param: {tenant_integration_param}")
-    
     if not tenant_integration_param:
-        logger.warning(f"⚠️ [DB] tenant_integration_param is None/empty - returning None")
         return None
     
     # Extract fields from the dict (handle both camelCase from API and snake_case)
@@ -253,32 +246,18 @@ def upsert_tenant_integration_param(*, tenant_integration_param: Optional[Dict[s
     param_code = tenant_integration_param.get('paramCode') or tenant_integration_param.get('param_code')
     param_kind = tenant_integration_param.get('paramKind') or tenant_integration_param.get('param_kind')
     
-    logger.info(f"🔍 [DB] Extracted fields: param_id={param_id}, tenant_id={tenant_id}, location_id={location_id}")
-    logger.info(f"🔍 [DB] provider={provider}, service={service}, param_code={param_code}, param_kind={param_kind}")
-    
     # Validate required fields
     if not tenant_id or not provider or not param_code or not param_kind:
-        logger.warning(f"⚠️ [DB] Validation FAILED - Missing required fields:")
-        logger.warning(f"⚠️ [DB]   tenant_id: {tenant_id} (present: {bool(tenant_id)})")
-        logger.warning(f"⚠️ [DB]   provider: {provider} (present: {bool(provider)})")
-        logger.warning(f"⚠️ [DB]   param_code: {param_code} (present: {bool(param_code)})")
-        logger.warning(f"⚠️ [DB]   param_kind: {param_kind} (present: {bool(param_kind)})")
         return None
-    
-    logger.info(f"✅ [DB] Validation PASSED - all required fields present")
     
     # Prepare value_json - use analysis_result if provided, otherwise empty dict
     value_json_data = analysis_result if analysis_result else {}
-    logger.info(f"🔍 [DB] value_json_data prepared, type: {type(value_json_data)}")
     
     conn = _get_conn()
-    logger.info(f"🔍 [DB] Database connection obtained")
-    
     try:
         with conn:
             with conn.cursor() as cur:
                 if param_id:
-                    logger.info(f"🔄 [DB] UPDATE path - param_id={param_id} exists, updating existing row")
                     # UPDATE existing row
                     if analysis_result or ai_description:
                         # Build SET clause dynamically based on what we have
@@ -288,26 +267,24 @@ def upsert_tenant_integration_param(*, tenant_integration_param: Optional[Dict[s
                         if analysis_result:
                             set_clauses.append("value_json = %s")
                             params.append(Json(value_json_data))
-                            logger.info(f"🔍 [DB] Will update value_json")
                         
                         if ai_description:
                             set_clauses.append("ai_description = %s")
                             params.append(ai_description)
-                            logger.info(f"🔍 [DB] Will update ai_description")
                         
                         params.append(param_id)
                         
-                        sql = f"""
+                        cur.execute(
+                            f"""
                             UPDATE public.tenant_integration_params
                             SET {', '.join(set_clauses)}
                             WHERE param_id = %s
                             RETURNING param_id
-                            """
-                        logger.info(f"🔍 [DB] Executing UPDATE with {len(params)} params")
-                        cur.execute(sql, tuple(params))
+                            """,
+                            tuple(params)
+                        )
                     else:
                         # Update without changing value_json or ai_description
-                        logger.info(f"🔍 [DB] Updating status only (no analysis/description)")
                         cur.execute(
                             """
                             UPDATE public.tenant_integration_params
@@ -320,52 +297,36 @@ def upsert_tenant_integration_param(*, tenant_integration_param: Optional[Dict[s
                             (param_id,)
                         )
                     row = cur.fetchone()
-                    result = int(row[0]) if row else None
-                    logger.info(f"✅ [DB] UPDATE completed, returned param_id: {result}")
-                    return result
+                    return int(row[0]) if row else None
                 else:
-                    logger.info(f"➕ [DB] INSERT path - no param_id provided, creating new row")
                     # INSERT new row (no unique constraint, so no ON CONFLICT needed)
                     # Build INSERT dynamically based on optional fields
                     insert_fields = ["tenant_id", "location_id", "provider", "service", "param_code", "param_kind", "value_json", "status"]
                     insert_values = [tenant_id, location_id, provider, service, param_code, param_kind, Json(value_json_data), 'configured']
                     
-                    logger.info(f"🔍 [DB] INSERT will use: tenant_id={tenant_id}, location_id={location_id}")
-                    logger.info(f"🔍 [DB] provider={provider}, service={service}, param_code={param_code}, param_kind={param_kind}")
-                    logger.info(f"🔍 [DB] status='configured', value_json type={type(value_json_data)}")
-                    
                     if ai_description:
                         insert_fields.append("ai_description")
                         insert_values.append(ai_description)
-                        logger.info(f"🔍 [DB] Will also insert ai_description ({len(ai_description)} chars)")
                     
                     placeholders = ', '.join(['%s'] * len(insert_values))
                     
-                    sql = f"""
+                    cur.execute(
+                        f"""
                         INSERT INTO public.tenant_integration_params
                             ({', '.join(insert_fields)})
                         VALUES
                             ({placeholders})
                         RETURNING param_id
-                        """
-                    logger.info(f"🔍 [DB] Executing INSERT with {len(insert_values)} values")
-                    logger.info(f"🔍 [DB] SQL: {sql}")
-                    
-                    cur.execute(sql, tuple(insert_values))
+                        """,
+                        tuple(insert_values)
+                    )
                     row = cur.fetchone()
-                    result = int(row[0]) if row else None
-                    logger.info(f"✅ [DB] INSERT completed, new param_id: {result}")
-                    return result
-    except Exception as e:
-        logger.error(f"❌ [DB] Database error: {type(e).__name__}: {e}")
-        logger.exception(f"🔍 [DB] Full traceback:")
-        return None
+                    return int(row[0]) if row else None
     finally:
         try:
             conn.close()
-            logger.info(f"🔍 [DB] Database connection closed")
-        except Exception as close_e:
-            logger.warning(f"⚠️ [DB] Error closing connection: {close_e}")
+        except Exception:
+            pass
 
 
 def get_ai_knowledge_type_by_key(key: str) -> Optional[Dict[str, Any]]:
