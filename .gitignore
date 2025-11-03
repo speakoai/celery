@@ -36,3 +36,7 @@ celerybeat.pid
 *.egg-info/
 dist/
 build/
+
+# Ignore test and manual script folders
+test-scripts/
+manual-scripts/
