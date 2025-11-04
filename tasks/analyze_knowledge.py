@@ -21,6 +21,7 @@ except Exception as _openai_e:
 from .utils.knowledge_utils import (
     build_knowledge_prompt,
     parse_model_json_output,
+    extract_dual_output,
     build_analysis_artifact_key,
     preprocess_for_model,
 )
@@ -351,13 +352,18 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
                 analysis_text = None
 
         parsed, raw = parse_model_json_output(analysis_text)
-        status = 'success' if parsed is not None else 'raw'
+        
+        # Extract json_data and markdown_data from the parsed response
+        json_payload, markdown_text = extract_dual_output(parsed)
+        
+        status = 'success' if json_payload is not None else 'raw'
         model_used = model_name
 
         # 3) Save analysis artifact to R2
         analysis_key = build_analysis_artifact_key(tenant_id, location_id, unique_filename)
         import json as _json
-        payload = parsed if parsed is not None else {"raw": raw}
+        # Store the full payload (json_payload) for backward compatibility
+        payload = json_payload if json_payload is not None else {"raw": raw}
         payload_bytes = _json.dumps(payload).encode('utf-8')
         put_analysis = client.put_object(
             Bucket=bucket,
@@ -408,11 +414,13 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
                 param_id = upsert_tenant_integration_param(
                     tenant_integration_param=tenant_integration_param,
                     analysis_result=payload,  # Save the OpenAI analysis JSON
-                    ai_description=ai_description  # Save the AI-generated description
+                    ai_description=ai_description,  # Save the AI-generated description
+                    value_text=markdown_text  # Save the extracted markdown text
                 )
                 if param_id:
                     desc_msg = " with AI description" if ai_description else ""
-                    logger.info(f"✅ [analyze_knowledge_file] Updated tenant_integration_param (param_id={param_id}) status to 'configured' with analysis result{desc_msg}")
+                    markdown_msg = " and markdown" if markdown_text else ""
+                    logger.info(f"✅ [analyze_knowledge_file] Updated tenant_integration_param (param_id={param_id}) status to 'configured' with analysis result{desc_msg}{markdown_msg}")
                 else:
                     logger.warning(f"⚠️ [analyze_knowledge_file] Failed to update tenant_integration_param - no param_id returned")
             except Exception as tip_e:

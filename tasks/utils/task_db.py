@@ -221,16 +221,18 @@ def record_task_artifact(*, task_id: str, kind: str, uri: str,
 
 def upsert_tenant_integration_param(*, tenant_integration_param: Optional[Dict[str, Any]] = None,
                                     analysis_result: Optional[Dict[str, Any]] = None,
-                                    ai_description: Optional[str] = None) -> Optional[int]:
+                                    ai_description: Optional[str] = None,
+                                    value_text: Optional[str] = None) -> Optional[int]:
     """Upsert tenant_integration_params table based on the provided parameter dict.
     
-    If param_id is present: UPDATE the existing row and set status='configured', optionally update value_json and ai_description
-    If param_id is missing: INSERT a new row with status='configured' and optional analysis result and description
+    If param_id is present: UPDATE the existing row and set status='configured', optionally update value_json, ai_description, and value_text
+    If param_id is missing: INSERT a new row with status='configured' and optional analysis result, description, and text
     
     Args:
         tenant_integration_param: Dict containing integration parameter info
         analysis_result: Optional dict containing the OpenAI analysis result to store in value_json
         ai_description: Optional string containing AI-generated description to store in ai_description field
+        value_text: Optional string containing markdown or text content to store in value_text field
     
     Returns the param_id if successful, None otherwise.
     """
@@ -259,7 +261,7 @@ def upsert_tenant_integration_param(*, tenant_integration_param: Optional[Dict[s
             with conn.cursor() as cur:
                 if param_id:
                     # UPDATE existing row
-                    if analysis_result or ai_description:
+                    if analysis_result or ai_description or value_text:
                         # Build SET clause dynamically based on what we have
                         set_clauses = ["status = 'configured'::integration_status", "updated_at = now()"]
                         params = []
@@ -271,6 +273,10 @@ def upsert_tenant_integration_param(*, tenant_integration_param: Optional[Dict[s
                         if ai_description:
                             set_clauses.append("ai_description = %s")
                             params.append(ai_description)
+                        
+                        if value_text:
+                            set_clauses.append("value_text = %s")
+                            params.append(value_text)
                         
                         params.append(param_id)
                         
@@ -284,7 +290,7 @@ def upsert_tenant_integration_param(*, tenant_integration_param: Optional[Dict[s
                             tuple(params)
                         )
                     else:
-                        # Update without changing value_json or ai_description
+                        # Update without changing value_json, ai_description, or value_text
                         cur.execute(
                             """
                             UPDATE public.tenant_integration_params
@@ -307,6 +313,10 @@ def upsert_tenant_integration_param(*, tenant_integration_param: Optional[Dict[s
                     if ai_description:
                         insert_fields.append("ai_description")
                         insert_values.append(ai_description)
+                    
+                    if value_text:
+                        insert_fields.append("value_text")
+                        insert_values.append(value_text)
                     
                     placeholders = ', '.join(['%s'] * len(insert_values))
                     

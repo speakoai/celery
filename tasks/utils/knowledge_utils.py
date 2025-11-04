@@ -143,6 +143,36 @@ def parse_model_json_output(analysis_text: str):
         return None, analysis_text
 
 
+def extract_dual_output(parsed_json: dict) -> tuple:
+    """Extract json_data and markdown_data from OpenAI response.
+    
+    Handles two formats:
+    1. New dual format: {"json_data": {...}, "markdown_data": "..."}
+    2. Legacy format: {...} (no markdown, just return the entire JSON)
+    
+    Args:
+        parsed_json: The parsed JSON response from OpenAI
+    
+    Returns:
+        Tuple of (json_payload, markdown_text)
+        - json_payload: The structured data (either from json_data field or entire object)
+        - markdown_text: The markdown string (from markdown_data field or None)
+    """
+    if parsed_json is None:
+        return None, None
+    
+    # Check if this is the new dual format
+    if isinstance(parsed_json, dict) and 'json_data' in parsed_json:
+        json_payload = parsed_json.get('json_data')
+        markdown_text = parsed_json.get('markdown_data')
+        logger.info(f"📦 Extracted dual format - JSON: {bool(json_payload)}, Markdown: {bool(markdown_text)} ({len(markdown_text) if markdown_text else 0} chars)")
+        return json_payload, markdown_text
+    
+    # Legacy format: entire response is the JSON data
+    logger.info(f"📦 Using legacy format - returning entire JSON as payload")
+    return parsed_json, None
+
+
 def build_analysis_artifact_key(tenant_id: str, location_id: str, unique_filename: str) -> str:
     """Return the R2 key for storing the analysis JSON next to the uploaded file.
 
