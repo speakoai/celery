@@ -24,6 +24,7 @@ from .utils.knowledge_utils import (
     build_scrape_artifact_paths,
     build_knowledge_prompt,
     parse_model_json_output,
+    extract_dual_output,
 )
 from .utils.task_db import mark_task_running, mark_task_failed, mark_task_succeeded, record_task_artifact, upsert_tenant_integration_param
 
@@ -415,7 +416,11 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
                         except Exception:
                             analysis_text = None
                     parsed, raw = parse_model_json_output(analysis_text)
-                    payload = parsed if parsed is not None else {"raw": raw}
+                    
+                    # Extract json_data and markdown_data from the parsed response
+                    json_payload, markdown_text = extract_dual_output(parsed)
+                    
+                    payload = json_payload if json_payload is not None else {"raw": raw}
                     payload_bytes = _json.dumps(payload).encode('utf-8')
                     put_analysis = r2.put_object(
                         Bucket=bucket,
@@ -464,15 +469,18 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
                 try:
                     # If analysis was performed, save the analysis result to value_json
                     analysis_to_save = payload if (pipeline == 'analyze' and 'payload' in locals() and payload) else None
+                    markdown_to_save = markdown_text if (pipeline == 'analyze' and 'markdown_text' in locals() and markdown_text) else None
                     param_id = upsert_tenant_integration_param(
                         tenant_integration_param=tenant_integration_param,
                         analysis_result=analysis_to_save,
-                        ai_description=ai_description
+                        ai_description=ai_description,
+                        value_text=markdown_to_save
                     )
                     if param_id:
                         if analysis_to_save:
                             desc_msg = " and AI description" if ai_description else ""
-                            logger.info(f"✅ [scrape_url_to_markdown] Updated tenant_integration_param (param_id={param_id}) status to 'configured' with analysis JSON{desc_msg} saved")
+                            markdown_msg = " and markdown" if markdown_to_save else ""
+                            logger.info(f"✅ [scrape_url_to_markdown] Updated tenant_integration_param (param_id={param_id}) status to 'configured' with analysis JSON{desc_msg}{markdown_msg} saved")
                         else:
                             logger.info(f"✅ [scrape_url_to_markdown] Updated tenant_integration_param (param_id={param_id}) status to 'configured'")
                     else:
