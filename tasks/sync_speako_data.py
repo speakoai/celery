@@ -530,7 +530,8 @@ def sync_speako_data(self, *,
             # Query database
             try:
                 raw_data = _query_business_info(tenant_id, location_id)
-                logger.info(f"✅ [sync_speako_data] Retrieved business data: company={raw_data['business_data'].get('company_name')}, location={raw_data['location_name']}")
+                num_locations = len(raw_data.get('locations', []))
+                logger.info(f"✅ [sync_speako_data] Retrieved business data: company={raw_data['business_data'].get('company_name')}, locations_count={num_locations}")
             except Exception as query_e:
                 logger.error(f"❌ [sync_speako_data] Database query failed: {query_e}")
                 raise
