@@ -530,10 +530,6 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
 
         # Optional analysis chain
         if pipeline == 'analyze' and knowledge_type:
-            # Initialize variables before try block to ensure they're in scope
-            payload = None
-            markdown_text = None
-            
             api_key = os.getenv('OPENAI_API_KEY')
             if not api_key or OpenAI is None:
                 analysis = {'status': 'skipped', 'reason': 'openai_not_configured'}
@@ -615,12 +611,9 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
                 
                 # Update tenant_integration_params table to mark as configured
                 try:
-                    # Check if analysis variables are available and not None
-                    analysis_to_save = payload if payload is not None else None
-                    markdown_to_save = markdown_text if markdown_text is not None else None
-                    
-                    # Debug logging
-                    logger.info(f"🔍 [scrape_url_to_markdown] Saving to DB: analysis_to_save={'present' if analysis_to_save else 'None'}, markdown_to_save={'present' if markdown_to_save else 'None'}")
+                    # Check if analysis variables are available in locals()
+                    analysis_to_save = payload if 'payload' in locals() and payload else None
+                    markdown_to_save = markdown_text if 'markdown_text' in locals() and markdown_text else None
                     
                     param_id = upsert_tenant_integration_param(
                         tenant_integration_param=tenant_integration_param,
@@ -629,7 +622,7 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
                         value_text=markdown_to_save
                     )
                     if param_id:
-                        if analysis_to_save is not None:
+                        if analysis_to_save:
                             desc_msg = " and AI description" if ai_description else ""
                             markdown_msg = " and markdown" if markdown_to_save else ""
                             logger.info(f"✅ [scrape_url_to_markdown] Updated tenant_integration_param (param_id={param_id}) status to 'configured' with analysis JSON{desc_msg}{markdown_msg} saved")
