@@ -198,7 +198,9 @@ def _fetch_via_zenrows(url: str, timeout_ms: int, output_format: str | None = 'm
     timeout_s = max(1, timeout_ms // 1000)
     
     # Make request to ZenRows REST API
+    logger.info(f"🔍 [_fetch_via_zenrows] Calling ZenRows API with url={url}, output_format={output_format}")
     response = requests.get('https://api.zenrows.com/v1/', params=params, timeout=timeout_s)
+    logger.info(f"🔍 [_fetch_via_zenrows] ZenRows responded with status={response.status_code}, content_length={len(response.text)}")
     response.raise_for_status()
     
     content = response.text
