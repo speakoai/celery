@@ -1,10 +1,15 @@
 import os
 import time
+import json
 from datetime import datetime
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote
 
 import requests
+import urllib3
 # No HTML parsing needed when using ScraperAPI Markdown output
+
+# Disable SSL warnings for ZenRows proxy
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from celery.utils.log import get_task_logger
 from tasks.celery_app import app
@@ -58,6 +63,30 @@ def _host_allowed(url: str) -> bool:
     host = urlparse(url).hostname or ''
     allowed_hosts = [h.strip() for h in allowed.split(',') if h.strip()]
     return host in allowed_hosts
+
+
+def _get_scraper_strategy() -> tuple[str, bool]:
+    """Determine which scraper to use and whether fallback is enabled.
+    
+    Returns:
+        tuple: (primary_scraper, enable_fallback)
+            primary_scraper: 'scraperapi' or 'zenrows'
+            enable_fallback: True if fallback to alternate scraper is allowed
+    
+    Environment:
+        SCRAPER_PRIORITY controls behavior:
+            - "scraperapi" (default): Use ScraperAPI with ZenRows fallback
+            - "zenrows" or "zenrows-only": Use only ZenRows
+            - "scraperapi-only": Use only ScraperAPI, no fallback
+    """
+    priority = os.getenv('SCRAPER_PRIORITY', 'scraperapi').lower()
+    
+    if priority in ('zenrows', 'zenrows-only'):
+        return ('zenrows', False)
+    elif priority == 'scraperapi-only':
+        return ('scraperapi', False)
+    else:  # default: 'scraperapi' with fallback
+        return ('scraperapi', True)
 
 
 def _submit_async_job(url: str, *, render: bool = True, output_format: str | None = 'markdown', timeout_ms: int = 15000) -> tuple[str, str]:
@@ -124,6 +153,72 @@ def _poll_async_job(status_url: str, *, per_req_timeout_ms: int = 10000, total_t
         sleep_s = min(5.0, 0.5 + attempt * 0.5)
         time.sleep(sleep_s)
 
+
+def _fetch_via_zenrows(url: str, timeout_ms: int, output_format: str | None = 'markdown') -> tuple[str, dict]:
+    """Fetch content via ZenRows proxy service.
+    
+    Args:
+        url: Target URL to scrape
+        timeout_ms: Request timeout in milliseconds
+        output_format: 'markdown' for markdown output, None for HTML
+    
+    Returns:
+        tuple: (content, headers_dict)
+            content: Scraped markdown or HTML content
+            headers_dict: Metadata headers for tracking
+    
+    Environment:
+        ZENROWS_API_KEY: Required API key for ZenRows service
+    """
+    api_key = os.getenv('ZENROWS_API_KEY')
+    if not api_key:
+        raise RuntimeError('ZENROWS_API_KEY not configured')
+    
+    # JS instructions for comprehensive page interaction
+    js_instructions = [
+        {"wait_for": "main, article, #__next, #app, [role='main']"},
+        {"click": "[aria-label*='accept' i], .cookie-accept, .cc-accept, button[aria-label='Accept all']"},
+        {"wait_event": "networkalmostidle"},
+        {"scroll_y": 1200},
+        {"wait": 400},
+        {"scroll_y": 2400},
+        {"wait": 400},
+        {"evaluate": "window.scrollTo(0, document.body.scrollHeight);"},
+        {"wait_event": "networkidle"},
+        {"wait_for": ".content, .article, .rich-text, [itemprop='articleBody'], .services, .service, [data-testid='content'], [data-testid='main-content']"}
+    ]
+    
+    # Build proxy URL with encoded parameters
+    instructions_json = json.dumps(js_instructions)
+    instructions_encoded = quote(instructions_json)
+    
+    params = f"js_render=true&js_instructions={instructions_encoded}"
+    if output_format == 'markdown':
+        params += "&response_type=markdown"
+    
+    proxy_url = f"http://{api_key}:{params}@api.zenrows.com:8001"
+    proxies = {"http": proxy_url, "https": proxy_url}
+    
+    timeout_s = max(1, timeout_ms // 1000)
+    
+    # Make request through proxy (verify=False due to proxy SSL setup)
+    response = requests.get(url, proxies=proxies, verify=False, timeout=timeout_s)
+    response.raise_for_status()
+    
+    content = response.text
+    headers = {
+        'X-Scraper-Source': 'zenrows',
+        'X-ZenRows-StatusCode': str(response.status_code),
+        'X-ZenRows-ContentLength': str(len(content)),
+    }
+    
+    return content, headers
+
+
+def _fetch_html_via_zenrows(url: str, timeout_ms: int) -> tuple[str, dict]:
+    """Fetch raw HTML via ZenRows (for raw HTML saving)."""
+    return _fetch_via_zenrows(url, timeout_ms, output_format=None)
+
 def _fetch_html_via_scraperapi_async(url: str, timeout_ms: int, total_timeout_ms: int) -> tuple[str, dict]:
     """Fetch raw HTML via ScraperAPI Async (rendered)."""
     job_id, status_url = _submit_async_job(url, render=True, output_format=None, timeout_ms=timeout_ms)
@@ -138,6 +233,27 @@ def _fetch_html_via_scraperapi_async(url: str, timeout_ms: int, total_timeout_ms
         'X-ScraperAPI-StatusCode': str(resp_info.get('statusCode')) if resp_info.get('statusCode') is not None else None,
     }
     return body, meta
+
+
+def _fetch_html_with_fallback(url: str, timeout_ms: int, total_timeout_ms: int) -> tuple[str, dict]:
+    """Fetch raw HTML using configured scraper with fallback support.
+    
+    Respects SCRAPER_PRIORITY environment variable to determine which scraper to use.
+    """
+    primary, enable_fallback = _get_scraper_strategy()
+    
+    if primary == 'zenrows':
+        logger.info(f"🎯 [_fetch_html_with_fallback] Using ZenRows for HTML (SCRAPER_PRIORITY={os.getenv('SCRAPER_PRIORITY', 'zenrows')})")
+        return _fetch_html_via_zenrows(url, timeout_ms)
+    else:
+        try:
+            return _fetch_html_via_scraperapi_async(url, timeout_ms, total_timeout_ms)
+        except Exception as e:
+            if enable_fallback:
+                logger.warning(f"⚠️ ScraperAPI HTML fetch failed: {e}, falling back to ZenRows")
+                return _fetch_html_via_zenrows(url, timeout_ms)
+            else:
+                raise
 
 
 def _extract_async_response_info(data: object) -> dict:
@@ -270,18 +386,46 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
     try:
         timeout_ms = int(os.getenv('SCRAPE_TIMEOUT_MS', '15000'))
         total_timeout_ms = int(os.getenv('SCRAPERAPI_POLL_TOTAL_TIMEOUT_MS', '180000'))
-        # Submit async job for Markdown output and poll until finished
-        job_id, status_url = _submit_async_job(url, render=True, output_format='markdown', timeout_ms=timeout_ms)
-        final = _poll_async_job(status_url, per_req_timeout_ms=timeout_ms, total_timeout_ms=total_timeout_ms)
-        resp_info = _extract_async_response_info(final) or {}
-        markdown = (resp_info.get('body') or '').strip()
-        headers = {
-            'X-ScraperAPI-Async': 'true',
-            'X-ScraperAPI-StatusUrl': status_url,
-            'X-ScraperAPI-JobId': job_id,
-            'X-ScraperAPI-Output-Format': 'markdown',
-            'X-ScraperAPI-StatusCode': str(resp_info.get('statusCode')) if resp_info.get('statusCode') is not None else None,
-        }
+        
+        # Determine scraper strategy
+        primary, enable_fallback = _get_scraper_strategy()
+        scraper_source = None
+        markdown = None
+        headers = None
+        
+        if primary == 'zenrows':
+            # Use ZenRows directly
+            logger.info(f"🎯 [scrape_url_to_markdown] Using ZenRows (SCRAPER_PRIORITY={os.getenv('SCRAPER_PRIORITY', 'zenrows')})")
+            markdown, headers = _fetch_via_zenrows(url, timeout_ms, output_format='markdown')
+            scraper_source = 'zenrows'
+        else:
+            # Try ScraperAPI first
+            try:
+                logger.info(f"🎯 [scrape_url_to_markdown] Using ScraperAPI (SCRAPER_PRIORITY={os.getenv('SCRAPER_PRIORITY', 'scraperapi')})")
+                job_id, status_url = _submit_async_job(url, render=True, output_format='markdown', timeout_ms=timeout_ms)
+                final = _poll_async_job(status_url, per_req_timeout_ms=timeout_ms, total_timeout_ms=total_timeout_ms)
+                resp_info = _extract_async_response_info(final) or {}
+                markdown = (resp_info.get('body') or '').strip()
+                scraper_source = 'scraperapi'
+                headers = {
+                    'X-ScraperAPI-Async': 'true',
+                    'X-ScraperAPI-StatusUrl': status_url,
+                    'X-ScraperAPI-JobId': job_id,
+                    'X-ScraperAPI-Output-Format': 'markdown',
+                    'X-ScraperAPI-StatusCode': str(resp_info.get('statusCode')) if resp_info.get('statusCode') is not None else None,
+                }
+            except Exception as scraper_error:
+                if enable_fallback:
+                    # Fallback to ZenRows
+                    logger.warning(f"⚠️ ScraperAPI failed: {scraper_error}, falling back to ZenRows")
+                    logger.info(f"🔄 [scrape_url_to_markdown] Attempting ZenRows fallback for URL: {url}")
+                    markdown, headers = _fetch_via_zenrows(url, timeout_ms, output_format='markdown')
+                    scraper_source = 'zenrows'
+                    logger.info(f"✅ [scrape_url_to_markdown] ZenRows fallback succeeded, retrieved {len(markdown)} chars of markdown")
+                else:
+                    # No fallback enabled, re-raise
+                    logger.error(f"❌ ScraperAPI failed and fallback disabled (SCRAPER_PRIORITY=scraperapi-only)")
+                    raise
 
         keys = build_scrape_artifact_paths(tenant_id, location_id, url)
         public_base = os.getenv('R2_PUBLIC_BASE_URL', 'https://assets.speako.ai')
@@ -320,7 +464,9 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
             'fetched_at': datetime.utcnow().isoformat() + 'Z',
             'headers': headers,
             'content_length': len(md_bytes),
-            'extractor': 'scraperapi',
+            'extractor': scraper_source,
+            'scraper_priority': os.getenv('SCRAPER_PRIORITY', 'scraperapi'),
+            'was_fallback': scraper_source == 'zenrows' and primary == 'scraperapi',
         }
         meta_bytes = _json.dumps(meta).encode('utf-8')
         put_meta = r2.put_object(
@@ -349,7 +495,7 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
 
         if save_raw_html or os.getenv('SCRAPE_SAVE_RAW_HTML', 'false').lower() == 'true':
             try:
-                raw_html, _raw_headers = _fetch_html_via_scraperapi_async(url, timeout_ms, total_timeout_ms)
+                raw_html, _raw_headers = _fetch_html_with_fallback(url, timeout_ms, total_timeout_ms)
                 raw_bytes = raw_html.encode('utf-8', errors='ignore')
                 put_raw = r2.put_object(
                     Bucket=bucket,
