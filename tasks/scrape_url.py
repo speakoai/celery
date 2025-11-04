@@ -2,14 +2,10 @@ import os
 import time
 import json
 from datetime import datetime
-from urllib.parse import urlparse, quote
+from urllib.parse import urlparse
 
 import requests
-import urllib3
 # No HTML parsing needed when using ScraperAPI Markdown output
-
-# Disable SSL warnings for ZenRows proxy
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from celery.utils.log import get_task_logger
 from tasks.celery_app import app
@@ -155,7 +151,7 @@ def _poll_async_job(status_url: str, *, per_req_timeout_ms: int = 10000, total_t
 
 
 def _fetch_via_zenrows(url: str, timeout_ms: int, output_format: str | None = 'markdown') -> tuple[str, dict]:
-    """Fetch content via ZenRows proxy service.
+    """Fetch content via ZenRows REST API service.
     
     Args:
         url: Target URL to scrape
@@ -188,21 +184,21 @@ def _fetch_via_zenrows(url: str, timeout_ms: int, output_format: str | None = 'm
         {"wait_for": ".content, .article, .rich-text, [itemprop='articleBody'], .services, .service, [data-testid='content'], [data-testid='main-content']"}
     ]
     
-    # Build proxy URL with encoded parameters
-    instructions_json = json.dumps(js_instructions)
-    instructions_encoded = quote(instructions_json)
+    # Build API request parameters (requests library will handle URL encoding)
+    params = {
+        'apikey': api_key,
+        'url': url,
+        'js_render': 'true',
+        'js_instructions': json.dumps(js_instructions),
+    }
     
-    params = f"js_render=true&js_instructions={instructions_encoded}"
     if output_format == 'markdown':
-        params += "&response_type=markdown"
-    
-    proxy_url = f"http://{api_key}:{params}@api.zenrows.com:8001"
-    proxies = {"http": proxy_url, "https": proxy_url}
+        params['response_type'] = 'markdown'
     
     timeout_s = max(1, timeout_ms // 1000)
     
-    # Make request through proxy (verify=False due to proxy SSL setup)
-    response = requests.get(url, proxies=proxies, verify=False, timeout=timeout_s)
+    # Make request to ZenRows REST API
+    response = requests.get('https://api.zenrows.com/v1/', params=params, timeout=timeout_s)
     response.raise_for_status()
     
     content = response.text
