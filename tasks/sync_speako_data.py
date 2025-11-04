@@ -131,8 +131,8 @@ def _format_onetime_hours(hours_data: list) -> list:
     return sorted(exceptions.values(), key=lambda x: x['date'])
 
 
-def _build_business_markdown(data: dict, location_name: str, recurring_hours: dict, onetime_hours: list) -> str:
-    """Build comprehensive markdown with all business info and availability."""
+def _build_business_markdown(data: dict, locations_data: list) -> str:
+    """Build comprehensive markdown with all business info and all locations' availability."""
     lines = []
     
     # Company/Brand Name
@@ -202,62 +202,77 @@ def _build_business_markdown(data: dict, location_name: str, recurring_hours: di
         lines.append("- N/A")
     lines.append("")
     
-    # Location-specific opening hours
-    lines.append(f"## Opening Hours - {location_name}")
+    # All locations' opening hours
+    lines.append("## Locations & Opening Hours")
     lines.append("")
     
-    # Regular opening hours
-    lines.append("### Regular Schedule")
-    for day in ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']:
-        day_key = day.lower()
-        slots = recurring_hours.get(day_key, [])
-        if slots:
-            lines.append(f"- {day}: {', '.join(slots)}")
-        else:
-            lines.append(f"- {day}: Closed")
-    lines.append("")
-    
-    # Categorize one-time hours
-    public_holidays = [e for e in onetime_hours if e['type'] == 'public_holiday']
-    special_hours = [e for e in onetime_hours if e['type'] == 'special_hours']
-    other_closures = [e for e in onetime_hours if e['type'] == 'closure']
-    
-    # Public holiday closures
-    if public_holidays:
-        lines.append("### Public Holiday Closures")
-        for entry in public_holidays:
-            holiday_info = f" ({entry['holiday_name']})" if entry['holiday_name'] else ""
-            lines.append(f"- {entry['date']}{holiday_info}: Closed")
+    for idx, location in enumerate(locations_data):
+        location_name = location.get('location_name', 'Unknown Location')
+        location_id = location.get('location_id', '')
+        recurring_hours = location.get('hours', {}).get('recurring', {})
+        onetime_hours = location.get('hours', {}).get('exceptions', [])
+        
+        # Location header
+        lines.append(f"### {location_name} (Location ID: {location_id})")
         lines.append("")
-    
-    # Special hours
-    if special_hours:
-        lines.append("### Special Hours & Exceptions")
-        for entry in special_hours:
-            hours_str = ', '.join(entry['hours'])
-            lines.append(f"- {entry['date']}: {hours_str}")
+        
+        # Regular opening hours
+        lines.append("#### Regular Schedule")
+        for day in ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']:
+            day_key = day.lower()
+            slots = recurring_hours.get(day_key, [])
+            if slots:
+                lines.append(f"- {day}: {', '.join(slots)}")
+            else:
+                lines.append(f"- {day}: Closed")
         lines.append("")
-    
-    # Other closures
-    if other_closures:
-        lines.append("### Other Closures")
-        for entry in other_closures:
-            lines.append(f"- {entry['date']}: Closed")
-        lines.append("")
+        
+        # Categorize one-time hours
+        public_holidays = [e for e in onetime_hours if e['type'] == 'public_holiday']
+        special_hours = [e for e in onetime_hours if e['type'] == 'special_hours']
+        other_closures = [e for e in onetime_hours if e['type'] == 'closure']
+        
+        # Public holiday closures
+        if public_holidays:
+            lines.append("#### Public Holiday Closures")
+            for entry in public_holidays:
+                holiday_info = f" ({entry['holiday_name']})" if entry['holiday_name'] else ""
+                lines.append(f"- {entry['date']}{holiday_info}: Closed")
+            lines.append("")
+        
+        # Special hours
+        if special_hours:
+            lines.append("#### Special Hours & Exceptions")
+            for entry in special_hours:
+                hours_str = ', '.join(entry['hours'])
+                lines.append(f"- {entry['date']}: {hours_str}")
+            lines.append("")
+        
+        # Other closures
+        if other_closures:
+            lines.append("#### Other Closures")
+            for entry in other_closures:
+                lines.append(f"- {entry['date']}: Closed")
+            lines.append("")
+        
+        # Add separator between locations (except for the last one)
+        if idx < len(locations_data) - 1:
+            lines.append("---")
+            lines.append("")
     
     return "\n".join(lines)
 
 
 def _query_business_info(tenant_id: str, location_id: str) -> dict:
     """
-    Query business info from database including location-specific hours.
+    Query business info from database including ALL locations' hours for the tenant.
+    
+    Note: location_id parameter represents dashboard context but we query ALL locations.
     
     Returns:
         dict with keys:
         - 'business_data': dict from tenants + tenant_info
-        - 'location_name': name of the location
-        - 'recurring_hours': list of recurring availability
-        - 'onetime_hours': list of one-time availability with holiday info
+        - 'locations': list of dicts with location_id, name, recurring_hours, onetime_hours
     """
     conn = _get_db_connection()
     cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -288,37 +303,42 @@ def _query_business_info(tenant_id: str, location_id: str) -> dict:
         if not business_data:
             raise ValueError(f"No tenant found with tenant_id={tenant_id}")
         
-        # Query 2: Get location name
-        query_location = """
-            SELECT name
+        # Query 2: Get ALL locations for this tenant
+        query_locations = """
+            SELECT location_id, name
             FROM locations
-            WHERE tenant_id = %s AND location_id = %s
+            WHERE tenant_id = %s
+            ORDER BY location_id
         """
-        cursor.execute(query_location, (tenant_id, location_id))
-        location_row = cursor.fetchone()
-        location_name = location_row['name'] if location_row else f"Location {location_id}"
+        cursor.execute(query_locations, (tenant_id,))
+        locations_list = cursor.fetchall()
         
-        # Query 3: Get recurring hours for this specific location
+        if not locations_list:
+            logger.warning(f"No locations found for tenant_id={tenant_id}")
+            locations_list = []
+        
+        # Query 3: Get recurring hours for ALL locations
         query_recurring = """
             SELECT 
+                location_id,
                 day_of_week,
                 start_time,
                 end_time,
                 slot_name
             FROM location_availability
             WHERE tenant_id = %s 
-              AND location_id = %s
               AND type = 'recurring'
               AND is_active = true
               AND is_closed = false
-            ORDER BY day_of_week, start_time
+            ORDER BY location_id, day_of_week, start_time
         """
-        cursor.execute(query_recurring, (tenant_id, location_id))
-        recurring_hours = cursor.fetchall()
+        cursor.execute(query_recurring, (tenant_id,))
+        all_recurring_hours = cursor.fetchall()
         
-        # Query 4: Get one-time availability with public holiday info
+        # Query 4: Get one-time availability for ALL locations with public holiday info
         query_onetime = """
             SELECT 
+                la.location_id,
                 la.specific_date,
                 la.start_time,
                 la.end_time,
@@ -329,20 +349,42 @@ def _query_business_info(tenant_id: str, location_id: str) -> dict:
             FROM location_availability la
             LEFT JOIN public_holidays ph ON la.holiday_id = ph.holiday_id
             WHERE la.tenant_id = %s 
-              AND la.location_id = %s
               AND la.type = 'one_time'
               AND la.is_active = true
               AND la.specific_date >= CURRENT_DATE
-            ORDER BY la.specific_date, la.start_time
+            ORDER BY la.location_id, la.specific_date, la.start_time
         """
-        cursor.execute(query_onetime, (tenant_id, location_id))
-        onetime_hours = cursor.fetchall()
+        cursor.execute(query_onetime, (tenant_id,))
+        all_onetime_hours = cursor.fetchall()
+        
+        # Group hours by location_id
+        locations_data = []
+        for loc in locations_list:
+            loc_id = str(loc['location_id'])
+            loc_name = loc['name']
+            
+            # Filter recurring hours for this location
+            recurring_for_loc = [
+                dict(row) for row in all_recurring_hours 
+                if str(row['location_id']) == loc_id
+            ]
+            
+            # Filter onetime hours for this location
+            onetime_for_loc = [
+                dict(row) for row in all_onetime_hours 
+                if str(row['location_id']) == loc_id
+            ]
+            
+            locations_data.append({
+                'location_id': loc_id,
+                'location_name': loc_name,
+                'recurring_hours': recurring_for_loc,
+                'onetime_hours': onetime_for_loc
+            })
         
         return {
             'business_data': dict(business_data),
-            'location_name': location_name,
-            'recurring_hours': [dict(row) for row in recurring_hours],
-            'onetime_hours': [dict(row) for row in onetime_hours]
+            'locations': locations_data
         }
         
     finally:
@@ -352,20 +394,16 @@ def _query_business_info(tenant_id: str, location_id: str) -> dict:
 
 def _format_business_info(raw_data: dict) -> tuple[dict, str]:
     """
-    Format raw DB data into JSON and Markdown.
+    Format raw DB data into JSON and Markdown for ALL locations.
     
     Args:
-        raw_data: dict with business_data, location_name, recurring_hours, onetime_hours
+        raw_data: dict with business_data and locations (list)
     
     Returns:
         tuple: (json_dict, markdown_string)
     """
     business_data = raw_data['business_data']
-    location_name = raw_data['location_name']
-    
-    # Format hours
-    recurring_hours = _format_recurring_hours(raw_data['recurring_hours'])
-    onetime_hours = _format_onetime_hours(raw_data['onetime_hours'])
+    locations_raw = raw_data['locations']
     
     # Derive locale from country_code
     country_code = business_data.get('country_code', 'AU')
@@ -377,6 +415,21 @@ def _format_business_info(raw_data: dict) -> tuple[dict, str]:
         'CA': 'en-CA'
     }
     locale = locale_map.get(country_code, 'en-AU')
+    
+    # Format hours for each location
+    locations_formatted = []
+    for loc in locations_raw:
+        recurring_hours = _format_recurring_hours(loc['recurring_hours'])
+        onetime_hours = _format_onetime_hours(loc['onetime_hours'])
+        
+        locations_formatted.append({
+            'location_id': loc['location_id'],
+            'location_name': loc['location_name'],
+            'hours': {
+                'recurring': recurring_hours,
+                'exceptions': onetime_hours
+            }
+        })
     
     # Build JSON structure
     json_output = {
@@ -403,19 +456,14 @@ def _format_business_info(raw_data: dict) -> tuple[dict, str]:
                 "logo_url": '',  # Not in schema yet
                 "primary_color": business_data.get('primary_color') or ''
             },
-            "hours": {
-                "recurring": recurring_hours,
-                "exceptions": onetime_hours
-            }
+            "locations": locations_formatted
         }
     }
     
     # Build comprehensive markdown
     markdown = _build_business_markdown(
         json_output['data'],
-        location_name,
-        recurring_hours,
-        onetime_hours
+        locations_formatted
     )
     
     return json_output, markdown
@@ -498,8 +546,9 @@ def sync_speako_data(self, *,
             # Generate AI description
             try:
                 company_name = json_output['data'].get('company_name', 'Business')
-                location_name = raw_data.get('location_name', 'Location')
-                ai_description = f"Business information for {company_name} - {location_name} including operating hours and contact details"
+                num_locations = len(json_output['data'].get('locations', []))
+                location_plural = 'location' if num_locations == 1 else 'locations'
+                ai_description = f"Business information for {company_name} with {num_locations} {location_plural} including operating hours and contact details"
                 logger.info(f"📝 [sync_speako_data] Generated AI description: {ai_description}")
             except Exception as desc_e:
                 logger.warning(f"⚠️ [sync_speako_data] Failed to generate AI description: {desc_e}")
