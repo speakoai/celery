@@ -48,6 +48,24 @@ def _format_time(time_obj) -> str:
         return time_obj.strftime('%H:%M')
 
 
+def _extract_duration_minutes(interval_obj) -> int:
+    """
+    Convert PostgreSQL interval/timedelta to total minutes.
+    
+    Args:
+        interval_obj: timedelta or interval from psycopg2
+    
+    Returns:
+        int: Total minutes (e.g., 45, 90, 120)
+    """
+    if interval_obj is None:
+        return 0
+    
+    # timedelta.total_seconds() returns float
+    total_seconds = interval_obj.total_seconds()
+    return int(total_seconds / 60)
+
+
 def _format_recurring_hours(hours_data: list) -> dict:
     """
     Convert recurring availability into weekly schedule.
@@ -469,6 +487,274 @@ def _format_business_info(raw_data: dict) -> tuple[dict, str]:
     return json_output, markdown
 
 
+# ============================================================================
+# SERVICE MENU Knowledge Type Helpers
+# ============================================================================
+
+def _query_service_menu(tenant_id: str, location_id: str) -> dict:
+    """
+    Fetch service categories, services, and service-modifier links for tenant.
+    
+    Args:
+        tenant_id: The tenant identifier
+        location_id: Location context (not used for service filtering - services are tenant-wide)
+    
+    Returns:
+        dict with:
+        - categories: List[dict] - Category tags from location_tag (category_id=4)
+        - services: List[dict] - All active services
+        - service_modifiers: Dict[int, List[dict]] - service_id → list of modifiers
+    """
+    conn = _get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        # Query 1: Fetch service category tags (category_id=4, is_active=true)
+        cursor.execute("""
+            SELECT tag_id, name, slug, tag_colour
+            FROM location_tag
+            WHERE tenant_id = %s 
+              AND category_id = 4 
+              AND is_active = true
+            ORDER BY name
+        """, (tenant_id,))
+        categories = cursor.fetchall()
+        
+        # Query 2: Fetch all active services
+        cursor.execute("""
+            SELECT 
+                service_id, name, description, duration, price, 
+                category_tag_ids, is_active
+            FROM services
+            WHERE tenant_id = %s 
+              AND is_active = true
+            ORDER BY name
+        """, (tenant_id,))
+        services = cursor.fetchall()
+        
+        # Query 3: Fetch service-modifier links with modifier details (JOIN)
+        cursor.execute("""
+            SELECT 
+                sml.service_id,
+                sml.modifier_id,
+                sml.price_override,
+                sml.is_required,
+                sml.default_selected,
+                sml.sort_order,
+                m.name as modifier_name,
+                m.description as modifier_description,
+                m.base_price as modifier_base_price
+            FROM service_modifier_links sml
+            INNER JOIN modifiers m 
+                ON sml.tenant_id = m.tenant_id 
+                AND sml.modifier_id = m.modifier_id
+            WHERE sml.tenant_id = %s
+              AND m.active = true
+            ORDER BY sml.service_id, sml.sort_order NULLS LAST, m.name
+        """, (tenant_id,))
+        modifier_links = cursor.fetchall()
+        
+        # Group modifiers by service_id
+        service_modifiers = {}
+        for link in modifier_links:
+            sid = link['service_id']
+            if sid not in service_modifiers:
+                service_modifiers[sid] = []
+            
+            # Use price_override if available, else base_price
+            price = link['price_override'] if link['price_override'] is not None else link['modifier_base_price']
+            
+            service_modifiers[sid].append({
+                'id': str(link['modifier_id']),
+                'name': link['modifier_name'],
+                'description': link['modifier_description'] or '',
+                'price': float(price) if price is not None else 0.0,
+                'is_required': link['is_required'] or False,
+                'default_selected': link['default_selected'] or False
+            })
+        
+        return {
+            'categories': categories,
+            'services': services,
+            'service_modifiers': service_modifiers
+        }
+    
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def _format_service_menu(raw_data: dict) -> tuple[dict, str]:
+    """
+    Transform raw DB data into JSON + Markdown format.
+    Handles many-to-many service-category relationships.
+    
+    Args:
+        raw_data: Dict with categories, services, service_modifiers
+    
+    Returns:
+        tuple: (json_dict, markdown_string)
+    """
+    categories_list = raw_data['categories']
+    services_list = raw_data['services']
+    service_modifiers = raw_data['service_modifiers']
+    
+    # Build category map: tag_id → category info
+    category_map = {
+        cat['tag_id']: {
+            'id': str(cat['tag_id']),
+            'name': cat['name'],
+            'slug': cat['slug']
+        }
+        for cat in categories_list
+    }
+    
+    # Build category → services mapping
+    category_services = {}  # tag_id → [services]
+    uncategorized_services = []
+    
+    for service in services_list:
+        category_tag_ids = service['category_tag_ids'] or []
+        
+        if not category_tag_ids:
+            # No categories assigned
+            uncategorized_services.append(service)
+        else:
+            # Add service to each valid category
+            for tag_id in category_tag_ids:
+                if tag_id in category_map:
+                    if tag_id not in category_services:
+                        category_services[tag_id] = []
+                    category_services[tag_id].append(service)
+    
+    # Build JSON structure
+    categories_output = []
+    
+    # Process each category (already sorted by name from query)
+    for tag_id, cat_info in category_map.items():
+        if tag_id not in category_services:
+            # Skip empty categories
+            continue
+        
+        items = []
+        for service in category_services[tag_id]:
+            service_id = service['service_id']
+            addons = service_modifiers.get(service_id, [])
+            
+            items.append({
+                'id': str(service_id),
+                'name': service['name'],
+                'description': service['description'] or '',
+                'duration_min': _extract_duration_minutes(service['duration']),
+                'price': {
+                    'currency': 'AUD',
+                    'amount': float(service['price']) if service['price'] is not None else 0.0
+                },
+                'addons': addons
+            })
+        
+        categories_output.append({
+            'id': cat_info['id'],
+            'name': cat_info['name'],
+            'items': items
+        })
+    
+    # Add uncategorized if any
+    if uncategorized_services:
+        items = []
+        for service in uncategorized_services:
+            service_id = service['service_id']
+            addons = service_modifiers.get(service_id, [])
+            
+            items.append({
+                'id': str(service_id),
+                'name': service['name'],
+                'description': service['description'] or '',
+                'duration_min': _extract_duration_minutes(service['duration']),
+                'price': {
+                    'currency': 'AUD',
+                    'amount': float(service['price']) if service['price'] is not None else 0.0
+                },
+                'addons': addons
+            })
+        
+        categories_output.append({
+            'id': '0',
+            'name': 'Uncategorized',
+            'items': items
+        })
+    
+    # Build JSON
+    json_data = {
+        'version': 1,
+        'source': 'sync_speako_data',
+        'analysis_artifact_url': '',
+        'locale': 'en-AU',
+        'data': {
+            'categories': categories_output
+        }
+    }
+    
+    # Build Markdown
+    markdown_content = _build_service_menu_markdown(json_data['data'])
+    
+    return json_data, markdown_content
+
+
+def _build_service_menu_markdown(data: dict) -> str:
+    """
+    Build comprehensive Markdown from formatted data.
+    
+    Args:
+        data: Dict with categories array
+    
+    Returns:
+        str: Markdown content
+    """
+    lines = []
+    lines.append("> Group services by **Category**, then list **Items** with duration and price.")
+    lines.append("")
+    
+    for category in data['categories']:
+        lines.append(f"## Category: {category['name']}")
+        
+        for item in category['items']:
+            lines.append(f"### Service: {item['name']}")
+            lines.append("**Description:**  ")
+            lines.append(item['description'] or 'No description available')
+            lines.append("")
+            lines.append(f"- Duration: {item['duration_min']} min")
+            lines.append(f"- Price: ${item['price']['amount']:.2f} {item['price']['currency']}")
+            
+            # Format addons
+            if item['addons']:
+                addon_parts = []
+                for addon in item['addons']:
+                    addon_str = f"{addon['name']} (${addon['price']:.2f})"
+                    
+                    # Add indicators
+                    indicators = []
+                    if addon.get('is_required'):
+                        indicators.append('Required')
+                    if addon.get('default_selected'):
+                        indicators.append('Default')
+                    
+                    if indicators:
+                        addon_str += f" [{']['.join(indicators)}]"
+                    
+                    addon_parts.append(addon_str)
+                
+                lines.append(f"- Add-ons: {', '.join(addon_parts)}")
+            else:
+                lines.append("- Add-ons: None")
+            
+            lines.append("")
+        
+        lines.append("")
+    
+    return '\n'.join(lines)
+
+
 @app.task(bind=True)
 def sync_speako_data(self, *, 
                      tenant_id: str, 
@@ -554,7 +840,40 @@ def sync_speako_data(self, *,
             except Exception as desc_e:
                 logger.warning(f"⚠️ [sync_speako_data] Failed to generate AI description: {desc_e}")
         
-        elif knowledge_type in ['service_menu', 'locations', 'staff']:
+        elif knowledge_type == 'service_menu':
+            logger.info(f"🛍️ [sync_speako_data] Syncing service_menu for tenant={tenant_id}, location={location_id}")
+            
+            # Query database
+            try:
+                raw_data = _query_service_menu(tenant_id, location_id)
+                num_categories = len(raw_data.get('categories', []))
+                num_services = len(raw_data.get('services', []))
+                logger.info(f"✅ [sync_speako_data] Retrieved service menu data: {num_categories} categories, {num_services} services")
+            except Exception as query_e:
+                logger.error(f"❌ [sync_speako_data] Database query failed: {query_e}")
+                raise
+            
+            # Format into JSON + Markdown
+            try:
+                json_output, markdown_output = _format_service_menu(raw_data)
+                num_output_categories = len(json_output['data'].get('categories', []))
+                logger.info(f"✅ [sync_speako_data] Formatted service_menu: {num_output_categories} categories in output, {len(json.dumps(json_output))} bytes JSON, {len(markdown_output)} bytes Markdown")
+            except Exception as format_e:
+                logger.error(f"❌ [sync_speako_data] Data formatting failed: {format_e}")
+                raise
+            
+            # Generate AI description
+            try:
+                num_categories = len(json_output['data'].get('categories', []))
+                total_services = sum(len(cat.get('items', [])) for cat in json_output['data'].get('categories', []))
+                category_plural = 'category' if num_categories == 1 else 'categories'
+                service_plural = 'service' if total_services == 1 else 'services'
+                ai_description = f"Service menu with {total_services} {service_plural} across {num_categories} {category_plural}"
+                logger.info(f"📝 [sync_speako_data] Generated AI description: {ai_description}")
+            except Exception as desc_e:
+                logger.warning(f"⚠️ [sync_speako_data] Failed to generate AI description: {desc_e}")
+        
+        elif knowledge_type in ['locations', 'staff']:
             # TODO: Implement other knowledge types
             logger.warning(f"⚠️ [sync_speako_data] Knowledge type '{knowledge_type}' not yet implemented")
             raise NotImplementedError(f"Knowledge type '{knowledge_type}' sync not yet implemented")
