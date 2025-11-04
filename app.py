@@ -14,6 +14,7 @@ from tasks.sms import (
 from tasks.celery_app import app as celery_app
 from tasks.analyze_knowledge import analyze_knowledge_file
 from tasks.scrape_url import scrape_url_to_markdown
+from tasks.sync_speako_data import sync_speako_data
 # Additional imports for R2 uploads
 import boto3
 from werkzeug.utils import secure_filename
@@ -1384,3 +1385,85 @@ def api_scrape_url():
 
     except Exception as e:
         return jsonify({'error': 'Internal server error', 'message': str(e)}), 500
+
+
+@app.route('/api/knowledge/sync-with-speako', methods=['POST'])
+@require_api_key
+def api_sync_with_speako():
+    """
+    [aiknowledges] Sync knowledge data directly from Speako's internal database.
+
+    Expected JSON payload:
+    {
+      "tenant_id": "123",           // required
+      "location_id": "456",         // required
+      "knowledge_type": "business_info|service_menu|locations|staff", // required
+      "speako_task_id": "abc-123",    // optional correlation ID
+      "tenantIntegrationParam": {...}  // optional integration metadata
+    }
+
+    Note: This endpoint does NOT accept file uploads or URLs. It syncs data directly
+    from Speako's internal database based on tenant_id and location_id.
+
+    Returns 202 with celery_task_id for polling at /api/task/<task_id>.
+    """
+    try:
+        # Be tolerant of clients missing Content-Type or sending invalid JSON
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({
+                'error': 'JSON payload required',
+                'message': 'Send a valid JSON body with Content-Type: application/json',
+                'content_type': request.headers.get('Content-Type', None)
+            }), 400
+
+        tenant_id = data.get('tenant_id')
+        location_id = data.get('location_id')
+        knowledge_type = data.get('knowledge_type')
+        speako_task_id = data.get('speako_task_id')
+        tenant_integration_param = data.get('tenantIntegrationParam')
+
+        # Validate required fields
+        missing = [k for k in ['tenant_id', 'location_id', 'knowledge_type'] if not data.get(k)]
+        if missing:
+            return jsonify({'error': 'Missing required fields', 'missing_fields': missing}), 400
+
+        # Validate knowledge_type - only allow sync-compatible types
+        valid_types = ['business_info', 'service_menu', 'locations', 'staff']
+        if knowledge_type not in valid_types:
+            return jsonify({
+                'error': 'Invalid knowledge_type',
+                'message': f'knowledge_type must be one of: {", ".join(valid_types)}',
+                'provided': knowledge_type
+            }), 400
+
+        # Enqueue sync task
+        task = sync_speako_data.delay(
+            tenant_id=tenant_id,
+            location_id=location_id,
+            knowledge_type=knowledge_type,
+            speako_task_id=speako_task_id,
+            tenant_integration_param=tenant_integration_param,
+        )
+
+        # Return response similar to other knowledge endpoints
+        return jsonify({
+            'success': True,
+            'message': 'Speako data sync task started',
+            'data': {
+                'analysis': {
+                    'status': 'queued',
+                    'mode': 'background',
+                    'celery_task_id': task.id
+                },
+                'tenant_id': tenant_id,
+                'location_id': location_id,
+                'knowledge_type': knowledge_type,
+                'source': 'sync_speako_data',
+                **({'speako_task_id': speako_task_id} if speako_task_id else {})
+            }
+        }), 202
+
+    except Exception as e:
+        return jsonify({'error': 'Internal server error', 'message': str(e)}), 500
+
