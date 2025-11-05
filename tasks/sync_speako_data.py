@@ -746,6 +746,90 @@ def _build_location_categories(location_service_ids: list,
     return categories_output
 
 
+# ============================================================================
+# Markdown Generation Helpers for service_menu
+# ============================================================================
+
+def _build_service_menu_markdown(json_data: dict) -> str:
+    """Build markdown content from service_menu JSON data."""
+    data = json_data.get('data', {})
+    sections = []
+    
+    # Header
+    sections.append("# Service Menu")
+    
+    # Primary Location
+    primary_location = data.get('primary_location', {})
+    if primary_location:
+        loc_name = primary_location.get('location_name', 'Primary Location')
+        categories = primary_location.get('categories', [])
+        
+        sections.append(f"\n## {loc_name}")
+        
+        for category in categories:
+            cat_name = category.get('name', 'Uncategorized')
+            items = category.get('items', [])
+            
+            sections.append(f"\n### {cat_name}")
+            
+            for item in items:
+                item_name = item.get('name', '')
+                description = item.get('description', '')
+                duration = item.get('duration_min', 0)
+                price = item.get('price', {})
+                amount = price.get('amount', 0)
+                currency = price.get('currency', 'AUD')
+                addons = item.get('addons', [])
+                
+                # Service title with price
+                sections.append(f"\n**{item_name}** — {currency} {amount:.2f}")
+                
+                # Duration
+                if duration > 0:
+                    sections.append(f"  \n*Duration: {duration} minutes*")
+                
+                # Description
+                if description:
+                    sections.append(f"  \n{description}")
+                
+                # Addons/Modifiers
+                if addons:
+                    sections.append("\n  \n*Available Add-ons:*")
+                    for addon in addons:
+                        addon_name = addon.get('name', '')
+                        addon_price = addon.get('price', 0)
+                        addon_desc = addon.get('description', '')
+                        
+                        addon_line = f"  - {addon_name} (+{currency} {addon_price:.2f})"
+                        if addon_desc:
+                            addon_line += f" - {addon_desc}"
+                        sections.append(addon_line)
+    
+    # Other Locations
+    other_locations = data.get('other_locations', [])
+    if other_locations:
+        sections.append("\n---\n")
+        sections.append("## Other Locations\n")
+        
+        for loc in other_locations:
+            loc_name = loc.get('location_name', 'Location')
+            categories = loc.get('categories', [])
+            
+            sections.append(f"\n### {loc_name}")
+            
+            # Just list categories and service counts for other locations
+            for category in categories:
+                cat_name = category.get('name', '')
+                items = category.get('items', [])
+                item_count = len(items)
+                
+                service_names = [item.get('name', '') for item in items]
+                sections.append(f"\n**{cat_name}** ({item_count} service{'s' if item_count != 1 else ''})")
+                sections.append(f"  \n{', '.join(service_names)}")
+    
+    return "\n".join(sections)
+
+
 def _format_service_menu(raw_data: dict, primary_location_id: int) -> tuple[dict, str]:
     """
     Prepare raw DB data for OpenAI processing.
@@ -821,7 +905,7 @@ def _format_service_menu(raw_data: dict, primary_location_id: int) -> tuple[dict
             'categories': loc_categories
         })
     
-    # Package raw data for OpenAI
+    # Package formatted data
     json_data = {
         'version': 1,
         'source': 'sync_speako_data',
@@ -833,9 +917,8 @@ def _format_service_menu(raw_data: dict, primary_location_id: int) -> tuple[dict
         }
     }
     
-    # TODO: Call OpenAI with ai_prompt + json_data
-    # OpenAI will handle all formatting based on ai_prompt from ai_knowledge_types table
-    markdown_content = ""  # Placeholder - OpenAI will generate this
+    # Generate markdown from JSON data
+    markdown_content = _build_service_menu_markdown(json_data)
     
     return json_data, markdown_content
 
@@ -1051,6 +1134,124 @@ def _query_locations(tenant_id: str, location_id: str) -> dict:
         conn.close()
 
 
+# ============================================================================
+# Markdown Generation Helpers for locations
+# ============================================================================
+
+def _build_locations_markdown(json_data: dict) -> str:
+    """Build markdown content from locations JSON data."""
+    data = json_data.get('data', {})
+    sections = []
+    
+    # Header
+    sections.append("# Our Locations")
+    
+    # Primary Location
+    primary_location = data.get('primary_location', {})
+    if primary_location:
+        sections.append("\n## Primary Location\n")
+        sections.append(_format_location_details_markdown(primary_location))
+    
+    # Other Locations
+    other_locations = data.get('other_locations', [])
+    if other_locations:
+        sections.append("\n---\n")
+        sections.append("## Additional Locations\n")
+        
+        for loc in other_locations:
+            sections.append(_format_location_details_markdown(loc))
+            sections.append("\n---\n")
+    
+    return "\n".join(sections)
+
+
+def _format_location_details_markdown(location: dict) -> str:
+    """Format a single location's details into markdown."""
+    sections = []
+    
+    # Location Name
+    name = location.get('name', 'Unknown Location')
+    sections.append(f"### {name}")
+    
+    # Address
+    address = location.get('address', {})
+    line1 = address.get('line1', '')
+    line2 = address.get('line2', '')
+    city = address.get('city', '')
+    state = address.get('state', '')
+    postcode = address.get('postcode', '')
+    country = address.get('country', '')
+    
+    if line1:
+        sections.append("\n**Address:**")
+        address_parts = [line1]
+        if line2:
+            address_parts.append(line2)
+        if city or state or postcode:
+            address_parts.append(f"{city} {state} {postcode}".strip())
+        if country:
+            address_parts.append(country)
+        sections.append("  \n" + "  \n".join(address_parts))
+    
+    # Contact
+    contact = location.get('contact', {})
+    phone = contact.get('phone', '')
+    email = contact.get('email', '')
+    website = contact.get('website', '')
+    
+    if phone or email or website:
+        sections.append("\n**Contact:**")
+        if phone:
+            sections.append(f"  \n📞 {phone}")
+        if email:
+            sections.append(f"  \n📧 {email}")
+        if website:
+            sections.append(f"  \n🌐 {website}")
+    
+    # Hours
+    hours = location.get('hours', {})
+    recurring = hours.get('recurring', {})
+    exceptions = hours.get('exceptions', [])
+    
+    if recurring:
+        sections.append("\n**Regular Hours:**\n")
+        sections.append(_format_week_schedule_markdown(recurring))
+    
+    if exceptions:
+        sections.append("\n**Special Hours & Closures:**\n")
+        sections.append(_format_exceptions_markdown(exceptions))
+    
+    # Services Available
+    services = location.get('services_available', [])
+    if services:
+        sections.append(f"\n**Services Available:** {len(services)} service{'s' if len(services) != 1 else ''}")
+        sections.append("  \n" + ", ".join(services))
+    
+    # Booking Info
+    booking_info = location.get('booking_info', {})
+    min_advance = booking_info.get('min_advance_minutes', 0)
+    slot_interval = booking_info.get('slot_interval_minutes', 0)
+    
+    if min_advance > 0 or slot_interval > 0:
+        sections.append("\n**Booking Information:**")
+        if min_advance > 0:
+            hours = min_advance // 60
+            mins = min_advance % 60
+            if hours > 0:
+                sections.append(f"  \n- Minimum advance booking: {hours}h {mins}min" if mins else f"  \n- Minimum advance booking: {hours} hour{'s' if hours != 1 else ''}")
+            else:
+                sections.append(f"  \n- Minimum advance booking: {mins} minutes")
+        if slot_interval > 0:
+            sections.append(f"  \n- Booking slots every: {slot_interval} minutes")
+    
+    # Notes
+    notes = location.get('notes', '')
+    if notes:
+        sections.append(f"\n**Notes:**  \n{notes}")
+    
+    return "\n".join(sections)
+
+
 def _build_location_details(
     location_id: int,
     locations_map: dict,
@@ -1144,17 +1345,15 @@ def _build_location_details(
 
 def _format_locations(raw_data: dict, primary_location_id: int) -> tuple[dict, str]:
     """
-    Prepare raw DB data for OpenAI processing.
-    OpenAI will structure and format the data based on ai_prompt from database.
+    Format locations data into structured JSON and markdown.
     
     Args:
         raw_data: Dict with locations, location_info, hours, services, states
         primary_location_id: The location that triggered this sync
     
     Returns:
-        tuple: (raw_data_dict, empty_markdown_placeholder)
+        tuple: (json_output, markdown_content)
     """
-    from .utils.task_db import get_ai_knowledge_type_by_key
     
     locations_list = raw_data['locations']
     location_info = raw_data['location_info']
@@ -1199,7 +1398,7 @@ def _format_locations(raw_data: dict, primary_location_id: int) -> tuple[dict, s
         if loc_details:
             other_locations_data.append(loc_details)
     
-    # Package raw data for OpenAI
+    # Package formatted data
     json_data = {
         'version': 1,
         'source': 'sync_speako_data',
@@ -1211,9 +1410,8 @@ def _format_locations(raw_data: dict, primary_location_id: int) -> tuple[dict, s
         }
     }
     
-    # TODO: Call OpenAI with ai_prompt + json_data
-    # OpenAI will handle all formatting based on ai_prompt from ai_knowledge_types table
-    markdown_content = ""  # Placeholder - OpenAI will generate this
+    # Generate markdown from JSON data
+    markdown_content = _build_locations_markdown(json_data)
     
     return json_data, markdown_content
 
