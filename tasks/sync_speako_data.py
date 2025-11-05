@@ -1590,9 +1590,11 @@ def _build_staff_markdown(json_data: dict) -> str:
     primary_location = data.get('primary_location', {})
     if primary_location:
         loc_name = primary_location.get('location_name', 'Primary Location')
+        staff_count = primary_location.get('staff_count', 0)
         staff_list = primary_location.get('staff', [])
         
-        sections.append(f"\n## Staff at {loc_name}")
+        staff_text = 'staff member' if staff_count == 1 else 'staff members'
+        sections.append(f"\n## Staff at {loc_name} ({staff_count} {staff_text})")
         
         for staff in staff_list:
             sections.append("\n" + _format_staff_member_markdown(staff, is_primary=True))
@@ -1605,9 +1607,11 @@ def _build_staff_markdown(json_data: dict) -> str:
         
         for loc in other_locations:
             loc_name = loc.get('location_name', 'Location')
+            staff_count = loc.get('staff_count', 0)
             staff_list = loc.get('staff', [])
             
-            sections.append(f"\n### {loc_name}\n")
+            staff_text = 'staff member' if staff_count == 1 else 'staff members'
+            sections.append(f"\n### {loc_name} ({staff_count} {staff_text})\n")
             
             for staff in staff_list:
                 sections.append(_format_staff_member_markdown(staff, is_primary=False))
@@ -1818,6 +1822,7 @@ def _format_staff(raw_data: dict, primary_location_id: int) -> tuple[dict, str]:
     primary_location_data = {
         'location_id': str(primary_location_id),
         'location_name': primary_location_name,
+        'staff_count': len(primary_location_staff),
         'staff': primary_location_staff
     }
     
@@ -1828,6 +1833,7 @@ def _format_staff(raw_data: dict, primary_location_id: int) -> tuple[dict, str]:
         other_locations_data.append({
             'location_id': str(loc_id),
             'location_name': loc_name,
+            'staff_count': len(other_locations_staff[loc_id]),
             'staff': other_locations_staff[loc_id]
         })
     
