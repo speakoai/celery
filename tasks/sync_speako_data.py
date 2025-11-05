@@ -1572,6 +1572,36 @@ def _group_staff_availability_by_location(staff_id: int, recurring_avail: list, 
 # Markdown Generation Helpers for staff
 # ============================================================================
 
+def _format_staff_day_hours_markdown(hours_array: list) -> str:
+    """Format hours array for a single day into markdown string (staff context)."""
+    if not hours_array:
+        return "Off Duty"
+    return ", ".join(hours_array)
+
+
+def _format_staff_week_schedule_markdown(recurring_dict: dict) -> str:
+    """Format weekly recurring hours into markdown bullet list (staff context)."""
+    days_order = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+    day_names = {
+        'mon': 'Monday',
+        'tue': 'Tuesday', 
+        'wed': 'Wednesday',
+        'thu': 'Thursday',
+        'fri': 'Friday',
+        'sat': 'Saturday',
+        'sun': 'Sunday'
+    }
+    
+    lines = []
+    for day_key in days_order:
+        day_name = day_names[day_key]
+        hours = recurring_dict.get(day_key, [])
+        hours_text = _format_staff_day_hours_markdown(hours)
+        lines.append(f"- **{day_name}**: {hours_text}")
+    
+    return "\n".join(lines)
+
+
 def _build_staff_markdown(json_data: dict) -> str:
     """Build markdown content from staff JSON data."""
     summary = json_data.get('summary', {})
@@ -1667,7 +1697,7 @@ def _format_staff_member_markdown(staff: dict, is_primary: bool = True) -> str:
         
         if recurring:
             sections.append("\n*Regular Hours:*\n")
-            sections.append(_format_week_schedule_markdown(recurring))
+            sections.append(_format_staff_week_schedule_markdown(recurring))
         
         if exceptions:
             sections.append("\n*Special Hours:*\n")
