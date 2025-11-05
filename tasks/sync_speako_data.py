@@ -1643,18 +1643,8 @@ def _format_staff_member_markdown(staff: dict, is_primary: bool = True) -> str:
     services = staff.get('services', [])
     if services:
         sections.append("\n**Services Offered:**")
-        for svc in services:
-            svc_name = svc.get('service_name', '')
-            duration = svc.get('duration_min', 0)
-            price = svc.get('price', {})
-            amount = price.get('amount', 0)
-            currency = price.get('currency', 'AUD')
-            description = svc.get('description', '')
-            
-            service_line = f"- **{svc_name}** ({duration} min) — {currency} {amount:.2f}"
-            sections.append(service_line)
-            if description and is_primary:
-                sections.append(f"  {description}")
+        for svc_name in services:
+            sections.append(f"- {svc_name}")
     
     # Availability
     availability = staff.get('availability', {})
@@ -1738,19 +1728,10 @@ def _format_staff(raw_data: dict, primary_location_id: int) -> tuple[dict, str]:
             if svc_id not in services:
                 continue
             svc = services[svc_id]
-            staff_services_list.append({
-                'service_id': str(svc_id),
-                'service_name': svc['name'],
-                'description': svc['description'] or '',
-                'duration_min': _extract_duration_minutes(svc['duration']),
-                'price': {
-                    'currency': 'AUD',
-                    'amount': float(svc['price']) if svc['price'] is not None else 0.0
-                }
-            })
+            staff_services_list.append(svc['name'])
         
         # Sort services by name
-        staff_services_list.sort(key=lambda x: x['service_name'])
+        staff_services_list.sort()
         
         # Get availability grouped by location
         loc_availability = _group_staff_availability_by_location(
@@ -1847,12 +1828,22 @@ def _format_staff(raw_data: dict, primary_location_id: int) -> tuple[dict, str]:
     # Sort other locations by name
     other_locations_data.sort(key=lambda x: x['location_name'])
     
+    # Build summary
+    total_staff = len(raw_data['staff_list'])
+    total_locations = (1 if primary_location_data else 0) + len(other_locations_data)
+    
+    summary = {
+        'total_staff': total_staff,
+        'total_locations': total_locations
+    }
+    
     # Package formatted data
     json_data = {
         'version': 1,
         'source': 'sync_speako_data',
         'analysis_artifact_url': '',
         'locale': 'en-AU',
+        'summary': summary,
         'data': {
             'primary_location': primary_location_data,
             'other_locations': other_locations_data
