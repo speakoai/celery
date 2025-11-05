@@ -1,6 +1,23 @@
 import os
 import time
 import json
+"""
+Sync knowledge data from Speako's internal database.
+
+ARCHITECTURE:
+This module uses a DATABASE-DRIVEN approach where:
+1. Raw data is queried from PostgreSQL
+2. Minimal formatting is applied (time conversions, data grouping)
+3. Raw data is packaged and ready for OpenAI processing
+4. OpenAI generates BOTH json_data and markdown_data based on ai_prompt from ai_knowledge_types table
+5. No hardcoded markdown templates - all formatting controlled via database
+
+This eliminates the need for code redeployment when templates change.
+Just update ai_knowledge_types.ai_prompt in the database!
+
+TODO: Implement OpenAI integration to replace placeholder markdown generation.
+"""
+
 from datetime import datetime
 
 from celery.utils.log import get_task_logger
@@ -149,136 +166,8 @@ def _format_onetime_hours(hours_data: list) -> list:
     return sorted(exceptions.values(), key=lambda x: x['date'])
 
 
-def _build_business_markdown(data: dict, locations_data: list) -> str:
-    """Build comprehensive markdown with all business info and all locations' availability."""
-    lines = []
-    
-    # Company/Brand Name
-    lines.append("## Company Name / Trading Name / Brand Name")
-    lines.append(data.get('company_name', 'N/A'))
-    lines.append("")
-    
-    # Legal Name
-    lines.append("## Legal Name")
-    lines.append(data.get('legal_name', 'N/A'))
-    lines.append("")
-    
-    # Tagline
-    lines.append("## Tagline")
-    lines.append(data.get('tagline', 'N/A'))
-    lines.append("")
-    
-    # Description
-    lines.append("## Description")
-    lines.append(data.get('description', 'N/A'))
-    lines.append("")
-    
-    # Philosophy
-    if data.get('philosophy'):
-        lines.append("## Philosophy")
-        lines.append(data['philosophy'])
-        lines.append("")
-    
-    # Contacts
-    lines.append("## Contacts")
-    email = data.get('contacts', {}).get('email', '')
-    phone = data.get('contacts', {}).get('phone', '')
-    if email:
-        lines.append(f"- Email: {email}")
-    if phone:
-        lines.append(f"- Phone: {phone}")
-    if not email and not phone:
-        lines.append("- N/A")
-    lines.append("")
-    
-    # Website
-    lines.append("## Website")
-    lines.append(data.get('website', 'N/A'))
-    lines.append("")
-    
-    # Social
-    lines.append("## Social")
-    instagram = data.get('social', {}).get('instagram', '')
-    facebook = data.get('social', {}).get('facebook', '')
-    if instagram:
-        lines.append(f"- Instagram: {instagram}")
-    if facebook:
-        lines.append(f"- Facebook: {facebook}")
-    if not instagram and not facebook:
-        lines.append("- N/A")
-    lines.append("")
-    
-    # Branding
-    lines.append("## Branding")
-    logo = data.get('branding', {}).get('logo_url', '')
-    color = data.get('branding', {}).get('primary_color', '')
-    if logo:
-        lines.append(f"- Logo URL: {logo}")
-    if color:
-        lines.append(f"- Primary Color: {color}")
-    if not logo and not color:
-        lines.append("- N/A")
-    lines.append("")
-    
-    # All locations' opening hours
-    lines.append("## Locations & Opening Hours")
-    lines.append("")
-    
-    for idx, location in enumerate(locations_data):
-        location_name = location.get('location_name', 'Unknown Location')
-        location_id = location.get('location_id', '')
-        recurring_hours = location.get('hours', {}).get('recurring', {})
-        onetime_hours = location.get('hours', {}).get('exceptions', [])
-        
-        # Location header
-        lines.append(f"### {location_name} (Location ID: {location_id})")
-        lines.append("")
-        
-        # Regular opening hours
-        lines.append("#### Regular Schedule")
-        for day in ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']:
-            day_key = day.lower()
-            slots = recurring_hours.get(day_key, [])
-            if slots:
-                lines.append(f"- {day}: {', '.join(slots)}")
-            else:
-                lines.append(f"- {day}: Closed")
-        lines.append("")
-        
-        # Categorize one-time hours
-        public_holidays = [e for e in onetime_hours if e['type'] == 'public_holiday']
-        special_hours = [e for e in onetime_hours if e['type'] == 'special_hours']
-        other_closures = [e for e in onetime_hours if e['type'] == 'closure']
-        
-        # Public holiday closures
-        if public_holidays:
-            lines.append("#### Public Holiday Closures")
-            for entry in public_holidays:
-                holiday_info = f" ({entry['holiday_name']})" if entry['holiday_name'] else ""
-                lines.append(f"- {entry['date']}{holiday_info}: Closed")
-            lines.append("")
-        
-        # Special hours
-        if special_hours:
-            lines.append("#### Special Hours & Exceptions")
-            for entry in special_hours:
-                hours_str = ', '.join(entry['hours'])
-                lines.append(f"- {entry['date']}: {hours_str}")
-            lines.append("")
-        
-        # Other closures
-        if other_closures:
-            lines.append("#### Other Closures")
-            for entry in other_closures:
-                lines.append(f"- {entry['date']}: Closed")
-            lines.append("")
-        
-        # Add separator between locations (except for the last one)
-        if idx < len(locations_data) - 1:
-            lines.append("---")
-            lines.append("")
-    
-    return "\n".join(lines)
+# Markdown builder functions removed - OpenAI now handles all formatting
+# based on ai_prompt from database
 
 
 def _query_business_info(tenant_id: str, location_id: str) -> dict:
@@ -412,14 +301,17 @@ def _query_business_info(tenant_id: str, location_id: str) -> dict:
 
 def _format_business_info(raw_data: dict) -> tuple[dict, str]:
     """
-    Format raw DB data into JSON and Markdown for ALL locations.
+    Prepare raw DB data for OpenAI processing.
+    OpenAI will structure and format the data based on ai_prompt from database.
     
     Args:
         raw_data: dict with business_data and locations (list)
     
     Returns:
-        tuple: (json_dict, markdown_string)
+        tuple: (raw_data_dict, empty_markdown_placeholder)
     """
+    from .utils.task_db import get_ai_knowledge_type_by_key
+    
     business_data = raw_data['business_data']
     locations_raw = raw_data['locations']
     
@@ -434,7 +326,7 @@ def _format_business_info(raw_data: dict) -> tuple[dict, str]:
     }
     locale = locale_map.get(country_code, 'en-AU')
     
-    # Format hours for each location
+    # Format hours for each location (minimal processing for OpenAI)
     locations_formatted = []
     for loc in locations_raw:
         recurring_hours = _format_recurring_hours(loc['recurring_hours'])
@@ -449,7 +341,8 @@ def _format_business_info(raw_data: dict) -> tuple[dict, str]:
             }
         })
     
-    # Build JSON structure
+    # Package raw data for OpenAI
+    # OpenAI will receive this + ai_prompt and generate both json_data and markdown_data
     json_output = {
         "version": 1,
         "source": "sync_speako_data",
@@ -478,11 +371,10 @@ def _format_business_info(raw_data: dict) -> tuple[dict, str]:
         }
     }
     
-    # Build comprehensive markdown
-    markdown = _build_business_markdown(
-        json_output['data'],
-        locations_formatted
-    )
+    # TODO: Call OpenAI with ai_prompt + json_output
+    # For now, return raw data and empty markdown
+    # OpenAI will handle all formatting based on ai_prompt from ai_knowledge_types table
+    markdown = ""  # Placeholder - OpenAI will generate this
     
     return json_output, markdown
 
@@ -714,16 +606,18 @@ def _build_location_categories(location_service_ids: list,
 
 def _format_service_menu(raw_data: dict, primary_location_id: int) -> tuple[dict, str]:
     """
-    Transform raw DB data into location-centric JSON + Markdown format.
-    Shows primary location at top, other locations grouped separately.
+    Prepare raw DB data for OpenAI processing.
+    OpenAI will structure and format the data based on ai_prompt from database.
     
     Args:
         raw_data: Dict with categories, locations, services, location_services, service_modifiers
         primary_location_id: The location that triggered this sync (shown first)
     
     Returns:
-        tuple: (json_dict, markdown_string)
+        tuple: (raw_data_dict, empty_markdown_placeholder)
     """
+    from .utils.task_db import get_ai_knowledge_type_by_key
+    
     categories_list = raw_data['categories']
     locations_list = raw_data['locations']
     services_list = raw_data['services']
@@ -785,7 +679,7 @@ def _format_service_menu(raw_data: dict, primary_location_id: int) -> tuple[dict
             'categories': loc_categories
         })
     
-    # Build JSON
+    # Package raw data for OpenAI
     json_data = {
         'version': 1,
         'source': 'sync_speako_data',
@@ -797,123 +691,13 @@ def _format_service_menu(raw_data: dict, primary_location_id: int) -> tuple[dict
         }
     }
     
-    # Build Markdown
-    markdown_content = _build_service_menu_markdown(json_data['data'])
+    # TODO: Call OpenAI with ai_prompt + json_data
+    # OpenAI will handle all formatting based on ai_prompt from ai_knowledge_types table
+    markdown_content = ""  # Placeholder - OpenAI will generate this
     
     return json_data, markdown_content
 
 
-def _build_service_menu_markdown(data: dict) -> str:
-    """
-    Build comprehensive Markdown from location-centric formatted data.
-    
-    Args:
-        data: Dict with primary_location and other_locations
-    
-    Returns:
-        str: Markdown content
-    """
-    lines = []
-    lines.append("> Group services by **Category**, then list **Items** with duration and price.")
-    lines.append("")
-    lines.append("# Service Menu")
-    lines.append("")
-    
-    # Primary location
-    primary_loc = data.get('primary_location')
-    if primary_loc:
-        lines.append(f"## Primary Location: {primary_loc['location_name']}")
-        lines.append("")
-        
-        for category in primary_loc.get('categories', []):
-            lines.append(f"### Category: {category['name']}")
-            
-            for item in category['items']:
-                lines.append(f"#### Service: {item['name']}")
-                lines.append("**Description:**  ")
-                lines.append(item['description'] or 'No description available')
-                lines.append("")
-                lines.append(f"- Duration: {item['duration_min']} min")
-                lines.append(f"- Price: ${item['price']['amount']:.2f} {item['price']['currency']}")
-                
-                # Format addons
-                if item['addons']:
-                    addon_parts = []
-                    for addon in item['addons']:
-                        addon_str = f"{addon['name']} (${addon['price']:.2f})"
-                        
-                        # Add indicators
-                        indicators = []
-                        if addon.get('is_required'):
-                            indicators.append('Required')
-                        if addon.get('default_selected'):
-                            indicators.append('Default')
-                        
-                        if indicators:
-                            addon_str += f" [{']['.join(indicators)}]"
-                        
-                        addon_parts.append(addon_str)
-                    
-                    lines.append(f"- Add-ons: {', '.join(addon_parts)}")
-                else:
-                    lines.append("- Add-ons: None")
-                
-                lines.append("")
-            
-            lines.append("")
-    
-    # Other locations
-    other_locations = data.get('other_locations', [])
-    if other_locations:
-        lines.append("---")
-        lines.append("")
-        lines.append("## Other Locations")
-        lines.append("")
-        
-        for location in other_locations:
-            lines.append(f"### Location: {location['location_name']}")
-            lines.append("")
-            
-            for category in location.get('categories', []):
-                lines.append(f"#### Category: {category['name']}")
-                
-                for item in category['items']:
-                    lines.append(f"##### Service: {item['name']}")
-                    lines.append("**Description:**  ")
-                    lines.append(item['description'] or 'No description available')
-                    lines.append("")
-                    lines.append(f"- Duration: {item['duration_min']} min")
-                    lines.append(f"- Price: ${item['price']['amount']:.2f} {item['price']['currency']}")
-                    
-                    # Format addons
-                    if item['addons']:
-                        addon_parts = []
-                        for addon in item['addons']:
-                            addon_str = f"{addon['name']} (${addon['price']:.2f})"
-                            
-                            # Add indicators
-                            indicators = []
-                            if addon.get('is_required'):
-                                indicators.append('Required')
-                            if addon.get('default_selected'):
-                                indicators.append('Default')
-                            
-                            if indicators:
-                                addon_str += f" [{']['.join(indicators)}]"
-                            
-                            addon_parts.append(addon_str)
-                        
-                        lines.append(f"- Add-ons: {', '.join(addon_parts)}")
-                    else:
-                        lines.append("- Add-ons: None")
-                    
-                    lines.append("")
-                
-                lines.append("")
-            
-            lines.append("")
-    
-    return '\n'.join(lines)
 
 
 # ============================================================================
@@ -1218,15 +1002,18 @@ def _build_location_details(
 
 def _format_locations(raw_data: dict, primary_location_id: int) -> tuple[dict, str]:
     """
-    Transform raw DB data into location-centric JSON + Markdown format.
+    Prepare raw DB data for OpenAI processing.
+    OpenAI will structure and format the data based on ai_prompt from database.
     
     Args:
         raw_data: Dict with locations, location_info, hours, services, states
         primary_location_id: The location that triggered this sync
     
     Returns:
-        tuple: (json_dict, markdown_string)
+        tuple: (raw_data_dict, empty_markdown_placeholder)
     """
+    from .utils.task_db import get_ai_knowledge_type_by_key
+    
     locations_list = raw_data['locations']
     location_info = raw_data['location_info']
     recurring_hours = raw_data['recurring_hours']
@@ -1270,7 +1057,7 @@ def _format_locations(raw_data: dict, primary_location_id: int) -> tuple[dict, s
         if loc_details:
             other_locations_data.append(loc_details)
     
-    # Build JSON
+    # Package raw data for OpenAI
     json_data = {
         'version': 1,
         'source': 'sync_speako_data',
@@ -1282,240 +1069,13 @@ def _format_locations(raw_data: dict, primary_location_id: int) -> tuple[dict, s
         }
     }
     
-    # Build Markdown
-    markdown_content = _build_locations_markdown(json_data['data'])
+    # TODO: Call OpenAI with ai_prompt + json_data
+    # OpenAI will handle all formatting based on ai_prompt from ai_knowledge_types table
+    markdown_content = ""  # Placeholder - OpenAI will generate this
     
     return json_data, markdown_content
 
 
-def _build_locations_markdown(data: dict) -> str:
-    """
-    Build comprehensive Markdown from location data.
-    
-    Args:
-        data: Dict with primary_location and other_locations
-    
-    Returns:
-        str: Markdown content
-    """
-    lines = []
-    
-    # Header / Instructions
-    lines.append("# How to use this document")
-    lines.append("")
-    lines.append("This is a simple text form. You can type normally — no special tech skills needed.")
-    lines.append("")
-    lines.append("**You can:**")
-    lines.append("- **Delete** any section you don't need.")
-    lines.append("- **Add** more sections or items by copying a block and pasting it below.")
-    lines.append("- **Rename** headings if it helps.")
-    lines.append("- **Write naturally** in sentences or bullet points. Both are fine.")
-    lines.append("")
-    lines.append("**Tips**")
-    lines.append("- Dates: use **YYYY-MM-DD** (e.g., 2025-10-31) if possible.")
-    lines.append("- Times: 09:00–17:00 (24-hour) or 9am–5pm (either is okay).")
-    lines.append("- Optional fields are truly optional — fill what you have and skip the rest.")
-    lines.append("")
-    lines.append("When you're done, just save. You can always return and edit later.")
-    lines.append("")
-    lines.append("---")
-    lines.append("")
-    lines.append("# Locations")
-    lines.append("")
-    
-    # Primary location
-    primary_loc = data.get('primary_location')
-    if primary_loc:
-        lines.append(f"## Primary Location: {primary_loc['name']}")
-        lines.append("")
-        
-        # Address
-        lines.append("**Address**  ")
-        addr = primary_loc['address']
-        if addr['line1']:
-            lines.append(addr['line1'])
-        if addr['line2']:
-            lines.append(addr['line2'])
-        city_state_post = ', '.join(filter(None, [addr['city'], addr['state'], addr['postcode']]))
-        if city_state_post:
-            lines.append(f"{city_state_post}, {addr['country']}")
-        elif addr['country']:
-            lines.append(addr['country'])
-        lines.append("")
-        
-        # Contact
-        lines.append("**Contact**")
-        contact = primary_loc['contact']
-        if contact['phone']:
-            lines.append(f"- Phone: {contact['phone']}")
-        if contact['email']:
-            lines.append(f"- Email: {contact['email']}")
-        if contact['website']:
-            lines.append(f"- Website: {contact['website']}")
-        if not any([contact['phone'], contact['email'], contact['website']]):
-            lines.append("- No contact information available")
-        lines.append("")
-        
-        # Location Details
-        lines.append("**Location Details**")
-        if primary_loc['location_type']:
-            lines.append(f"- Type: {primary_loc['location_type']}")
-        if primary_loc['timezone']:
-            lines.append(f"- Timezone: {primary_loc['timezone']}")
-        if primary_loc['geo']['lat'] != 0 or primary_loc['geo']['lng'] != 0:
-            lines.append(f"- Coordinates: lat {primary_loc['geo']['lat']}, lng {primary_loc['geo']['lng']}")
-        lines.append("")
-        
-        # Opening Hours (recurring)
-        lines.append("**Opening Hours**")
-        hours = primary_loc['hours']['recurring']
-        day_order = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
-        day_labels = {'mon': 'Mon', 'tue': 'Tue', 'wed': 'Wed', 'thu': 'Thu', 'fri': 'Fri', 'sat': 'Sat', 'sun': 'Sun'}
-        for day in day_order:
-            day_hours = hours.get(day, [])
-            if day_hours:
-                lines.append(f"- {day_labels[day]}: {', '.join(day_hours)}")
-            else:
-                lines.append(f"- {day_labels[day]}: Closed")
-        lines.append("")
-        
-        # Exceptions
-        exceptions = primary_loc['hours']['exceptions']
-        if exceptions:
-            lines.append("**Exceptions/Special Hours**")
-            for exc in exceptions:
-                lines.append(f"- {exc['date']}: {exc['status']} ({exc['type']})")
-            lines.append("")
-        
-        # Services Available
-        services = primary_loc['services_available']
-        if services:
-            lines.append("**Services Available**")
-            for svc in services:
-                lines.append(f"- {svc}")
-            lines.append(f"(Total: {len(services)} services)")
-        else:
-            lines.append("**Services Available**")
-            lines.append("- No services configured")
-        lines.append("")
-        
-        # Booking Information
-        booking = primary_loc['booking_info']
-        if any([booking['min_advance_minutes'], booking['slot_interval_minutes'], booking['booking_email']]):
-            lines.append("**Booking Information**")
-            if booking['min_advance_minutes']:
-                lines.append(f"- Minimum advance booking: {booking['min_advance_minutes']} minutes")
-            if booking['slot_interval_minutes']:
-                lines.append(f"- Booking slot intervals: {booking['slot_interval_minutes']} minutes")
-            if booking['booking_email']:
-                lines.append(f"- Booking notifications sent to: {booking['booking_email']}")
-            lines.append("")
-        
-        # Notes
-        if primary_loc['notes']:
-            lines.append("**Notes**  ")
-            lines.append(primary_loc['notes'])
-            lines.append("")
-    
-    # Other locations
-    other_locations = data.get('other_locations', [])
-    if other_locations:
-        lines.append("---")
-        lines.append("")
-        lines.append("## Other Locations")
-        lines.append("")
-        
-        for location in other_locations:
-            lines.append(f"### Location: {location['name']}")
-            lines.append("")
-            
-            # Address
-            lines.append("**Address**  ")
-            addr = location['address']
-            if addr['line1']:
-                lines.append(addr['line1'])
-            if addr['line2']:
-                lines.append(addr['line2'])
-            city_state_post = ', '.join(filter(None, [addr['city'], addr['state'], addr['postcode']]))
-            if city_state_post:
-                lines.append(f"{city_state_post}, {addr['country']}")
-            elif addr['country']:
-                lines.append(addr['country'])
-            lines.append("")
-            
-            # Contact
-            lines.append("**Contact**")
-            contact = location['contact']
-            if contact['phone']:
-                lines.append(f"- Phone: {contact['phone']}")
-            if contact['email']:
-                lines.append(f"- Email: {contact['email']}")
-            if contact['website']:
-                lines.append(f"- Website: {contact['website']}")
-            if not any([contact['phone'], contact['email'], contact['website']]):
-                lines.append("- No contact information available")
-            lines.append("")
-            
-            # Location Details
-            lines.append("**Location Details**")
-            if location['location_type']:
-                lines.append(f"- Type: {location['location_type']}")
-            if location['timezone']:
-                lines.append(f"- Timezone: {location['timezone']}")
-            lines.append("")
-            
-            # Opening Hours
-            lines.append("**Opening Hours**")
-            hours = location['hours']['recurring']
-            for day in day_order:
-                day_hours = hours.get(day, [])
-                if day_hours:
-                    lines.append(f"- {day_labels[day]}: {', '.join(day_hours)}")
-                else:
-                    lines.append(f"- {day_labels[day]}: Closed")
-            lines.append("")
-            
-            # Exceptions
-            exceptions = location['hours']['exceptions']
-            if exceptions:
-                lines.append("**Exceptions/Special Hours**")
-                for exc in exceptions:
-                    lines.append(f"- {exc['date']}: {exc['status']} ({exc['type']})")
-                lines.append("")
-            
-            # Services Available
-            services = location['services_available']
-            if services:
-                lines.append("**Services Available**")
-                for svc in services:
-                    lines.append(f"- {svc}")
-                lines.append(f"(Total: {len(services)} services)")
-            else:
-                lines.append("**Services Available**")
-                lines.append("- No services configured")
-            lines.append("")
-            
-            # Booking Information
-            booking = location['booking_info']
-            if any([booking['min_advance_minutes'], booking['slot_interval_minutes'], booking['booking_email']]):
-                lines.append("**Booking Information**")
-                if booking['min_advance_minutes']:
-                    lines.append(f"- Minimum advance booking: {booking['min_advance_minutes']} minutes")
-                if booking['slot_interval_minutes']:
-                    lines.append(f"- Booking slot intervals: {booking['slot_interval_minutes']} minutes")
-                if booking['booking_email']:
-                    lines.append(f"- Booking notifications sent to: {booking['booking_email']}")
-                lines.append("")
-            
-            # Notes
-            if location['notes']:
-                lines.append("**Notes**  ")
-                lines.append(location['notes'])
-                lines.append("")
-            
-            lines.append("")
-    
-    return '\n'.join(lines)
 
 
 @app.task(bind=True)
