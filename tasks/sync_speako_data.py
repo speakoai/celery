@@ -1574,11 +1574,17 @@ def _group_staff_availability_by_location(staff_id: int, recurring_avail: list, 
 
 def _build_staff_markdown(json_data: dict) -> str:
     """Build markdown content from staff JSON data."""
+    summary = json_data.get('summary', {})
     data = json_data.get('data', {})
     sections = []
     
-    # Header
+    # Header with summary
     sections.append("# Our Team")
+    if summary:
+        total_staff = summary.get('total_staff', 0)
+        total_locations = summary.get('total_locations', 0)
+        loc_text = 'location' if total_locations == 1 else 'locations'
+        sections.append(f"\n**Total Staff:** {total_staff} across {total_locations} {loc_text}\n")
     
     # Primary Location
     primary_location = data.get('primary_location', {})
