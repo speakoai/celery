@@ -1416,6 +1416,455 @@ def _format_locations(raw_data: dict, primary_location_id: int) -> tuple[dict, s
     return json_data, markdown_content
 
 
+# ============================================================================
+# STAFF Knowledge Type Helpers
+# ============================================================================
+
+def _query_staff(tenant_id: str, location_id: str) -> dict:
+    """
+    Fetch staff members, their titles, services, and availability for tenant.
+    
+    Args:
+        tenant_id: The tenant identifier
+        location_id: Location identifier (for location context)
+    
+    Returns:
+        dict with:
+        - staff_list: List of staff records
+        - title_tags: Dict mapping tag_id → title info
+        - recurring_availability: List of recurring availability records
+        - onetime_availability: List of one-time availability records
+        - staff_services: Dict mapping staff_id → [service_ids]
+        - services: Dict mapping service_id → service details
+        - locations: Dict mapping location_id → location name
+    """
+    conn = _get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        # Query 1: Get all active staff for tenant
+        cursor.execute("""
+            SELECT staff_id, name, title_tag_ids, default_location_id,
+                   staff_img_url, phone_number, bio, email
+            FROM staff
+            WHERE tenant_id = %s AND is_active = true
+            ORDER BY name
+        """, (tenant_id,))
+        staff_list = cursor.fetchall()
+        
+        # Query 2: Get staff title tags (category_id = 3)
+        cursor.execute("""
+            SELECT tag_id, name, slug, tag_colour
+            FROM location_tag
+            WHERE tenant_id = %s AND category_id = 3 AND is_active = true
+        """, (tenant_id,))
+        title_tags_list = cursor.fetchall()
+        title_tags = {tag['tag_id']: dict(tag) for tag in title_tags_list}
+        
+        # Query 3: Get staff recurring availability
+        cursor.execute("""
+            SELECT staff_id, location_id, day_of_week, start_time, end_time, is_closed
+            FROM staff_availability
+            WHERE tenant_id = %s AND type = 'recurring' AND is_active = true AND is_closed = false
+            ORDER BY staff_id, location_id, day_of_week, start_time
+        """, (tenant_id,))
+        recurring_availability = cursor.fetchall()
+        
+        # Query 4: Get staff one-time availability
+        cursor.execute("""
+            SELECT staff_id, location_id, specific_date, start_time, end_time, is_closed
+            FROM staff_availability
+            WHERE tenant_id = %s AND type = 'one_time' AND is_active = true
+            ORDER BY staff_id, location_id, specific_date, start_time
+        """, (tenant_id,))
+        onetime_availability = cursor.fetchall()
+        
+        # Query 5: Get staff-service relationships
+        cursor.execute("""
+            SELECT staff_id, service_id
+            FROM staff_services
+            WHERE tenant_id = %s
+        """, (tenant_id,))
+        staff_service_links = cursor.fetchall()
+        
+        # Build staff_services map: staff_id → [service_ids]
+        staff_services = {}
+        for link in staff_service_links:
+            sid = link['staff_id']
+            svc_id = link['service_id']
+            if sid not in staff_services:
+                staff_services[sid] = []
+            staff_services[sid].append(svc_id)
+        
+        # Query 6: Get active service details
+        cursor.execute("""
+            SELECT service_id, name, description, duration, price
+            FROM services
+            WHERE tenant_id = %s AND is_active = true
+        """, (tenant_id,))
+        services_list = cursor.fetchall()
+        services = {svc['service_id']: dict(svc) for svc in services_list}
+        
+        # Query 7: Get location names
+        cursor.execute("""
+            SELECT location_id, name
+            FROM locations
+            WHERE tenant_id = %s AND is_active = true
+        """, (tenant_id,))
+        locations_list = cursor.fetchall()
+        locations = {loc['location_id']: loc['name'] for loc in locations_list}
+        
+        return {
+            'staff_list': staff_list,
+            'title_tags': title_tags,
+            'recurring_availability': recurring_availability,
+            'onetime_availability': onetime_availability,
+            'staff_services': staff_services,
+            'services': services,
+            'locations': locations
+        }
+    
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def _group_staff_availability_by_location(staff_id: int, recurring_avail: list, onetime_avail: list) -> dict:
+    """
+    Group availability data by location for a specific staff member.
+    
+    Args:
+        staff_id: The staff member's ID
+        recurring_avail: List of all recurring availability records
+        onetime_avail: List of all one-time availability records
+    
+    Returns:
+        dict: location_id → {'recurring': hours_data, 'onetime': hours_data}
+    """
+    location_availability = {}
+    
+    # Group recurring hours by location
+    for row in recurring_avail:
+        if row['staff_id'] != staff_id:
+            continue
+        
+        loc_id = row['location_id']
+        if loc_id not in location_availability:
+            location_availability[loc_id] = {'recurring': [], 'onetime': []}
+        
+        location_availability[loc_id]['recurring'].append(dict(row))
+    
+    # Group one-time hours by location
+    for row in onetime_avail:
+        if row['staff_id'] != staff_id:
+            continue
+        
+        loc_id = row['location_id']
+        if loc_id not in location_availability:
+            location_availability[loc_id] = {'recurring': [], 'onetime': []}
+        
+        location_availability[loc_id]['onetime'].append(dict(row))
+    
+    return location_availability
+
+
+# ============================================================================
+# Markdown Generation Helpers for staff
+# ============================================================================
+
+def _build_staff_markdown(json_data: dict) -> str:
+    """Build markdown content from staff JSON data."""
+    data = json_data.get('data', {})
+    sections = []
+    
+    # Header
+    sections.append("# Our Team")
+    
+    # Primary Location
+    primary_location = data.get('primary_location', {})
+    if primary_location:
+        loc_name = primary_location.get('location_name', 'Primary Location')
+        staff_list = primary_location.get('staff', [])
+        
+        sections.append(f"\n## Staff at {loc_name}")
+        
+        for staff in staff_list:
+            sections.append("\n" + _format_staff_member_markdown(staff, is_primary=True))
+            sections.append("\n---")
+    
+    # Other Locations
+    other_locations = data.get('other_locations', [])
+    if other_locations:
+        sections.append("\n## Staff at Other Locations\n")
+        
+        for loc in other_locations:
+            loc_name = loc.get('location_name', 'Location')
+            staff_list = loc.get('staff', [])
+            
+            sections.append(f"\n### {loc_name}\n")
+            
+            for staff in staff_list:
+                sections.append(_format_staff_member_markdown(staff, is_primary=False))
+                sections.append("\n---")
+    
+    return "\n".join(sections)
+
+
+def _format_staff_member_markdown(staff: dict, is_primary: bool = True) -> str:
+    """Format a single staff member's details into markdown."""
+    sections = []
+    
+    # Name and Titles
+    name = staff.get('name', 'Unknown Staff')
+    titles = staff.get('titles', [])
+    
+    sections.append(f"### {name}")
+    if titles:
+        sections.append(f"**{', '.join(titles)}**")
+    
+    # Bio
+    bio = staff.get('bio', '')
+    if bio:
+        sections.append(f"\n{bio}")
+    
+    # Contact (only for primary location or if provided)
+    contact = staff.get('contact', {})
+    email = contact.get('email', '')
+    phone = contact.get('phone', '')
+    
+    if is_primary and (email or phone):
+        sections.append("\n**Contact:**")
+        if email:
+            sections.append(f"- 📧 {email}")
+        if phone:
+            sections.append(f"- 📞 {phone}")
+    
+    # Services
+    services = staff.get('services', [])
+    if services:
+        sections.append("\n**Services Offered:**")
+        for svc in services:
+            svc_name = svc.get('service_name', '')
+            duration = svc.get('duration_min', 0)
+            price = svc.get('price', {})
+            amount = price.get('amount', 0)
+            currency = price.get('currency', 'AUD')
+            description = svc.get('description', '')
+            
+            service_line = f"- **{svc_name}** ({duration} min) — {currency} {amount:.2f}"
+            sections.append(service_line)
+            if description and is_primary:
+                sections.append(f"  {description}")
+    
+    # Availability
+    availability = staff.get('availability', {})
+    this_location = availability.get('this_location', {})
+    recurring = this_location.get('recurring', {})
+    exceptions = this_location.get('exceptions', [])
+    
+    if recurring or exceptions:
+        sections.append("\n**Availability at This Location:**")
+        
+        if recurring:
+            sections.append("\n*Regular Hours:*\n")
+            sections.append(_format_week_schedule_markdown(recurring))
+        
+        if exceptions:
+            sections.append("\n*Special Hours:*\n")
+            sections.append(_format_exceptions_markdown(exceptions))
+    
+    # Other locations where staff works
+    other_locs = availability.get('other_locations', [])
+    if other_locs and is_primary:
+        sections.append("\n**Also Available At:**")
+        for loc in other_locs:
+            loc_name = loc.get('location_name', '')
+            loc_recurring = loc.get('recurring', {})
+            
+            # Summarize availability
+            days_available = [day for day, hours in loc_recurring.items() if hours]
+            if days_available:
+                day_names = {
+                    'mon': 'Mon', 'tue': 'Tue', 'wed': 'Wed', 'thu': 'Thu',
+                    'fri': 'Fri', 'sat': 'Sat', 'sun': 'Sun'
+                }
+                days_str = ', '.join([day_names.get(d, d.title()) for d in days_available])
+                
+                # Get first time range as example
+                first_day_hours = loc_recurring[days_available[0]]
+                hours_str = first_day_hours[0] if first_day_hours else ''
+                
+                sections.append(f"- **{loc_name}**: {days_str} {hours_str}")
+    
+    return "\n".join(sections)
+
+
+def _format_staff(raw_data: dict, primary_location_id: int) -> tuple[dict, str]:
+    """
+    Format staff data into structured JSON and markdown.
+    
+    Args:
+        raw_data: Dict with staff_list, title_tags, availability, services, locations
+        primary_location_id: The location that triggered this sync (shown first)
+    
+    Returns:
+        tuple: (json_output, markdown_content)
+    """
+    
+    staff_list = raw_data['staff_list']
+    title_tags = raw_data['title_tags']
+    recurring_availability = raw_data['recurring_availability']
+    onetime_availability = raw_data['onetime_availability']
+    staff_services = raw_data['staff_services']
+    services = raw_data['services']
+    locations_map = raw_data['locations']
+    
+    # Helper to build staff member data
+    def build_staff_data(staff):
+        staff_id = staff['staff_id']
+        
+        # Resolve titles from title_tag_ids
+        title_ids = staff['title_tag_ids'] or []
+        titles = [
+            title_tags[tag_id]['name']
+            for tag_id in title_ids
+            if tag_id in title_tags
+        ]
+        
+        # Get services for this staff
+        service_ids = staff_services.get(staff_id, [])
+        staff_services_list = []
+        for svc_id in service_ids:
+            if svc_id not in services:
+                continue
+            svc = services[svc_id]
+            staff_services_list.append({
+                'service_id': str(svc_id),
+                'service_name': svc['name'],
+                'description': svc['description'] or '',
+                'duration_min': _extract_duration_minutes(svc['duration']),
+                'price': {
+                    'currency': 'AUD',
+                    'amount': float(svc['price']) if svc['price'] is not None else 0.0
+                }
+            })
+        
+        # Sort services by name
+        staff_services_list.sort(key=lambda x: x['service_name'])
+        
+        # Get availability grouped by location
+        loc_availability = _group_staff_availability_by_location(
+            staff_id,
+            recurring_availability,
+            onetime_availability
+        )
+        
+        # Determine primary location availability
+        primary_loc_avail = loc_availability.get(primary_location_id, {'recurring': [], 'onetime': []})
+        primary_recurring = _format_recurring_hours(primary_loc_avail['recurring'])
+        primary_exceptions = _format_onetime_hours(primary_loc_avail['onetime'])
+        
+        # Get other locations where staff works
+        other_locs_avail = []
+        for loc_id, avail_data in loc_availability.items():
+            if loc_id == primary_location_id:
+                continue
+            
+            loc_name = locations_map.get(loc_id, f'Location {loc_id}')
+            recurring = _format_recurring_hours(avail_data['recurring'])
+            exceptions = _format_onetime_hours(avail_data['onetime'])
+            
+            other_locs_avail.append({
+                'location_id': str(loc_id),
+                'location_name': loc_name,
+                'recurring': recurring,
+                'exceptions': exceptions
+            })
+        
+        # Sort other locations by name
+        other_locs_avail.sort(key=lambda x: x['location_name'])
+        
+        return {
+            'staff_id': str(staff_id),
+            'name': staff['name'],
+            'titles': titles,
+            'bio': staff['bio'] or '',
+            'contact': {
+                'email': staff['email'] or '',
+                'phone': staff['phone_number'] or ''
+            },
+            'image_url': staff['staff_img_url'] or '',
+            'default_location_id': str(staff['default_location_id']) if staff['default_location_id'] else '',
+            'services': staff_services_list,
+            'availability': {
+                'this_location': {
+                    'recurring': primary_recurring,
+                    'exceptions': primary_exceptions
+                },
+                'other_locations': other_locs_avail
+            }
+        }
+    
+    # Separate staff by primary vs other locations
+    primary_location_staff = []
+    other_locations_staff = {}
+    
+    for staff in staff_list:
+        default_loc_id = staff['default_location_id']
+        
+        if default_loc_id == primary_location_id:
+            # Staff belongs to primary location
+            primary_location_staff.append(build_staff_data(staff))
+        elif default_loc_id and default_loc_id in locations_map:
+            # Staff belongs to another location
+            if default_loc_id not in other_locations_staff:
+                other_locations_staff[default_loc_id] = []
+            other_locations_staff[default_loc_id].append(build_staff_data(staff))
+    
+    # Sort staff by name within each location
+    primary_location_staff.sort(key=lambda x: x['name'])
+    for loc_id in other_locations_staff:
+        other_locations_staff[loc_id].sort(key=lambda x: x['name'])
+    
+    # Build primary location data
+    primary_location_name = locations_map.get(primary_location_id, f'Location {primary_location_id}')
+    primary_location_data = {
+        'location_id': str(primary_location_id),
+        'location_name': primary_location_name,
+        'staff': primary_location_staff
+    }
+    
+    # Build other locations data
+    other_locations_data = []
+    for loc_id in sorted(other_locations_staff.keys()):
+        loc_name = locations_map.get(loc_id, f'Location {loc_id}')
+        other_locations_data.append({
+            'location_id': str(loc_id),
+            'location_name': loc_name,
+            'staff': other_locations_staff[loc_id]
+        })
+    
+    # Sort other locations by name
+    other_locations_data.sort(key=lambda x: x['location_name'])
+    
+    # Package formatted data
+    json_data = {
+        'version': 1,
+        'source': 'sync_speako_data',
+        'analysis_artifact_url': '',
+        'locale': 'en-AU',
+        'data': {
+            'primary_location': primary_location_data,
+            'other_locations': other_locations_data
+        }
+    }
+    
+    # Generate markdown from JSON data
+    markdown_content = _build_staff_markdown(json_data)
+    
+    return json_data, markdown_content
+
+
 
 
 @app.task(bind=True)
@@ -1600,9 +2049,33 @@ def sync_speako_data(self, *,
                 logger.warning(f"⚠️ [sync_speako_data] Failed to generate AI description: {desc_e}")
         
         elif knowledge_type in ['staff']:
-            # TODO: Implement staff knowledge type
-            logger.warning(f"⚠️ [sync_speako_data] Knowledge type '{knowledge_type}' not yet implemented")
-            raise NotImplementedError(f"Knowledge type '{knowledge_type}' sync not yet implemented")
+            logger.info(f"📋 [sync_speako_data] Querying staff data for tenant_id={tenant_id}")
+            staff_data = _query_staff(tenant_id, location_id)
+            
+            logger.info(f"🔄 [sync_speako_data] Formatting staff data")
+            json_output, markdown_output = _format_staff(staff_data)
+            
+            logger.info(f"📊 [sync_speako_data] Staff data formatted: {len(str(json_output))} bytes JSON, {len(markdown_output)} bytes Markdown")
+            
+            # Generate AI description
+            try:
+                total_staff = json_output['summary']['total_staff']
+                primary_loc = json_output['data'].get('primary_location', {})
+                primary_name = primary_loc.get('name', 'Primary Location')
+                primary_staff_count = len(primary_loc.get('staff', []))
+                other_locs = json_output['data'].get('other_locations', [])
+                num_other_locs = len(other_locs)
+                
+                staff_plural = 'staff member' if primary_staff_count == 1 else 'staff members'
+                if num_other_locs > 0:
+                    loc_plural = 'location' if num_other_locs == 1 else 'locations'
+                    ai_description = f"Team roster: {total_staff} total staff - {primary_name} ({primary_staff_count} {staff_plural}) and {num_other_locs} other {loc_plural}"
+                else:
+                    ai_description = f"Team roster for {primary_name} with {primary_staff_count} {staff_plural}"
+                
+                logger.info(f"📝 [sync_speako_data] Generated AI description: {ai_description}")
+            except Exception as desc_e:
+                logger.warning(f"⚠️ [sync_speako_data] Failed to generate AI description: {desc_e}")
         
         else:
             raise ValueError(f"Unsupported knowledge_type: {knowledge_type}")
