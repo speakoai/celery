@@ -916,6 +916,608 @@ def _build_service_menu_markdown(data: dict) -> str:
     return '\n'.join(lines)
 
 
+# ============================================================================
+# LOCATIONS Knowledge Type Helpers
+# ============================================================================
+
+def _parse_address(address_text: str, state_name: str = '', country_code: str = 'AU') -> dict:
+    """
+    Parse address text into structured components.
+    
+    Args:
+        address_text: Address string (may be multi-line or comma-separated)
+        state_name: State name from states table
+        country_code: Country code from locations table
+    
+    Returns:
+        dict with: line1, line2, city, state, postcode, country
+    """
+    if not address_text:
+        return {
+            'line1': '',
+            'line2': '',
+            'city': '',
+            'state': state_name or '',
+            'postcode': '',
+            'country': country_code or 'AU'
+        }
+    
+    # Try to parse address intelligently
+    # Common formats:
+    # "123 Main St, Sydney NSW 2000"
+    # "123 Main St\nSuite 5\nSydney NSW 2000"
+    
+    lines = [line.strip() for line in address_text.replace('\n', ',').split(',') if line.strip()]
+    
+    line1 = lines[0] if len(lines) > 0 else ''
+    line2 = ''
+    city = ''
+    postcode = ''
+    
+    # Last line often contains city, state, postcode
+    if len(lines) >= 2:
+        last_line = lines[-1]
+        # Try to extract postcode (4 digits in Australia)
+        import re
+        postcode_match = re.search(r'\b(\d{4})\b', last_line)
+        if postcode_match:
+            postcode = postcode_match.group(1)
+            # Remove postcode from last line to get city
+            city = last_line.replace(postcode, '').replace(state_name, '').strip(', ')
+        else:
+            city = last_line.replace(state_name, '').strip(', ')
+        
+        # If there are 3+ lines, middle ones are line2
+        if len(lines) >= 3:
+            line2 = ', '.join(lines[1:-1])
+    
+    return {
+        'line1': line1,
+        'line2': line2,
+        'city': city,
+        'state': state_name or '',
+        'postcode': postcode,
+        'country': country_code or 'AU'
+    }
+
+
+def _query_locations(tenant_id: str, location_id: str) -> dict:
+    """
+    Fetch all location data including locations, info, hours, services, states.
+    
+    Args:
+        tenant_id: The tenant identifier
+        location_id: Primary location context
+    
+    Returns:
+        dict with:
+        - locations: List of location records
+        - location_info: Dict mapping location_id → info
+        - recurring_hours: Dict mapping location_id → hours list
+        - exceptions: Dict mapping location_id → exceptions list
+        - location_services: Dict mapping location_id → [service_ids]
+        - services_names: Dict mapping service_id → name
+        - states: Dict mapping state_id → name
+    """
+    conn = _get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        # Query 1: Fetch all active locations for tenant
+        cursor.execute("""
+            SELECT 
+                location_id, name, timezone, country_code, state_id,
+                location_type, twilio_phone_number, human_phone_number,
+                booking_email_recipients, min_advance_booking_minutes, 
+                slot_interval_minutes, is_active
+            FROM locations
+            WHERE tenant_id = %s AND is_active = true
+            ORDER BY name
+        """, (tenant_id,))
+        locations = cursor.fetchall()
+        
+        # Query 2: Fetch location_info for all locations
+        cursor.execute("""
+            SELECT 
+                location_id, address, phone_with_country_code, 
+                email, website_url, order_link, opening_hours, ai_prompt
+            FROM location_info
+            WHERE tenant_id = %s
+        """, (tenant_id,))
+        location_info_list = cursor.fetchall()
+        location_info = {info['location_id']: info for info in location_info_list}
+        
+        # Query 3: Fetch recurring availability for all locations
+        cursor.execute("""
+            SELECT 
+                location_id, day_of_week, start_time, end_time, 
+                slot_name, is_active, is_closed
+            FROM location_availability
+            WHERE tenant_id = %s 
+              AND type = 'recurring' 
+              AND is_active = true 
+              AND is_closed = false
+            ORDER BY location_id, day_of_week, start_time
+        """, (tenant_id,))
+        recurring_list = cursor.fetchall()
+        
+        # Group recurring hours by location_id
+        recurring_hours = {}
+        for row in recurring_list:
+            loc_id = row['location_id']
+            if loc_id not in recurring_hours:
+                recurring_hours[loc_id] = []
+            recurring_hours[loc_id].append(row)
+        
+        # Query 4: Fetch one-time availability (exceptions) for all locations
+        cursor.execute("""
+            SELECT 
+                la.location_id, la.specific_date, la.start_time, la.end_time,
+                la.is_closed, la.slot_name, la.holiday_id,
+                ph.name as holiday_name
+            FROM location_availability la
+            LEFT JOIN public_holidays ph ON la.holiday_id = ph.holiday_id
+            WHERE la.tenant_id = %s 
+              AND la.type = 'one_time' 
+              AND la.is_active = true
+            ORDER BY la.location_id, la.specific_date
+        """, (tenant_id,))
+        exceptions_list = cursor.fetchall()
+        
+        # Group exceptions by location_id
+        exceptions = {}
+        for row in exceptions_list:
+            loc_id = row['location_id']
+            if loc_id not in exceptions:
+                exceptions[loc_id] = []
+            exceptions[loc_id].append(row)
+        
+        # Query 5: Fetch location-service relationships
+        cursor.execute("""
+            SELECT location_id, service_id
+            FROM location_services
+            WHERE tenant_id = %s
+        """, (tenant_id,))
+        location_service_links = cursor.fetchall()
+        
+        # Build location_services map
+        location_services = {}
+        for link in location_service_links:
+            loc_id = link['location_id']
+            svc_id = link['service_id']
+            if loc_id not in location_services:
+                location_services[loc_id] = []
+            location_services[loc_id].append(svc_id)
+        
+        # Query 6: Fetch all active service names
+        cursor.execute("""
+            SELECT service_id, name
+            FROM services
+            WHERE tenant_id = %s AND is_active = true
+        """, (tenant_id,))
+        services_list = cursor.fetchall()
+        services_names = {svc['service_id']: svc['name'] for svc in services_list}
+        
+        # Query 7: Fetch state names for locations' state_ids
+        state_ids = [loc['state_id'] for loc in locations if loc.get('state_id')]
+        states = {}
+        if state_ids:
+            cursor.execute("""
+                SELECT state_id, name
+                FROM states
+                WHERE state_id = ANY(%s)
+            """, (state_ids,))
+            states_list = cursor.fetchall()
+            states = {st['state_id']: st['name'] for st in states_list}
+        
+        return {
+            'locations': locations,
+            'location_info': location_info,
+            'recurring_hours': recurring_hours,
+            'exceptions': exceptions,
+            'location_services': location_services,
+            'services_names': services_names,
+            'states': states
+        }
+    
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def _build_location_details(
+    location_id: int,
+    locations_map: dict,
+    location_info_map: dict,
+    recurring_hours: dict,
+    exceptions: dict,
+    location_services_map: dict,
+    services_names: dict,
+    states_map: dict
+) -> dict:
+    """
+    Build complete location details dictionary.
+    
+    Args:
+        location_id: Location identifier
+        locations_map: Dict of location_id → location record
+        location_info_map: Dict of location_id → location_info record
+        recurring_hours: Dict of location_id → hours list
+        exceptions: Dict of location_id → exceptions list
+        location_services_map: Dict of location_id → [service_ids]
+        services_names: Dict of service_id → service name
+        states_map: Dict of state_id → state name
+    
+    Returns:
+        dict: Complete location details
+    """
+    loc = locations_map.get(location_id)
+    if not loc:
+        return None
+    
+    info = location_info_map.get(location_id, {})
+    hours_recurring = recurring_hours.get(location_id, [])
+    hours_exceptions = exceptions.get(location_id, [])
+    service_ids = location_services_map.get(location_id, [])
+    
+    # Get state name
+    state_name = states_map.get(loc.get('state_id'), '')
+    
+    # Parse address
+    address = _parse_address(
+        info.get('address', ''),
+        state_name,
+        loc.get('country_code', 'AU')
+    )
+    
+    # Format hours using existing helpers
+    hours_formatted = _format_recurring_hours(hours_recurring)
+    exceptions_formatted = _format_onetime_hours(hours_exceptions)
+    
+    # Get service names
+    services_available = [
+        services_names.get(svc_id, f'Service {svc_id}')
+        for svc_id in service_ids
+        if svc_id in services_names
+    ]
+    services_available.sort()  # Alphabetical order
+    
+    # Contact info - prefer location_info, fallback to location fields
+    phone = info.get('phone_with_country_code') or loc.get('human_phone_number') or ''
+    email = info.get('email') or ''
+    website = info.get('website_url') or ''
+    
+    return {
+        'id': str(location_id),
+        'name': loc['name'],
+        'address': address,
+        'contact': {
+            'phone': phone,
+            'email': email,
+            'website': website
+        },
+        'geo': {
+            'lat': 0,  # Not available in schema - placeholder
+            'lng': 0   # Not available in schema - placeholder
+        },
+        'timezone': loc.get('timezone', ''),
+        'location_type': loc.get('location_type', ''),
+        'hours': {
+            'recurring': hours_formatted,
+            'exceptions': exceptions_formatted
+        },
+        'services_available': services_available,
+        'booking_info': {
+            'min_advance_minutes': loc.get('min_advance_booking_minutes', 0) or 0,
+            'slot_interval_minutes': loc.get('slot_interval_minutes', 0) or 0,
+            'booking_email': loc.get('booking_email_recipients', '') or ''
+        },
+        'notes': info.get('ai_prompt', '') or ''
+    }
+
+
+def _format_locations(raw_data: dict, primary_location_id: int) -> tuple[dict, str]:
+    """
+    Transform raw DB data into location-centric JSON + Markdown format.
+    
+    Args:
+        raw_data: Dict with locations, location_info, hours, services, states
+        primary_location_id: The location that triggered this sync
+    
+    Returns:
+        tuple: (json_dict, markdown_string)
+    """
+    locations_list = raw_data['locations']
+    location_info = raw_data['location_info']
+    recurring_hours = raw_data['recurring_hours']
+    exceptions = raw_data['exceptions']
+    location_services = raw_data['location_services']
+    services_names = raw_data['services_names']
+    states = raw_data['states']
+    
+    # Build locations map
+    locations_map = {loc['location_id']: loc for loc in locations_list}
+    
+    # Build primary location details
+    primary_location_data = _build_location_details(
+        primary_location_id,
+        locations_map,
+        location_info,
+        recurring_hours,
+        exceptions,
+        location_services,
+        services_names,
+        states
+    )
+    
+    # Build other locations details
+    other_locations_data = []
+    for loc_id in sorted(locations_map.keys()):
+        if loc_id == primary_location_id:
+            continue  # Skip primary location
+        
+        loc_details = _build_location_details(
+            loc_id,
+            locations_map,
+            location_info,
+            recurring_hours,
+            exceptions,
+            location_services,
+            services_names,
+            states
+        )
+        
+        if loc_details:
+            other_locations_data.append(loc_details)
+    
+    # Build JSON
+    json_data = {
+        'version': 1,
+        'source': 'sync_speako_data',
+        'analysis_artifact_url': '',
+        'locale': 'en-AU',
+        'data': {
+            'primary_location': primary_location_data,
+            'other_locations': other_locations_data
+        }
+    }
+    
+    # Build Markdown
+    markdown_content = _build_locations_markdown(json_data['data'])
+    
+    return json_data, markdown_content
+
+
+def _build_locations_markdown(data: dict) -> str:
+    """
+    Build comprehensive Markdown from location data.
+    
+    Args:
+        data: Dict with primary_location and other_locations
+    
+    Returns:
+        str: Markdown content
+    """
+    lines = []
+    
+    # Header / Instructions
+    lines.append("# How to use this document")
+    lines.append("")
+    lines.append("This is a simple text form. You can type normally — no special tech skills needed.")
+    lines.append("")
+    lines.append("**You can:**")
+    lines.append("- **Delete** any section you don't need.")
+    lines.append("- **Add** more sections or items by copying a block and pasting it below.")
+    lines.append("- **Rename** headings if it helps.")
+    lines.append("- **Write naturally** in sentences or bullet points. Both are fine.")
+    lines.append("")
+    lines.append("**Tips**")
+    lines.append("- Dates: use **YYYY-MM-DD** (e.g., 2025-10-31) if possible.")
+    lines.append("- Times: 09:00–17:00 (24-hour) or 9am–5pm (either is okay).")
+    lines.append("- Optional fields are truly optional — fill what you have and skip the rest.")
+    lines.append("")
+    lines.append("When you're done, just save. You can always return and edit later.")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    lines.append("# Locations")
+    lines.append("")
+    
+    # Primary location
+    primary_loc = data.get('primary_location')
+    if primary_loc:
+        lines.append(f"## Primary Location: {primary_loc['name']}")
+        lines.append("")
+        
+        # Address
+        lines.append("**Address**  ")
+        addr = primary_loc['address']
+        if addr['line1']:
+            lines.append(addr['line1'])
+        if addr['line2']:
+            lines.append(addr['line2'])
+        city_state_post = ', '.join(filter(None, [addr['city'], addr['state'], addr['postcode']]))
+        if city_state_post:
+            lines.append(f"{city_state_post}, {addr['country']}")
+        elif addr['country']:
+            lines.append(addr['country'])
+        lines.append("")
+        
+        # Contact
+        lines.append("**Contact**")
+        contact = primary_loc['contact']
+        if contact['phone']:
+            lines.append(f"- Phone: {contact['phone']}")
+        if contact['email']:
+            lines.append(f"- Email: {contact['email']}")
+        if contact['website']:
+            lines.append(f"- Website: {contact['website']}")
+        if not any([contact['phone'], contact['email'], contact['website']]):
+            lines.append("- No contact information available")
+        lines.append("")
+        
+        # Location Details
+        lines.append("**Location Details**")
+        if primary_loc['location_type']:
+            lines.append(f"- Type: {primary_loc['location_type']}")
+        if primary_loc['timezone']:
+            lines.append(f"- Timezone: {primary_loc['timezone']}")
+        if primary_loc['geo']['lat'] != 0 or primary_loc['geo']['lng'] != 0:
+            lines.append(f"- Coordinates: lat {primary_loc['geo']['lat']}, lng {primary_loc['geo']['lng']}")
+        lines.append("")
+        
+        # Opening Hours (recurring)
+        lines.append("**Opening Hours**")
+        hours = primary_loc['hours']['recurring']
+        day_order = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+        day_labels = {'mon': 'Mon', 'tue': 'Tue', 'wed': 'Wed', 'thu': 'Thu', 'fri': 'Fri', 'sat': 'Sat', 'sun': 'Sun'}
+        for day in day_order:
+            day_hours = hours.get(day, [])
+            if day_hours:
+                lines.append(f"- {day_labels[day]}: {', '.join(day_hours)}")
+            else:
+                lines.append(f"- {day_labels[day]}: Closed")
+        lines.append("")
+        
+        # Exceptions
+        exceptions = primary_loc['hours']['exceptions']
+        if exceptions:
+            lines.append("**Exceptions/Special Hours**")
+            for exc in exceptions:
+                lines.append(f"- {exc['date']}: {exc['status']} ({exc['type']})")
+            lines.append("")
+        
+        # Services Available
+        services = primary_loc['services_available']
+        if services:
+            lines.append("**Services Available**")
+            for svc in services:
+                lines.append(f"- {svc}")
+            lines.append(f"(Total: {len(services)} services)")
+        else:
+            lines.append("**Services Available**")
+            lines.append("- No services configured")
+        lines.append("")
+        
+        # Booking Information
+        booking = primary_loc['booking_info']
+        if any([booking['min_advance_minutes'], booking['slot_interval_minutes'], booking['booking_email']]):
+            lines.append("**Booking Information**")
+            if booking['min_advance_minutes']:
+                lines.append(f"- Minimum advance booking: {booking['min_advance_minutes']} minutes")
+            if booking['slot_interval_minutes']:
+                lines.append(f"- Booking slot intervals: {booking['slot_interval_minutes']} minutes")
+            if booking['booking_email']:
+                lines.append(f"- Booking notifications sent to: {booking['booking_email']}")
+            lines.append("")
+        
+        # Notes
+        if primary_loc['notes']:
+            lines.append("**Notes**  ")
+            lines.append(primary_loc['notes'])
+            lines.append("")
+    
+    # Other locations
+    other_locations = data.get('other_locations', [])
+    if other_locations:
+        lines.append("---")
+        lines.append("")
+        lines.append("## Other Locations")
+        lines.append("")
+        
+        for location in other_locations:
+            lines.append(f"### Location: {location['name']}")
+            lines.append("")
+            
+            # Address
+            lines.append("**Address**  ")
+            addr = location['address']
+            if addr['line1']:
+                lines.append(addr['line1'])
+            if addr['line2']:
+                lines.append(addr['line2'])
+            city_state_post = ', '.join(filter(None, [addr['city'], addr['state'], addr['postcode']]))
+            if city_state_post:
+                lines.append(f"{city_state_post}, {addr['country']}")
+            elif addr['country']:
+                lines.append(addr['country'])
+            lines.append("")
+            
+            # Contact
+            lines.append("**Contact**")
+            contact = location['contact']
+            if contact['phone']:
+                lines.append(f"- Phone: {contact['phone']}")
+            if contact['email']:
+                lines.append(f"- Email: {contact['email']}")
+            if contact['website']:
+                lines.append(f"- Website: {contact['website']}")
+            if not any([contact['phone'], contact['email'], contact['website']]):
+                lines.append("- No contact information available")
+            lines.append("")
+            
+            # Location Details
+            lines.append("**Location Details**")
+            if location['location_type']:
+                lines.append(f"- Type: {location['location_type']}")
+            if location['timezone']:
+                lines.append(f"- Timezone: {location['timezone']}")
+            lines.append("")
+            
+            # Opening Hours
+            lines.append("**Opening Hours**")
+            hours = location['hours']['recurring']
+            for day in day_order:
+                day_hours = hours.get(day, [])
+                if day_hours:
+                    lines.append(f"- {day_labels[day]}: {', '.join(day_hours)}")
+                else:
+                    lines.append(f"- {day_labels[day]}: Closed")
+            lines.append("")
+            
+            # Exceptions
+            exceptions = location['hours']['exceptions']
+            if exceptions:
+                lines.append("**Exceptions/Special Hours**")
+                for exc in exceptions:
+                    lines.append(f"- {exc['date']}: {exc['status']} ({exc['type']})")
+                lines.append("")
+            
+            # Services Available
+            services = location['services_available']
+            if services:
+                lines.append("**Services Available**")
+                for svc in services:
+                    lines.append(f"- {svc}")
+                lines.append(f"(Total: {len(services)} services)")
+            else:
+                lines.append("**Services Available**")
+                lines.append("- No services configured")
+            lines.append("")
+            
+            # Booking Information
+            booking = location['booking_info']
+            if any([booking['min_advance_minutes'], booking['slot_interval_minutes'], booking['booking_email']]):
+                lines.append("**Booking Information**")
+                if booking['min_advance_minutes']:
+                    lines.append(f"- Minimum advance booking: {booking['min_advance_minutes']} minutes")
+                if booking['slot_interval_minutes']:
+                    lines.append(f"- Booking slot intervals: {booking['slot_interval_minutes']} minutes")
+                if booking['booking_email']:
+                    lines.append(f"- Booking notifications sent to: {booking['booking_email']}")
+                lines.append("")
+            
+            # Notes
+            if location['notes']:
+                lines.append("**Notes**  ")
+                lines.append(location['notes'])
+                lines.append("")
+            
+            lines.append("")
+    
+    return '\n'.join(lines)
+
+
 @app.task(bind=True)
 def sync_speako_data(self, *, 
                      tenant_id: str, 
@@ -1049,8 +1651,56 @@ def sync_speako_data(self, *,
             except Exception as desc_e:
                 logger.warning(f"⚠️ [sync_speako_data] Failed to generate AI description: {desc_e}")
         
-        elif knowledge_type in ['locations', 'staff']:
-            # TODO: Implement other knowledge types
+        elif knowledge_type == 'locations':
+            logger.info(f"📍 [sync_speako_data] Syncing locations for tenant={tenant_id}, location={location_id}")
+            
+            # Query database
+            try:
+                raw_data = _query_locations(tenant_id, location_id)
+                num_locations = len(raw_data.get('locations', []))
+                num_services = len(raw_data.get('services_names', {}))
+                logger.info(f"✅ [sync_speako_data] Retrieved location data: {num_locations} locations, {num_services} services available")
+            except Exception as query_e:
+                logger.error(f"❌ [sync_speako_data] Database query failed: {query_e}")
+                raise
+            
+            # Format into JSON + Markdown (location-centric)
+            try:
+                json_output, markdown_output = _format_locations(raw_data, int(location_id))
+                
+                # Count services per location
+                primary_loc = json_output['data'].get('primary_location', {})
+                primary_name = primary_loc.get('name', 'Primary Location')
+                primary_services_count = len(primary_loc.get('services_available', []))
+                other_locs = json_output['data'].get('other_locations', [])
+                other_loc_count = len(other_locs)
+                
+                logger.info(f"✅ [sync_speako_data] Formatted locations: primary_location='{primary_name}' has {primary_services_count} services, {other_loc_count} other locations, {len(json.dumps(json_output))} bytes JSON, {len(markdown_output)} bytes Markdown")
+            except Exception as format_e:
+                logger.error(f"❌ [sync_speako_data] Data formatting failed: {format_e}")
+                raise
+            
+            # Generate AI description
+            try:
+                primary_loc = json_output['data'].get('primary_location', {})
+                primary_name = primary_loc.get('name', 'Primary Location')
+                primary_services_count = len(primary_loc.get('services_available', []))
+                other_locs = json_output['data'].get('other_locations', [])
+                num_other_locs = len(other_locs)
+                
+                service_plural = 'service' if primary_services_count == 1 else 'services'
+                if num_other_locs > 0:
+                    loc_plural = 'location' if num_other_locs == 1 else 'locations'
+                    ai_description = f"Location details for {primary_name} ({primary_services_count} {service_plural}) and {num_other_locs} other {loc_plural}"
+                else:
+                    ai_description = f"Location details for {primary_name} with {primary_services_count} {service_plural}"
+                
+                logger.info(f"📝 [sync_speako_data] Generated AI description: {ai_description}")
+            except Exception as desc_e:
+                logger.warning(f"⚠️ [sync_speako_data] Failed to generate AI description: {desc_e}")
+        
+        elif knowledge_type in ['staff']:
+            # TODO: Implement staff knowledge type
             logger.warning(f"⚠️ [sync_speako_data] Knowledge type '{knowledge_type}' not yet implemented")
             raise NotImplementedError(f"Knowledge type '{knowledge_type}' sync not yet implemented")
         
