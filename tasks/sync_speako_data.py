@@ -2053,7 +2053,7 @@ def sync_speako_data(self, *,
             staff_data = _query_staff(tenant_id, location_id)
             
             logger.info(f"🔄 [sync_speako_data] Formatting staff data")
-            json_output, markdown_output = _format_staff(staff_data)
+            json_output, markdown_output = _format_staff(staff_data, int(location_id))
             
             logger.info(f"📊 [sync_speako_data] Staff data formatted: {len(str(json_output))} bytes JSON, {len(markdown_output)} bytes Markdown")
             
