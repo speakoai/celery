@@ -493,16 +493,18 @@ def _format_business_info(raw_data: dict) -> tuple[dict, str]:
 
 def _query_service_menu(tenant_id: str, location_id: str) -> dict:
     """
-    Fetch service categories, services, and service-modifier links for tenant.
+    Fetch service categories, services, locations, and service-modifier links for tenant.
     
     Args:
         tenant_id: The tenant identifier
-        location_id: Location context (not used for service filtering - services are tenant-wide)
+        location_id: Primary location identifier (for location-centric output)
     
     Returns:
         dict with:
         - categories: List[dict] - Category tags from location_tag (category_id=4)
+        - locations: List[dict] - All locations for tenant
         - services: List[dict] - All active services
+        - location_services: Dict[int, List[int]] - location_id → [service_ids]
         - service_modifiers: Dict[int, List[dict]] - service_id → list of modifiers
     """
     conn = _get_db_connection()
@@ -520,7 +522,33 @@ def _query_service_menu(tenant_id: str, location_id: str) -> dict:
         """, (tenant_id,))
         categories = cursor.fetchall()
         
-        # Query 2: Fetch all active services
+        # Query 2: Fetch all locations for tenant
+        cursor.execute("""
+            SELECT location_id, name
+            FROM locations
+            WHERE tenant_id = %s
+            ORDER BY name
+        """, (tenant_id,))
+        locations = cursor.fetchall()
+        
+        # Query 3: Fetch location-service relationships
+        cursor.execute("""
+            SELECT location_id, service_id
+            FROM location_services
+            WHERE tenant_id = %s
+        """, (tenant_id,))
+        location_service_links = cursor.fetchall()
+        
+        # Build location_services map: location_id → [service_ids]
+        location_services = {}
+        for link in location_service_links:
+            loc_id = link['location_id']
+            svc_id = link['service_id']
+            if loc_id not in location_services:
+                location_services[loc_id] = []
+            location_services[loc_id].append(svc_id)
+        
+        # Query 4: Fetch all active services
         cursor.execute("""
             SELECT 
                 service_id, name, description, duration, price, 
@@ -532,7 +560,8 @@ def _query_service_menu(tenant_id: str, location_id: str) -> dict:
         """, (tenant_id,))
         services = cursor.fetchall()
         
-        # Query 3: Fetch service-modifier links with modifier details (JOIN)
+        # Query 5: Fetch service-modifier links with modifier details (JOIN)
+        # Query 5: Fetch service-modifier links with modifier details (JOIN)
         cursor.execute("""
             SELECT 
                 sml.service_id,
@@ -575,7 +604,9 @@ def _query_service_menu(tenant_id: str, location_id: str) -> dict:
         
         return {
             'categories': categories,
+            'locations': locations,
             'services': services,
+            'location_services': location_services,
             'service_modifiers': service_modifiers
         }
     
@@ -584,36 +615,30 @@ def _query_service_menu(tenant_id: str, location_id: str) -> dict:
         conn.close()
 
 
-def _format_service_menu(raw_data: dict) -> tuple[dict, str]:
+def _build_location_categories(location_service_ids: list, 
+                                all_services: list, 
+                                category_map: dict, 
+                                service_modifiers: dict) -> list:
     """
-    Transform raw DB data into JSON + Markdown format.
-    Handles many-to-many service-category relationships.
+    Build categories array for a specific location based on available services.
     
     Args:
-        raw_data: Dict with categories, services, service_modifiers
+        location_service_ids: List of service_ids available at this location
+        all_services: List of all services (from query)
+        category_map: Dict mapping tag_id → category info
+        service_modifiers: Dict mapping service_id → modifiers list
     
     Returns:
-        tuple: (json_dict, markdown_string)
+        list: Categories array with items filtered to location's services
     """
-    categories_list = raw_data['categories']
-    services_list = raw_data['services']
-    service_modifiers = raw_data['service_modifiers']
-    
-    # Build category map: tag_id → category info
-    category_map = {
-        cat['tag_id']: {
-            'id': str(cat['tag_id']),
-            'name': cat['name'],
-            'slug': cat['slug']
-        }
-        for cat in categories_list
-    }
+    # Filter services to only those available at this location
+    location_services = [s for s in all_services if s['service_id'] in location_service_ids]
     
     # Build category → services mapping
     category_services = {}  # tag_id → [services]
     uncategorized_services = []
     
-    for service in services_list:
+    for service in location_services:
         category_tag_ids = service['category_tag_ids'] or []
         
         if not category_tag_ids:
@@ -627,13 +652,13 @@ def _format_service_menu(raw_data: dict) -> tuple[dict, str]:
                         category_services[tag_id] = []
                     category_services[tag_id].append(service)
     
-    # Build JSON structure
+    # Build categories output
     categories_output = []
     
     # Process each category (already sorted by name from query)
     for tag_id, cat_info in category_map.items():
         if tag_id not in category_services:
-            # Skip empty categories
+            # Skip empty categories for this location
             continue
         
         items = []
@@ -684,6 +709,82 @@ def _format_service_menu(raw_data: dict) -> tuple[dict, str]:
             'items': items
         })
     
+    return categories_output
+
+
+def _format_service_menu(raw_data: dict, primary_location_id: int) -> tuple[dict, str]:
+    """
+    Transform raw DB data into location-centric JSON + Markdown format.
+    Shows primary location at top, other locations grouped separately.
+    
+    Args:
+        raw_data: Dict with categories, locations, services, location_services, service_modifiers
+        primary_location_id: The location that triggered this sync (shown first)
+    
+    Returns:
+        tuple: (json_dict, markdown_string)
+    """
+    categories_list = raw_data['categories']
+    locations_list = raw_data['locations']
+    services_list = raw_data['services']
+    location_services = raw_data['location_services']
+    service_modifiers = raw_data['service_modifiers']
+    
+    # Build category map: tag_id → category info
+    category_map = {
+        cat['tag_id']: {
+            'id': str(cat['tag_id']),
+            'name': cat['name'],
+            'slug': cat['slug']
+        }
+        for cat in categories_list
+    }
+    
+    # Build locations map: location_id → name
+    locations_map = {loc['location_id']: loc['name'] for loc in locations_list}
+    
+    # Build primary location data
+    primary_location_name = locations_map.get(primary_location_id, f'Location {primary_location_id}')
+    primary_service_ids = location_services.get(primary_location_id, [])
+    primary_categories = _build_location_categories(
+        primary_service_ids,
+        services_list,
+        category_map,
+        service_modifiers
+    )
+    
+    primary_location_data = {
+        'location_id': str(primary_location_id),
+        'location_name': primary_location_name,
+        'categories': primary_categories
+    }
+    
+    # Build other locations data
+    other_locations_data = []
+    for loc_id in sorted(locations_map.keys()):
+        if loc_id == primary_location_id:
+            continue  # Skip primary location
+        
+        loc_service_ids = location_services.get(loc_id, [])
+        if not loc_service_ids:
+            continue  # Skip locations with no services
+        
+        loc_categories = _build_location_categories(
+            loc_service_ids,
+            services_list,
+            category_map,
+            service_modifiers
+        )
+        
+        if not loc_categories:
+            continue  # Skip if no categories after filtering
+        
+        other_locations_data.append({
+            'location_id': str(loc_id),
+            'location_name': locations_map[loc_id],
+            'categories': loc_categories
+        })
+    
     # Build JSON
     json_data = {
         'version': 1,
@@ -691,7 +792,8 @@ def _format_service_menu(raw_data: dict) -> tuple[dict, str]:
         'analysis_artifact_url': '',
         'locale': 'en-AU',
         'data': {
-            'categories': categories_output
+            'primary_location': primary_location_data,
+            'other_locations': other_locations_data
         }
     }
     
@@ -703,10 +805,10 @@ def _format_service_menu(raw_data: dict) -> tuple[dict, str]:
 
 def _build_service_menu_markdown(data: dict) -> str:
     """
-    Build comprehensive Markdown from formatted data.
+    Build comprehensive Markdown from location-centric formatted data.
     
     Args:
-        data: Dict with categories array
+        data: Dict with primary_location and other_locations
     
     Returns:
         str: Markdown content
@@ -714,43 +816,102 @@ def _build_service_menu_markdown(data: dict) -> str:
     lines = []
     lines.append("> Group services by **Category**, then list **Items** with duration and price.")
     lines.append("")
+    lines.append("# Service Menu")
+    lines.append("")
     
-    for category in data['categories']:
-        lines.append(f"## Category: {category['name']}")
-        
-        for item in category['items']:
-            lines.append(f"### Service: {item['name']}")
-            lines.append("**Description:**  ")
-            lines.append(item['description'] or 'No description available')
-            lines.append("")
-            lines.append(f"- Duration: {item['duration_min']} min")
-            lines.append(f"- Price: ${item['price']['amount']:.2f} {item['price']['currency']}")
-            
-            # Format addons
-            if item['addons']:
-                addon_parts = []
-                for addon in item['addons']:
-                    addon_str = f"{addon['name']} (${addon['price']:.2f})"
-                    
-                    # Add indicators
-                    indicators = []
-                    if addon.get('is_required'):
-                        indicators.append('Required')
-                    if addon.get('default_selected'):
-                        indicators.append('Default')
-                    
-                    if indicators:
-                        addon_str += f" [{']['.join(indicators)}]"
-                    
-                    addon_parts.append(addon_str)
-                
-                lines.append(f"- Add-ons: {', '.join(addon_parts)}")
-            else:
-                lines.append("- Add-ons: None")
-            
-            lines.append("")
-        
+    # Primary location
+    primary_loc = data.get('primary_location')
+    if primary_loc:
+        lines.append(f"## Primary Location: {primary_loc['location_name']}")
         lines.append("")
+        
+        for category in primary_loc.get('categories', []):
+            lines.append(f"### Category: {category['name']}")
+            
+            for item in category['items']:
+                lines.append(f"#### Service: {item['name']}")
+                lines.append("**Description:**  ")
+                lines.append(item['description'] or 'No description available')
+                lines.append("")
+                lines.append(f"- Duration: {item['duration_min']} min")
+                lines.append(f"- Price: ${item['price']['amount']:.2f} {item['price']['currency']}")
+                
+                # Format addons
+                if item['addons']:
+                    addon_parts = []
+                    for addon in item['addons']:
+                        addon_str = f"{addon['name']} (${addon['price']:.2f})"
+                        
+                        # Add indicators
+                        indicators = []
+                        if addon.get('is_required'):
+                            indicators.append('Required')
+                        if addon.get('default_selected'):
+                            indicators.append('Default')
+                        
+                        if indicators:
+                            addon_str += f" [{']['.join(indicators)}]"
+                        
+                        addon_parts.append(addon_str)
+                    
+                    lines.append(f"- Add-ons: {', '.join(addon_parts)}")
+                else:
+                    lines.append("- Add-ons: None")
+                
+                lines.append("")
+            
+            lines.append("")
+    
+    # Other locations
+    other_locations = data.get('other_locations', [])
+    if other_locations:
+        lines.append("---")
+        lines.append("")
+        lines.append("## Other Locations")
+        lines.append("")
+        
+        for location in other_locations:
+            lines.append(f"### Location: {location['location_name']}")
+            lines.append("")
+            
+            for category in location.get('categories', []):
+                lines.append(f"#### Category: {category['name']}")
+                
+                for item in category['items']:
+                    lines.append(f"##### Service: {item['name']}")
+                    lines.append("**Description:**  ")
+                    lines.append(item['description'] or 'No description available')
+                    lines.append("")
+                    lines.append(f"- Duration: {item['duration_min']} min")
+                    lines.append(f"- Price: ${item['price']['amount']:.2f} {item['price']['currency']}")
+                    
+                    # Format addons
+                    if item['addons']:
+                        addon_parts = []
+                        for addon in item['addons']:
+                            addon_str = f"{addon['name']} (${addon['price']:.2f})"
+                            
+                            # Add indicators
+                            indicators = []
+                            if addon.get('is_required'):
+                                indicators.append('Required')
+                            if addon.get('default_selected'):
+                                indicators.append('Default')
+                            
+                            if indicators:
+                                addon_str += f" [{']['.join(indicators)}]"
+                            
+                            addon_parts.append(addon_str)
+                        
+                        lines.append(f"- Add-ons: {', '.join(addon_parts)}")
+                    else:
+                        lines.append("- Add-ons: None")
+                    
+                    lines.append("")
+                
+                lines.append("")
+            
+            lines.append("")
     
     return '\n'.join(lines)
 
@@ -848,27 +1009,42 @@ def sync_speako_data(self, *,
                 raw_data = _query_service_menu(tenant_id, location_id)
                 num_categories = len(raw_data.get('categories', []))
                 num_services = len(raw_data.get('services', []))
-                logger.info(f"✅ [sync_speako_data] Retrieved service menu data: {num_categories} categories, {num_services} services")
+                num_locations = len(raw_data.get('locations', []))
+                logger.info(f"✅ [sync_speako_data] Retrieved service menu data: {num_locations} locations, {num_categories} categories, {num_services} services")
             except Exception as query_e:
                 logger.error(f"❌ [sync_speako_data] Database query failed: {query_e}")
                 raise
             
-            # Format into JSON + Markdown
+            # Format into JSON + Markdown (location-centric)
             try:
-                json_output, markdown_output = _format_service_menu(raw_data)
-                num_output_categories = len(json_output['data'].get('categories', []))
-                logger.info(f"✅ [sync_speako_data] Formatted service_menu: {num_output_categories} categories in output, {len(json.dumps(json_output))} bytes JSON, {len(markdown_output)} bytes Markdown")
+                json_output, markdown_output = _format_service_menu(raw_data, int(location_id))
+                
+                # Count services per location
+                primary_loc = json_output['data'].get('primary_location', {})
+                primary_services = sum(len(cat.get('items', [])) for cat in primary_loc.get('categories', []))
+                other_locs = json_output['data'].get('other_locations', [])
+                other_loc_count = len(other_locs)
+                
+                logger.info(f"✅ [sync_speako_data] Formatted service_menu: primary_location has {primary_services} services, {other_loc_count} other locations, {len(json.dumps(json_output))} bytes JSON, {len(markdown_output)} bytes Markdown")
             except Exception as format_e:
                 logger.error(f"❌ [sync_speako_data] Data formatting failed: {format_e}")
                 raise
             
             # Generate AI description
             try:
-                num_categories = len(json_output['data'].get('categories', []))
-                total_services = sum(len(cat.get('items', [])) for cat in json_output['data'].get('categories', []))
-                category_plural = 'category' if num_categories == 1 else 'categories'
-                service_plural = 'service' if total_services == 1 else 'services'
-                ai_description = f"Service menu with {total_services} {service_plural} across {num_categories} {category_plural}"
+                primary_loc = json_output['data'].get('primary_location', {})
+                primary_name = primary_loc.get('location_name', 'Primary Location')
+                primary_services = sum(len(cat.get('items', [])) for cat in primary_loc.get('categories', []))
+                other_locs = json_output['data'].get('other_locations', [])
+                num_other_locs = len(other_locs)
+                
+                service_plural = 'service' if primary_services == 1 else 'services'
+                if num_other_locs > 0:
+                    loc_plural = 'location' if num_other_locs == 1 else 'locations'
+                    ai_description = f"Service menu for {primary_name} ({primary_services} {service_plural}) and {num_other_locs} other {loc_plural}"
+                else:
+                    ai_description = f"Service menu for {primary_name} with {primary_services} {service_plural}"
+                
                 logger.info(f"📝 [sync_speako_data] Generated AI description: {ai_description}")
             except Exception as desc_e:
                 logger.warning(f"⚠️ [sync_speako_data] Failed to generate AI description: {desc_e}")
