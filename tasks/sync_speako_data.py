@@ -166,8 +166,155 @@ def _format_onetime_hours(hours_data: list) -> list:
     return sorted(exceptions.values(), key=lambda x: x['date'])
 
 
-# Markdown builder functions removed - OpenAI now handles all formatting
-# based on ai_prompt from database
+# ============================================================================
+# Markdown Generation Helpers for business_info
+# ============================================================================
+
+def _format_day_hours_markdown(hours_array: list) -> str:
+    """Format hours array for a single day into markdown string."""
+    if not hours_array:
+        return "Closed"
+    return ", ".join(hours_array)
+
+
+def _format_week_schedule_markdown(recurring_dict: dict) -> str:
+    """Format weekly recurring hours into markdown bullet list."""
+    days_order = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+    day_names = {
+        'mon': 'Monday',
+        'tue': 'Tuesday', 
+        'wed': 'Wednesday',
+        'thu': 'Thursday',
+        'fri': 'Friday',
+        'sat': 'Saturday',
+        'sun': 'Sunday'
+    }
+    
+    lines = []
+    for day_key in days_order:
+        day_name = day_names[day_key]
+        hours = recurring_dict.get(day_key, [])
+        hours_text = _format_day_hours_markdown(hours)
+        lines.append(f"- **{day_name}**: {hours_text}")
+    
+    return "\n".join(lines)
+
+
+def _format_exceptions_markdown(exceptions_array: list) -> str:
+    """Format exceptions (special hours/closures) into markdown list."""
+    if not exceptions_array:
+        return ""
+    
+    lines = []
+    for exc in exceptions_array:
+        date = exc.get('date', '')
+        status = exc.get('status', '')
+        exc_type = exc.get('type', '')
+        holiday_name = exc.get('holiday_name', '')
+        hours = exc.get('hours', [])
+        
+        # Build description
+        if status == 'closed':
+            if holiday_name:
+                desc = f"Closed ({holiday_name})"
+            else:
+                desc = "Closed"
+        else:
+            hours_text = ", ".join(hours) if hours else "Open"
+            if holiday_name:
+                desc = f"{hours_text} ({holiday_name})"
+            elif exc_type == 'special_hours':
+                desc = f"{hours_text} (Special Hours)"
+            else:
+                desc = hours_text
+        
+        lines.append(f"- **{date}**: {desc}")
+    
+    return "\n".join(lines)
+
+
+def _build_business_info_markdown(json_data: dict) -> str:
+    """Build markdown content from business_info JSON data."""
+    data = json_data.get('data', {})
+    
+    sections = []
+    
+    # Header: Company Name
+    company_name = data.get('company_name', '')
+    if company_name:
+        sections.append(f"# {company_name}")
+    
+    # Tagline
+    tagline = data.get('tagline', '')
+    if tagline:
+        sections.append(f"\n{tagline}")
+    
+    # About Us Section
+    description = data.get('description', '')
+    philosophy = data.get('philosophy', '')
+    
+    if description or philosophy:
+        sections.append("\n## About Us")
+        if description:
+            sections.append(f"\n{description}")
+        if philosophy:
+            sections.append(f"\n{philosophy}")
+    
+    # Contact Information Section
+    contacts = data.get('contacts', {})
+    email = contacts.get('email', '')
+    phone = contacts.get('phone', '')
+    website = data.get('website', '')
+    
+    if email or phone or website:
+        sections.append("\n## Contact Information")
+        contact_lines = []
+        if email:
+            contact_lines.append(f"- **Email**: {email}")
+        if phone:
+            contact_lines.append(f"- **Phone**: {phone}")
+        if website:
+            contact_lines.append(f"- **Website**: {website}")
+        sections.append("\n" + "\n".join(contact_lines))
+    
+    # Social Media Section
+    social = data.get('social', {})
+    instagram = social.get('instagram', '')
+    facebook = social.get('facebook', '')
+    
+    if instagram or facebook:
+        sections.append("\n## Social Media")
+        social_lines = []
+        if instagram:
+            social_lines.append(f"- **Instagram**: {instagram}")
+        if facebook:
+            social_lines.append(f"- **Facebook**: {facebook}")
+        sections.append("\n" + "\n".join(social_lines))
+    
+    # Locations Section
+    locations = data.get('locations', [])
+    if locations:
+        sections.append("\n## Our Locations")
+        
+        for loc in locations:
+            loc_name = loc.get('location_name', 'Unknown Location')
+            sections.append(f"\n### {loc_name}")
+            
+            hours = loc.get('hours', {})
+            recurring = hours.get('recurring', {})
+            exceptions = hours.get('exceptions', [])
+            
+            # Regular Hours
+            if recurring:
+                sections.append("\n**Regular Hours:**\n")
+                sections.append(_format_week_schedule_markdown(recurring))
+            
+            # Special Hours & Closures
+            if exceptions:
+                sections.append("\n\n**Special Hours & Closures:**\n")
+                sections.append(_format_exceptions_markdown(exceptions))
+    
+    return "\n".join(sections)
 
 
 def _query_business_info(tenant_id: str, location_id: str) -> dict:
@@ -301,16 +448,14 @@ def _query_business_info(tenant_id: str, location_id: str) -> dict:
 
 def _format_business_info(raw_data: dict) -> tuple[dict, str]:
     """
-    Prepare raw DB data for OpenAI processing.
-    OpenAI will structure and format the data based on ai_prompt from database.
+    Format business info data into structured JSON and markdown.
     
     Args:
         raw_data: dict with business_data and locations (list)
     
     Returns:
-        tuple: (raw_data_dict, empty_markdown_placeholder)
+        tuple: (json_output, markdown_content)
     """
-    from .utils.task_db import get_ai_knowledge_type_by_key
     
     business_data = raw_data['business_data']
     locations_raw = raw_data['locations']
@@ -326,7 +471,7 @@ def _format_business_info(raw_data: dict) -> tuple[dict, str]:
     }
     locale = locale_map.get(country_code, 'en-AU')
     
-    # Format hours for each location (minimal processing for OpenAI)
+    # Format hours for each location
     locations_formatted = []
     for loc in locations_raw:
         recurring_hours = _format_recurring_hours(loc['recurring_hours'])
@@ -341,8 +486,7 @@ def _format_business_info(raw_data: dict) -> tuple[dict, str]:
             }
         })
     
-    # Package raw data for OpenAI
-    # OpenAI will receive this + ai_prompt and generate both json_data and markdown_data
+    # Package formatted data
     json_output = {
         "version": 1,
         "source": "sync_speako_data",
@@ -371,10 +515,8 @@ def _format_business_info(raw_data: dict) -> tuple[dict, str]:
         }
     }
     
-    # TODO: Call OpenAI with ai_prompt + json_output
-    # For now, return raw data and empty markdown
-    # OpenAI will handle all formatting based on ai_prompt from ai_knowledge_types table
-    markdown = ""  # Placeholder - OpenAI will generate this
+    # Generate markdown from JSON data
+    markdown = _build_business_info_markdown(json_output)
     
     return json_output, markdown
 
@@ -1268,12 +1410,12 @@ def sync_speako_data(self, *,
             raise ValueError(f"Unsupported knowledge_type: {knowledge_type}")
         
         # Save to database
-        if json_output and markdown_output:
+        if json_output is not None:
             try:
                 param_id = upsert_tenant_integration_param(
                     tenant_integration_param=tenant_integration_param,
                     analysis_result=json_output,
-                    value_text=markdown_output,
+                    value_text=markdown_output or "",
                     ai_description=ai_description
                 )
                 if param_id:
