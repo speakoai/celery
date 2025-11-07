@@ -195,7 +195,7 @@ def publish_knowledge(
     save_new_elevenlabs_knowledge_id(
         tenant_id=tenant_id,
         location_id=location_id,
-        elevenlabs_knowledge_id=new_knowledge_id
+        knowledge_id=new_knowledge_id
     )
     
     # Step 9: Mark knowledge documents as published
