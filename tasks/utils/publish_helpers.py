@@ -85,7 +85,7 @@ def publish_knowledge(
     update_publish_job_status(
         tenant_id=tenant_id,
         publish_job_id=publish_job_id,
-        status='processing',
+        status='in_progress',
         started_at=datetime.utcnow()
     )
     
@@ -127,7 +127,7 @@ def publish_knowledge(
     update_publish_job_status(
         tenant_id=tenant_id,
         publish_job_id=publish_job_id,
-        status='processing',
+        status='in_progress',
         knowledge_file_url=r2_url
     )
     logger.info(f"[PublishKnowledge] Updated publish_jobs table with knowledge_file_url")
