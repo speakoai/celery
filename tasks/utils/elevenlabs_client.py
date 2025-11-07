@@ -20,8 +20,11 @@ ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 def _get_headers() -> Dict[str, str]:
     """Get headers for ElevenLabs API requests."""
     if not ELEVENLABS_API_KEY:
-        raise RuntimeError("ELEVENLABS_API_KEY environment variable not set")
+        error_msg = "ELEVENLABS_API_KEY environment variable is NOT SET - Cannot make API calls"
+        logger.error(f"[ElevenLabs] ❌ {error_msg}")
+        raise RuntimeError(error_msg)
     
+    logger.info(f"[ElevenLabs] ✓ API Key found (ending with: ...{ELEVENLABS_API_KEY[-8:]})")
     return {
         "xi-api-key": ELEVENLABS_API_KEY
     }
@@ -47,6 +50,7 @@ def upload_knowledge_file(file_url: str, name: str) -> str:
         RuntimeError: If file download fails
     """
     logger.info(f"[ElevenLabs] Uploading knowledge from URL: {file_url}")
+    logger.info(f"[ElevenLabs] 📤 STARTING API CALL: POST {ELEVENLABS_BASE_URL}/knowledge-base/file")
     
     # Step 1: Download file from URL
     try:
@@ -82,6 +86,7 @@ def upload_knowledge_file(file_url: str, name: str) -> str:
     headers = _get_headers()
     
     logger.info(f"[ElevenLabs] Uploading to ElevenLabs: name='{name}', filename='{filename}'")
+    logger.info(f"[ElevenLabs] 🌐 Making POST request to: {url}")
     
     try:
         response = requests.post(
@@ -91,14 +96,17 @@ def upload_knowledge_file(file_url: str, name: str) -> str:
             data=data,
             timeout=60
         )
+        
+        logger.info(f"[ElevenLabs] ✓ Received response: HTTP {response.status_code}")
+        
         response.raise_for_status()
     except requests.HTTPError as e:
         error_msg = f"ElevenLabs API error (HTTP {response.status_code}): {response.text}"
-        logger.error(f"[ElevenLabs] {error_msg}")
+        logger.error(f"[ElevenLabs] ❌ API CALL FAILED: {error_msg}")
         raise requests.HTTPError(error_msg, response=response) from e
     except requests.RequestException as e:
         error_msg = f"Failed to upload to ElevenLabs: {str(e)}"
-        logger.error(f"[ElevenLabs] {error_msg}")
+        logger.error(f"[ElevenLabs] ❌ REQUEST FAILED: {error_msg}")
         raise
     
     # Step 4: Extract knowledge_id from response
@@ -119,6 +127,7 @@ def upload_knowledge_file(file_url: str, name: str) -> str:
         f"[ElevenLabs] Successfully uploaded knowledge: "
         f"id={knowledge_id}, name='{result.get('name')}'"
     )
+    logger.info(f"[ElevenLabs] ✅ API CALL SUCCESSFUL: Created knowledge ID: {knowledge_id}")
     
     return knowledge_id
 
@@ -142,11 +151,14 @@ def delete_knowledge(knowledge_id: str) -> bool:
         - Returns False for other errors
     """
     logger.info(f"[ElevenLabs] Deleting knowledge: id={knowledge_id}")
+    logger.info(f"[ElevenLabs] 📤 STARTING API CALL: DELETE {ELEVENLABS_BASE_URL}/knowledge-base/{knowledge_id}")
     
     try:
         url = f"{ELEVENLABS_BASE_URL}/knowledge-base/{knowledge_id}"
         headers = _get_headers()
         params = {'force': 'true'}  # Force delete even if used by agents
+        
+        logger.info(f"[ElevenLabs] 🌐 Making DELETE request to: {url}")
         
         response = requests.delete(
             url,
@@ -154,9 +166,13 @@ def delete_knowledge(knowledge_id: str) -> bool:
             params=params,
             timeout=30
         )
+        
+        logger.info(f"[ElevenLabs] ✓ Received response: HTTP {response.status_code}")
+        
         response.raise_for_status()
         
         logger.info(f"[ElevenLabs] Successfully deleted knowledge: {knowledge_id}")
+        logger.info(f"[ElevenLabs] ✅ API CALL SUCCESSFUL: Deleted knowledge ID: {knowledge_id}")
         return True
         
     except requests.HTTPError as e:
@@ -165,23 +181,24 @@ def delete_knowledge(knowledge_id: str) -> bool:
             logger.warning(
                 f"[ElevenLabs] Knowledge not found (already deleted?): {knowledge_id}"
             )
+            logger.info(f"[ElevenLabs] ✓ Knowledge already deleted (404): {knowledge_id}")
             return True
         else:
             logger.error(
-                f"[ElevenLabs] Failed to delete knowledge {knowledge_id}: "
+                f"[ElevenLabs] ❌ API CALL FAILED - Failed to delete knowledge {knowledge_id}: "
                 f"HTTP {e.response.status_code} - {e.response.text}"
             )
             return False
             
     except requests.RequestException as e:
         logger.error(
-            f"[ElevenLabs] Error deleting knowledge {knowledge_id}: {str(e)}"
+            f"[ElevenLabs] ❌ REQUEST FAILED - Error deleting knowledge {knowledge_id}: {str(e)}"
         )
         return False
     
     except Exception as e:
         logger.error(
-            f"[ElevenLabs] Unexpected error deleting knowledge {knowledge_id}: {str(e)}"
+            f"[ElevenLabs] ❌ UNEXPECTED ERROR - Error deleting knowledge {knowledge_id}: {str(e)}"
         )
         return False
 
@@ -201,16 +218,22 @@ def get_agent_config(agent_id: str) -> Dict[str, Any]:
         ValueError: If response cannot be parsed
     """
     logger.info(f"[ElevenLabs] Fetching agent configuration: agent_id={agent_id}")
+    logger.info(f"[ElevenLabs] 📤 STARTING API CALL: GET {ELEVENLABS_BASE_URL}/agents/{agent_id}")
     
     try:
         url = f"{ELEVENLABS_BASE_URL}/agents/{agent_id}"
         headers = _get_headers()
+        
+        logger.info(f"[ElevenLabs] 🌐 Making GET request to: {url}")
         
         response = requests.get(
             url,
             headers=headers,
             timeout=30
         )
+        
+        logger.info(f"[ElevenLabs] ✓ Received response: HTTP {response.status_code}")
+        
         response.raise_for_status()
         
         config = response.json()
@@ -231,22 +254,23 @@ def get_agent_config(agent_id: str) -> Dict[str, Any]:
             f"current_knowledge_count={len(current_knowledge_ids)}, "
             f"knowledge_ids={current_knowledge_ids}"
         )
+        logger.info(f"[ElevenLabs] ✅ API CALL SUCCESSFUL: Retrieved agent config")
         
         return config
         
     except requests.HTTPError as e:
         error_msg = f"Failed to fetch agent {agent_id}: HTTP {e.response.status_code} - {e.response.text}"
-        logger.error(f"[ElevenLabs] {error_msg}")
+        logger.error(f"[ElevenLabs] ❌ API CALL FAILED: {error_msg}")
         raise requests.HTTPError(error_msg, response=e.response) from e
         
     except requests.RequestException as e:
         error_msg = f"Failed to fetch agent {agent_id}: {str(e)}"
-        logger.error(f"[ElevenLabs] {error_msg}")
+        logger.error(f"[ElevenLabs] ❌ REQUEST FAILED: {error_msg}")
         raise
         
     except Exception as e:
         error_msg = f"Failed to parse agent config for {agent_id}: {str(e)}"
-        logger.error(f"[ElevenLabs] {error_msg}")
+        logger.error(f"[ElevenLabs] ❌ PARSE ERROR: {error_msg}")
         raise ValueError(error_msg) from e
 
 
@@ -272,6 +296,7 @@ def update_agent_knowledge(agent_id: str, knowledge_ids: list) -> Dict[str, Any]
         f"[ElevenLabs] Updating agent knowledge: agent_id={agent_id}, "
         f"knowledge_count={len(knowledge_ids)}, knowledge_ids={knowledge_ids}"
     )
+    logger.info(f"[ElevenLabs] 📤 STARTING API CALL: PATCH {ELEVENLABS_BASE_URL}/agents/{agent_id}")
     
     # Build knowledge_base array with usage_mode="auto"
     knowledge_base = [
@@ -294,12 +319,18 @@ def update_agent_knowledge(agent_id: str, knowledge_ids: list) -> Dict[str, Any]
         headers = _get_headers()
         headers['Content-Type'] = 'application/json'
         
+        logger.info(f"[ElevenLabs] 🌐 Making PATCH request to: {url}")
+        logger.info(f"[ElevenLabs] Payload: {payload}")
+        
         response = requests.patch(
             url,
             headers=headers,
             json=payload,
             timeout=30
         )
+        
+        logger.info(f"[ElevenLabs] ✓ Received response: HTTP {response.status_code}")
+        
         response.raise_for_status()
         
         updated_config = response.json()
@@ -308,20 +339,21 @@ def update_agent_knowledge(agent_id: str, knowledge_ids: list) -> Dict[str, Any]
             f"[ElevenLabs] Successfully updated agent knowledge: agent_id={agent_id}, "
             f"new_knowledge_count={len(knowledge_ids)}"
         )
+        logger.info(f"[ElevenLabs] ✅ API CALL SUCCESSFUL: Updated agent configuration")
         
         return updated_config
         
     except requests.HTTPError as e:
         error_msg = f"Failed to update agent {agent_id}: HTTP {e.response.status_code} - {e.response.text}"
-        logger.error(f"[ElevenLabs] {error_msg}")
+        logger.error(f"[ElevenLabs] ❌ API CALL FAILED: {error_msg}")
         raise requests.HTTPError(error_msg, response=e.response) from e
         
     except requests.RequestException as e:
         error_msg = f"Failed to update agent {agent_id}: {str(e)}"
-        logger.error(f"[ElevenLabs] {error_msg}")
+        logger.error(f"[ElevenLabs] ❌ REQUEST FAILED: {error_msg}")
         raise
         
     except Exception as e:
         error_msg = f"Failed to parse update response for agent {agent_id}: {str(e)}"
-        logger.error(f"[ElevenLabs] {error_msg}")
+        logger.error(f"[ElevenLabs] ❌ PARSE ERROR: {error_msg}")
         raise ValueError(error_msg) from e

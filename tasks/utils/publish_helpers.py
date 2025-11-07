@@ -80,7 +80,14 @@ def publish_knowledge(
             f"Publish job not found: tenant_id={tenant_id}, publish_job_id={publish_job_id}"
         )
     
-    update_publish_job_status(tenant_id, publish_job_id, 'processing')
+    # Mark as processing and set started_at timestamp
+    from datetime import datetime
+    update_publish_job_status(
+        tenant_id=tenant_id,
+        publish_job_id=publish_job_id,
+        status='processing',
+        started_at=datetime.utcnow()
+    )
     
     elevenlabs_agent_id = get_elevenlabs_agent_id(tenant_id, location_id)
     if not elevenlabs_agent_id:
@@ -116,6 +123,15 @@ def publish_knowledge(
     
     logger.info(f"[PublishKnowledge] Uploaded to R2: {r2_url}")
     
+    # Update publish job with knowledge_file_url
+    update_publish_job_status(
+        tenant_id=tenant_id,
+        publish_job_id=publish_job_id,
+        status='processing',
+        knowledge_file_url=r2_url
+    )
+    logger.info(f"[PublishKnowledge] Updated publish_jobs table with knowledge_file_url")
+    
     # Step 4: Upload to ElevenLabs
     logger.info("[PublishKnowledge] Step 4: Uploading to ElevenLabs")
     knowledge_name = f"Speako Knowledge - Tenant {tenant_id} Location {location_id}"
@@ -128,7 +144,14 @@ def publish_knowledge(
         logger.info(f"[PublishKnowledge] Created ElevenLabs knowledge: {new_knowledge_id}")
     except Exception as e:
         logger.error(f"[PublishKnowledge] Failed to upload to ElevenLabs: {str(e)}")
-        update_publish_job_status(tenant_id, publish_job_id, 'failed')
+        from datetime import datetime
+        update_publish_job_status(
+            tenant_id=tenant_id,
+            publish_job_id=publish_job_id,
+            status='failed',
+            finished_at=datetime.utcnow(),
+            error_message=str(e)
+        )
         raise RuntimeError(f"Failed to upload knowledge to ElevenLabs: {str(e)}") from e
     
     # Step 5: Get existing knowledge IDs from database
@@ -157,7 +180,14 @@ def publish_knowledge(
         )
     except Exception as e:
         logger.error(f"[PublishKnowledge] Failed to update agent: {str(e)}")
-        update_publish_job_status(tenant_id, publish_job_id, 'failed')
+        from datetime import datetime
+        update_publish_job_status(
+            tenant_id=tenant_id,
+            publish_job_id=publish_job_id,
+            status='failed',
+            finished_at=datetime.utcnow(),
+            error_message=str(e)
+        )
         raise RuntimeError(f"Failed to update agent configuration: {str(e)}") from e
     
     # Step 8: Save new knowledge ID to database
@@ -195,7 +225,25 @@ def publish_knowledge(
     
     # Step 11: Mark publish job as completed
     logger.info("[PublishKnowledge] Step 11: Marking publish job as completed")
-    update_publish_job_status(tenant_id, publish_job_id, 'completed')
+    from datetime import datetime
+    
+    # Prepare response JSON for database
+    response_data = {
+        'elevenlabs_agent_id': elevenlabs_agent_id,
+        'new_knowledge_id': new_knowledge_id,
+        'merged_knowledge_ids': merged_knowledge_ids,
+        'deleted_old_knowledge': deleted_old_knowledge,
+        'knowledge_count': len(knowledge_docs)
+    }
+    
+    update_publish_job_status(
+        tenant_id=tenant_id,
+        publish_job_id=publish_job_id,
+        status='completed',
+        finished_at=datetime.utcnow(),
+        http_status_code=200,
+        response_json=response_data
+    )
     
     # Prepare result
     result = {
