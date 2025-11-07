@@ -184,3 +184,144 @@ def delete_knowledge(knowledge_id: str) -> bool:
             f"[ElevenLabs] Unexpected error deleting knowledge {knowledge_id}: {str(e)}"
         )
         return False
+
+
+def get_agent_config(agent_id: str) -> Dict[str, Any]:
+    """
+    Fetch the current configuration of an ElevenLabs agent.
+    
+    Args:
+        agent_id: ElevenLabs agent ID
+        
+    Returns:
+        Full agent configuration as a dictionary
+        
+    Raises:
+        requests.HTTPError: If API call fails
+        ValueError: If response cannot be parsed
+    """
+    logger.info(f"[ElevenLabs] Fetching agent configuration: agent_id={agent_id}")
+    
+    try:
+        url = f"{ELEVENLABS_BASE_URL}/agents/{agent_id}"
+        headers = _get_headers()
+        
+        response = requests.get(
+            url,
+            headers=headers,
+            timeout=30
+        )
+        response.raise_for_status()
+        
+        config = response.json()
+        
+        # Log current knowledge base for visibility
+        current_knowledge_ids = []
+        if 'conversation_config' in config:
+            conv_config = config['conversation_config']
+            if 'knowledge_base' in conv_config:
+                current_knowledge_ids = [
+                    kb.get('knowledge_id') 
+                    for kb in conv_config.get('knowledge_base', [])
+                    if kb.get('knowledge_id')
+                ]
+        
+        logger.info(
+            f"[ElevenLabs] Retrieved agent config: agent_id={agent_id}, "
+            f"current_knowledge_count={len(current_knowledge_ids)}, "
+            f"knowledge_ids={current_knowledge_ids}"
+        )
+        
+        return config
+        
+    except requests.HTTPError as e:
+        error_msg = f"Failed to fetch agent {agent_id}: HTTP {e.response.status_code} - {e.response.text}"
+        logger.error(f"[ElevenLabs] {error_msg}")
+        raise requests.HTTPError(error_msg, response=e.response) from e
+        
+    except requests.RequestException as e:
+        error_msg = f"Failed to fetch agent {agent_id}: {str(e)}"
+        logger.error(f"[ElevenLabs] {error_msg}")
+        raise
+        
+    except Exception as e:
+        error_msg = f"Failed to parse agent config for {agent_id}: {str(e)}"
+        logger.error(f"[ElevenLabs] {error_msg}")
+        raise ValueError(error_msg) from e
+
+
+def update_agent_knowledge(agent_id: str, knowledge_ids: list) -> Dict[str, Any]:
+    """
+    Update the knowledge base of an ElevenLabs agent.
+    
+    This function REPLACES the entire knowledge_base array with the provided IDs.
+    Each knowledge entry uses usage_mode="auto" by default.
+    
+    Args:
+        agent_id: ElevenLabs agent ID
+        knowledge_ids: List of knowledge document IDs to set (replaces existing)
+        
+    Returns:
+        Updated agent configuration
+        
+    Raises:
+        requests.HTTPError: If API call fails
+        ValueError: If response cannot be parsed
+    """
+    logger.info(
+        f"[ElevenLabs] Updating agent knowledge: agent_id={agent_id}, "
+        f"knowledge_count={len(knowledge_ids)}, knowledge_ids={knowledge_ids}"
+    )
+    
+    # Build knowledge_base array with usage_mode="auto"
+    knowledge_base = [
+        {
+            "knowledge_id": kid,
+            "usage_mode": "auto"
+        }
+        for kid in knowledge_ids
+    ]
+    
+    # Prepare PATCH payload (only update conversation_config.knowledge_base)
+    payload = {
+        "conversation_config": {
+            "knowledge_base": knowledge_base
+        }
+    }
+    
+    try:
+        url = f"{ELEVENLABS_BASE_URL}/agents/{agent_id}"
+        headers = _get_headers()
+        headers['Content-Type'] = 'application/json'
+        
+        response = requests.patch(
+            url,
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
+        response.raise_for_status()
+        
+        updated_config = response.json()
+        
+        logger.info(
+            f"[ElevenLabs] Successfully updated agent knowledge: agent_id={agent_id}, "
+            f"new_knowledge_count={len(knowledge_ids)}"
+        )
+        
+        return updated_config
+        
+    except requests.HTTPError as e:
+        error_msg = f"Failed to update agent {agent_id}: HTTP {e.response.status_code} - {e.response.text}"
+        logger.error(f"[ElevenLabs] {error_msg}")
+        raise requests.HTTPError(error_msg, response=e.response) from e
+        
+    except requests.RequestException as e:
+        error_msg = f"Failed to update agent {agent_id}: {str(e)}"
+        logger.error(f"[ElevenLabs] {error_msg}")
+        raise
+        
+    except Exception as e:
+        error_msg = f"Failed to parse update response for agent {agent_id}: {str(e)}"
+        logger.error(f"[ElevenLabs] {error_msg}")
+        raise ValueError(error_msg) from e

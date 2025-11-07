@@ -8,7 +8,8 @@ Currently a placeholder implementation with full task tracking for workflow test
 import os
 from celery.utils.log import get_task_logger
 from tasks.celery_app import app
-from .utils.task_db import mark_task_running, mark_task_failed, mark_task_succeeded, upsert_tenant_integration_param
+from .utils.task_db import mark_task_running, mark_task_succeeded, mark_task_failed, upsert_tenant_integration_param
+from .utils.publish_helpers import publish_knowledge
 
 logger = get_task_logger(__name__)
 
@@ -55,12 +56,25 @@ def publish_elevenlabs_agent(
             upsert_tenant_integration_param(tenant_integration_param=tenant_integration_param)
             logger.info(f"[publish_elevenlabs_agent] Stored tenant integration params for task: {speako_task_id}")
         
-        # TODO: Implement actual ElevenLabs agent publishing logic here
-        # For now, just log the parameters and simulate success
+        # Execute the knowledge publishing workflow
         logger.info(
-            f"[publish_elevenlabs_agent] Processing publish job - "
+            f"[publish_elevenlabs_agent] Starting knowledge publishing workflow - "
             f"tenant_id={tenant_id}, location_id={location_id}, publish_job_id={publish_job_id}"
         )
+        
+        publish_result = publish_knowledge(
+            tenant_id=tenant_id,
+            location_id=location_id,
+            publish_job_id=publish_job_id
+        )
+        
+        # Log the ElevenLabs agent ID prominently for cross-checking
+        elevenlabs_agent_id = publish_result.get('elevenlabs_agent_id')
+        logger.info("=" * 80)
+        logger.info(f"ELEVENLABS AGENT ID: {elevenlabs_agent_id}")
+        logger.info(f"NEW KNOWLEDGE ID: {publish_result.get('new_knowledge_id')}")
+        logger.info(f"TOTAL KNOWLEDGE COUNT: {len(publish_result.get('merged_knowledge_ids', []))}")
+        logger.info("=" * 80)
         
         # Prepare success response
         result = {
@@ -70,6 +84,12 @@ def publish_elevenlabs_agent(
             'location_id': location_id,
             'publish_job_id': publish_job_id,
             'celery_task_id': celery_task_id,
+            'elevenlabs_agent_id': elevenlabs_agent_id,
+            'new_knowledge_id': publish_result.get('new_knowledge_id'),
+            'merged_knowledge_ids': publish_result.get('merged_knowledge_ids'),
+            'knowledge_count': publish_result.get('knowledge_count'),
+            'r2_url': publish_result.get('r2_url'),
+            'deleted_old_knowledge': publish_result.get('deleted_old_knowledge', [])
         }
         
         # Include speako_task_id in response if provided
