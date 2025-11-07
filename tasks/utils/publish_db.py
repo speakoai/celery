@@ -154,16 +154,17 @@ def update_publish_job_status(
             pass
 
 
-def get_elevenlabs_agent_id(tenant_id: str, location_id: str) -> str:
+def get_elevenlabs_agent_id(tenant_id: str, location_id: str) -> tuple[str, str, str]:
     """
-    Get ElevenLabs agent ID from locations table.
+    Get ElevenLabs agent ID, location name, and timezone from locations table.
     
     Args:
         tenant_id: Tenant identifier
         location_id: Location identifier
     
     Returns:
-        ElevenLabs agent ID
+        Tuple of (agent_id, location_name, timezone)
+        Example: ("agent_01jvtvy0x0e978a0xa4dk3cgmm", "Nail Lab Sydney", "Australia/Sydney")
     
     Raises:
         ValueError: If agent ID is not configured or location not found
@@ -174,7 +175,7 @@ def get_elevenlabs_agent_id(tenant_id: str, location_id: str) -> str:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT elevenlabs_agent_id 
+                    SELECT elevenlabs_agent_id, name, timezone
                     FROM locations 
                     WHERE tenant_id = %s AND location_id = %s
                     """,
@@ -187,14 +188,21 @@ def get_elevenlabs_agent_id(tenant_id: str, location_id: str) -> str:
                         f"Location not found: tenant_id={tenant_id}, location_id={location_id}"
                     )
                 
-                agent_id = row[0]
+                agent_id, location_name, timezone = row[0], row[1], row[2]
+                
                 if not agent_id:
                     raise ValueError(
                         f"ElevenLabs agent ID not configured for location: "
                         f"tenant_id={tenant_id}, location_id={location_id}"
                     )
                 
-                return agent_id
+                # Provide fallbacks for missing data
+                if not location_name:
+                    location_name = f"Location {location_id}"
+                if not timezone:
+                    timezone = "UTC"
+                
+                return agent_id, location_name, timezone
     finally:
         try:
             conn.close()
@@ -325,17 +333,26 @@ def save_new_elevenlabs_knowledge_id(
             pass
 
 
-def mark_speako_knowledge_published(tenant_id: str, location_id: str) -> int:
+def mark_speako_knowledge_published(
+    tenant_id: str, 
+    location_id: str,
+    param_ids: List[int]
+) -> int:
     """
-    Mark all configured Speako knowledge entries as 'published'.
+    Mark specific Speako knowledge entries as 'published'.
     
     Args:
         tenant_id: Tenant identifier
         location_id: Location identifier
+        param_ids: List of param_ids to mark as published
     
     Returns:
         Number of rows updated
     """
+    if not param_ids:
+        logger.info("[publish_db] No param_ids provided, skipping mark as published")
+        return 0
+    
     conn = _get_conn()
     try:
         with conn:
@@ -348,11 +365,14 @@ def mark_speako_knowledge_published(tenant_id: str, location_id: str) -> int:
                       AND location_id = %s
                       AND provider = 'speako' 
                       AND service = 'knowledge' 
-                      AND status IN ('configured', 'published')
+                      AND param_id = ANY(%s)
+                      AND status = 'configured'
                     """,
-                    (tenant_id, location_id)
+                    (tenant_id, location_id, param_ids)
                 )
-                return cur.rowcount
+                rows_updated = cur.rowcount
+                logger.info(f"[publish_db] Marked {rows_updated} knowledge entries as published (param_ids: {param_ids})")
+                return rows_updated
     finally:
         try:
             conn.close()

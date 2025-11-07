@@ -6,6 +6,8 @@ database operations, R2 storage, and ElevenLabs API calls.
 """
 
 from typing import Dict, Any
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import requests
 from celery.utils.log import get_task_logger
 
@@ -31,6 +33,33 @@ from .elevenlabs_client import (
 )
 
 logger = get_task_logger(__name__)
+
+
+def format_timestamp_for_location(timezone_str: str) -> str:
+    """
+    Generate human-readable timestamp in location's timezone.
+    
+    Args:
+        timezone_str: IANA timezone string (e.g., "Australia/Sydney")
+    
+    Returns:
+        Formatted timestamp (e.g., "Nov 7, 2025 10:30 AM AEDT")
+    """
+    try:
+        # Get current time in UTC
+        utc_now = datetime.now(ZoneInfo("UTC"))
+        
+        # Convert to location timezone
+        local_time = utc_now.astimezone(ZoneInfo(timezone_str))
+        
+        # Format: "Nov 7, 2025 10:30 AM AEDT"
+        formatted = local_time.strftime("%b %d, %Y %I:%M %p %Z")
+        
+        return formatted
+    except Exception as e:
+        # Fallback to UTC if timezone is invalid
+        logger.warning(f"[PublishKnowledge] Invalid timezone '{timezone_str}', using UTC: {e}")
+        return datetime.utcnow().strftime("%b %d, %Y %I:%M %p UTC")
 
 
 def publish_knowledge(
@@ -74,7 +103,7 @@ def publish_knowledge(
         f"location_id={location_id}, publish_job_id={publish_job_id}"
     )
     
-    # Step 1: Validate publish job and get agent ID
+    # Step 1: Validate publish job and get location data
     publish_job = get_publish_job(tenant_id, publish_job_id)
     if not publish_job:
         raise ValueError(
@@ -90,13 +119,16 @@ def publish_knowledge(
         started_at=datetime.utcnow()
     )
     
-    elevenlabs_agent_id = get_elevenlabs_agent_id(tenant_id, location_id)
+    # Get agent ID, location name, and timezone
+    elevenlabs_agent_id, location_name, location_timezone = get_elevenlabs_agent_id(tenant_id, location_id)
     if not elevenlabs_agent_id:
         raise ValueError(
             f"ElevenLabs agent ID not found: tenant_id={tenant_id}, location_id={location_id}"
         )
     
     logger.info(f"[PublishKnowledge] Found agent ID: {elevenlabs_agent_id}")
+    logger.info(f"[PublishKnowledge] Location: name='{location_name}', timezone='{location_timezone}'")
+
     
     # Step 2: Collect knowledge from Speako
     knowledge_docs = collect_speako_knowledge(tenant_id, location_id)
@@ -130,8 +162,14 @@ def publish_knowledge(
         knowledge_file_url=r2_url
     )
     
-    # Step 4: Upload to ElevenLabs
-    knowledge_name = f"Speako Knowledge - Tenant {tenant_id} Location {location_id}"
+    # Step 4: Upload to ElevenLabs with location name and timestamp
+    # Generate timestamp in location's timezone
+    timestamp = format_timestamp_for_location(location_timezone)
+    
+    # Build knowledge name with location name and timestamp
+    knowledge_name = f"{location_name} - {timestamp}"
+    
+    logger.info(f"[PublishKnowledge] Knowledge name: '{knowledge_name}'")
     
     try:
         new_knowledge_id, new_knowledge_name = upload_knowledge_file(
@@ -237,8 +275,16 @@ def publish_knowledge(
     )
     logger.info(f"[PublishKnowledge] ✓ Saved new knowledge ID to database: {new_knowledge_id}")
     
-    # Step 11: Mark Speako knowledge documents as published
-    mark_speako_knowledge_published(tenant_id=tenant_id, location_id=location_id)
+    # Step 11: Mark ONLY the collected Speako knowledge documents as published
+    # Extract param_ids from the knowledge docs collected in Step 2
+    collected_param_ids = [doc['param_id'] for doc in knowledge_docs]
+    logger.info(f"[PublishKnowledge] Marking {len(collected_param_ids)} knowledge entries as published: {collected_param_ids}")
+    
+    mark_speako_knowledge_published(
+        tenant_id=tenant_id, 
+        location_id=location_id,
+        param_ids=collected_param_ids
+    )
     
     # Step 12: Mark publish job as completed
     from datetime import datetime
