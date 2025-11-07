@@ -114,7 +114,7 @@ def publish_knowledge(
     aggregated_content = aggregate_knowledge_markdown(knowledge_docs)
     
     filename = f"knowledge_{tenant_id}_{location_id}.md"
-    r2_url = upload_knowledge_to_r2(
+    r2_key, r2_url = upload_knowledge_to_r2(
         content=aggregated_content,
         tenant_id=tenant_id,
         location_id=location_id,
