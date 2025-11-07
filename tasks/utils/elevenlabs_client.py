@@ -73,7 +73,7 @@ def upload_knowledge_file(file_url: str, name: str) -> str:
         'file': (
             filename,
             file_content,
-            'text/markdown'
+            'text/plain'
         )
     }
     
