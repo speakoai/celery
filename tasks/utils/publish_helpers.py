@@ -111,7 +111,7 @@ def publish_knowledge(
     
     # Step 3: Aggregate knowledge and upload to R2
     logger.info("[PublishKnowledge] Step 3: Aggregating and uploading to R2")
-    aggregated_content = aggregate_knowledge_markdown(knowledge_docs)
+    aggregated_content, suggested_filename = aggregate_knowledge_markdown(knowledge_docs)
     
     filename = f"knowledge_{tenant_id}_{location_id}.md"
     r2_key, r2_url = upload_knowledge_to_r2(
