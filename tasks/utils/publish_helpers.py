@@ -6,6 +6,7 @@ database operations, R2 storage, and ElevenLabs API calls.
 """
 
 from typing import Dict, Any
+import requests
 from celery.utils.log import get_task_logger
 
 from .publish_db import (
@@ -148,11 +149,7 @@ def publish_knowledge(
         )
         raise RuntimeError(f"Failed to upload knowledge to ElevenLabs: {str(e)}") from e
     
-    # Step 5: Get existing knowledge IDs from database
-    old_knowledge_ids = get_existing_elevenlabs_knowledge_ids(tenant_id, location_id)
-    
-    # Step 6: Build knowledge items array with proper structure
-    # New knowledge item
+    # Step 5: Build knowledge item with proper structure (ONLY new knowledge)
     new_knowledge_item = {
         "id": new_knowledge_id,
         "name": new_knowledge_name,
@@ -160,32 +157,36 @@ def publish_knowledge(
         "usage_mode": "auto"
     }
     
-    # Old knowledge items (we only have IDs, so create minimal items)
-    old_knowledge_items = [
-        {
-            "id": kid,
-            "name": f"Legacy Knowledge {i+1}",  # Placeholder name
-            "type": "file",
-            "usage_mode": "auto"
-        }
-        for i, kid in enumerate(old_knowledge_ids)
-    ]
-    
-    # Merge: new + existing
-    merged_knowledge_items = [new_knowledge_item] + old_knowledge_items
-    merged_knowledge_ids = [new_knowledge_id] + old_knowledge_ids
-    
     logger.info(
-        f"[PublishKnowledge] Merging knowledge: new={new_knowledge_id}, "
-        f"old_count={len(old_knowledge_ids)}, total={len(merged_knowledge_ids)}"
+        f"[PublishKnowledge] Updating agent with new knowledge only: {new_knowledge_id}"
     )
     
-    # Step 7: Update agent configuration
+    # Step 6: Update agent configuration (ONLY new knowledge, no merging with old)
     try:
         updated_config = update_agent_knowledge(
             agent_id=elevenlabs_agent_id,
-            knowledge_items=merged_knowledge_items
+            knowledge_items=[new_knowledge_item]
         )
+    except requests.HTTPError as e:
+        # Check if it's a knowledge not found error
+        if e.response.status_code == 404 and "knowledge_base_documentation_not_found" in e.response.text:
+            logger.warning(
+                f"[PublishKnowledge] ⚠️ Knowledge not found error during agent update: {e.response.text}"
+            )
+            logger.warning(
+                f"[PublishKnowledge] This may indicate the knowledge ID {new_knowledge_id} is invalid or was deleted"
+            )
+        
+        # Re-raise to fail the workflow (this shouldn't happen with newly created knowledge)
+        from datetime import datetime
+        update_publish_job_status(
+            tenant_id=tenant_id,
+            publish_job_id=publish_job_id,
+            status='failed',
+            finished_at=datetime.utcnow(),
+            error_message=str(e)
+        )
+        raise RuntimeError(f"Failed to update agent configuration: {str(e)}") from e
     except Exception as e:
         from datetime import datetime
         update_publish_job_status(
@@ -197,39 +198,41 @@ def publish_knowledge(
         )
         raise RuntimeError(f"Failed to update agent configuration: {str(e)}") from e
     
-    # Step 8: Save new knowledge ID to database
+    # Step 7: Save new knowledge ID to database
     save_new_elevenlabs_knowledge_id(
         tenant_id=tenant_id,
         location_id=location_id,
         knowledge_id=new_knowledge_id
     )
     
-    # Step 9: Mark knowledge documents as published
+    # Step 8: Mark knowledge documents as published
     mark_speako_knowledge_published(tenant_id=tenant_id, location_id=location_id)
     
-    # Step 10: Clean up old knowledge (best effort - don't fail if this errors)
+    # Step 9: Clean up old knowledge from database (best effort)
+    old_knowledge_ids = get_existing_elevenlabs_knowledge_ids(tenant_id, location_id)
     deleted_old_knowledge = []
+    
     if old_knowledge_ids:
-        logger.info(f"[PublishKnowledge] Deleting {len(old_knowledge_ids)} old knowledge documents")
+        logger.info(f"[PublishKnowledge] Attempting to delete {len(old_knowledge_ids)} old knowledge documents")
         for old_id in old_knowledge_ids:
             try:
                 if delete_knowledge(old_id):
                     deleted_old_knowledge.append(old_id)
+                    logger.info(f"[PublishKnowledge] ✓ Deleted old knowledge: {old_id}")
                 else:
-                    logger.warning(f"[PublishKnowledge] Failed to delete: {old_id}")
+                    logger.warning(f"[PublishKnowledge] ⚠️ Could not delete old knowledge: {old_id}")
             except Exception as e:
                 logger.warning(
                     f"[PublishKnowledge] Error deleting old knowledge {old_id}: {str(e)}"
                 )
     
-    # Step 11: Mark publish job as completed
+    # Step 10: Mark publish job as completed
     from datetime import datetime
     
     # Prepare response JSON for database
     response_data = {
         'elevenlabs_agent_id': elevenlabs_agent_id,
         'new_knowledge_id': new_knowledge_id,
-        'merged_knowledge_ids': merged_knowledge_ids,
         'deleted_old_knowledge': deleted_old_knowledge,
         'knowledge_count': len(knowledge_docs)
     }
@@ -248,7 +251,6 @@ def publish_knowledge(
         'elevenlabs_agent_id': elevenlabs_agent_id,
         'new_knowledge_id': new_knowledge_id,
         'old_knowledge_ids': old_knowledge_ids,
-        'merged_knowledge_ids': merged_knowledge_ids,
         'deleted_old_knowledge': deleted_old_knowledge,
         'r2_url': r2_url,
         'knowledge_count': len(knowledge_docs)
@@ -256,8 +258,7 @@ def publish_knowledge(
     
     logger.info(
         f"[PublishKnowledge] ✅ Workflow completed: "
-        f"agent_id={elevenlabs_agent_id}, new_knowledge_id={new_knowledge_id}, "
-        f"total_knowledge={len(merged_knowledge_ids)}"
+        f"agent_id={elevenlabs_agent_id}, new_knowledge_id={new_knowledge_id}"
     )
     
     return result

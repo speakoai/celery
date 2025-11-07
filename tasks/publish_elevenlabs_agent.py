@@ -73,7 +73,7 @@ def publish_elevenlabs_agent(
         logger.info("=" * 80)
         logger.info(f"ELEVENLABS AGENT ID: {elevenlabs_agent_id}")
         logger.info(f"NEW KNOWLEDGE ID: {publish_result.get('new_knowledge_id')}")
-        logger.info(f"TOTAL KNOWLEDGE COUNT: {len(publish_result.get('merged_knowledge_ids', []))}")
+        logger.info(f"KNOWLEDGE COUNT: {publish_result.get('knowledge_count')}")
         logger.info("=" * 80)
         
         # Prepare success response
@@ -86,7 +86,6 @@ def publish_elevenlabs_agent(
             'celery_task_id': celery_task_id,
             'elevenlabs_agent_id': elevenlabs_agent_id,
             'new_knowledge_id': publish_result.get('new_knowledge_id'),
-            'merged_knowledge_ids': publish_result.get('merged_knowledge_ids'),
             'knowledge_count': publish_result.get('knowledge_count'),
             'r2_url': publish_result.get('r2_url'),
             'deleted_old_knowledge': publish_result.get('deleted_old_knowledge', [])
