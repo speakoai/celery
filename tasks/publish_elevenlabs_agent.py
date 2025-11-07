@@ -47,12 +47,12 @@ def publish_elevenlabs_agent(
     try:
         # Mark task as running in database
         if speako_task_id:
-            mark_task_running(speako_task_id, celery_task_id)
+            mark_task_running(task_id=speako_task_id, celery_task_id=celery_task_id)
             logger.info(f"[publish_elevenlabs_agent] Marked task as running: {speako_task_id}")
         
         # Store tenant integration parameters if provided
         if tenant_integration_param and speako_task_id:
-            upsert_tenant_integration_param(speako_task_id, tenant_integration_param)
+            upsert_tenant_integration_param(tenant_integration_param=tenant_integration_param)
             logger.info(f"[publish_elevenlabs_agent] Stored tenant integration params for task: {speako_task_id}")
         
         # TODO: Implement actual ElevenLabs agent publishing logic here
@@ -79,8 +79,9 @@ def publish_elevenlabs_agent(
         # Mark task as succeeded in database
         if speako_task_id:
             mark_task_succeeded(
-                speako_task_id=speako_task_id,
-                result_data=result
+                task_id=speako_task_id,
+                celery_task_id=celery_task_id,
+                details=result
             )
             logger.info(f"[publish_elevenlabs_agent] Marked task as succeeded: {speako_task_id}")
         
@@ -102,7 +103,8 @@ def publish_elevenlabs_agent(
         # Mark task as failed in database
         if speako_task_id:
             mark_task_failed(
-                speako_task_id=speako_task_id,
+                task_id=speako_task_id,
+                celery_task_id=celery_task_id,
                 error_message=error_msg
             )
             logger.info(f"[publish_elevenlabs_agent] Marked task as failed: {speako_task_id}")
