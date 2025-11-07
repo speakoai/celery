@@ -358,3 +358,45 @@ def mark_speako_knowledge_published(tenant_id: str, location_id: str) -> int:
             conn.close()
         except Exception:
             pass
+
+
+def delete_old_elevenlabs_knowledge_ids(
+    tenant_id: str,
+    location_id: str,
+    knowledge_ids: List[str]
+) -> int:
+    """
+    Delete old ElevenLabs knowledge IDs from tenant_integration_params.
+    
+    Args:
+        tenant_id: Tenant identifier
+        location_id: Location identifier
+        knowledge_ids: List of ElevenLabs knowledge IDs to delete
+    
+    Returns:
+        Number of rows deleted
+    """
+    if not knowledge_ids:
+        return 0
+    
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    DELETE FROM tenant_integration_params 
+                    WHERE tenant_id = %s 
+                      AND location_id = %s
+                      AND provider = 'elevenlabs' 
+                      AND service = 'knowledge'
+                      AND value_text = ANY(%s)
+                    """,
+                    (tenant_id, location_id, knowledge_ids)
+                )
+                return cur.rowcount
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass

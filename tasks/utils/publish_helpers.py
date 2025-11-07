@@ -16,7 +16,8 @@ from .publish_db import (
     collect_speako_knowledge,
     get_existing_elevenlabs_knowledge_ids,
     save_new_elevenlabs_knowledge_id,
-    mark_speako_knowledge_published
+    mark_speako_knowledge_published,
+    delete_old_elevenlabs_knowledge_ids
 )
 from .publish_r2 import (
     aggregate_knowledge_markdown,
@@ -198,35 +199,48 @@ def publish_knowledge(
         )
         raise RuntimeError(f"Failed to update agent configuration: {str(e)}") from e
     
-    # Step 7: Save new knowledge ID to database
+    # Step 7: Fetch ALL old knowledge IDs BEFORE saving new one
+    old_knowledge_ids = get_existing_elevenlabs_knowledge_ids(tenant_id, location_id)
+    logger.info(f"[PublishKnowledge] Found {len(old_knowledge_ids)} old knowledge IDs to delete: {old_knowledge_ids}")
+    
+    # Step 8: Delete old knowledge from ElevenLabs API
+    deleted_old_knowledge = []
+    if old_knowledge_ids:
+        logger.info(f"[PublishKnowledge] Attempting to delete {len(old_knowledge_ids)} old knowledge documents from ElevenLabs")
+        for old_id in old_knowledge_ids:
+            try:
+                if delete_knowledge(old_id):
+                    deleted_old_knowledge.append(old_id)
+                    logger.info(f"[PublishKnowledge] ✓ Deleted old knowledge from ElevenLabs: {old_id}")
+                else:
+                    logger.warning(f"[PublishKnowledge] ⚠️ Could not delete old knowledge from ElevenLabs: {old_id}")
+            except Exception as e:
+                logger.warning(f"[PublishKnowledge] Error deleting old knowledge {old_id} from ElevenLabs: {str(e)}")
+    
+    # Step 9: Delete old knowledge IDs from database
+    if deleted_old_knowledge:
+        try:
+            deleted_count = delete_old_elevenlabs_knowledge_ids(
+                tenant_id=tenant_id,
+                location_id=location_id,
+                knowledge_ids=deleted_old_knowledge
+            )
+            logger.info(f"[PublishKnowledge] ✓ Deleted {deleted_count} old knowledge IDs from database")
+        except Exception as e:
+            logger.warning(f"[PublishKnowledge] ⚠️ Error deleting old knowledge IDs from database: {str(e)}")
+    
+    # Step 10: Save NEW knowledge ID to database (AFTER deletion)
     save_new_elevenlabs_knowledge_id(
         tenant_id=tenant_id,
         location_id=location_id,
         knowledge_id=new_knowledge_id
     )
+    logger.info(f"[PublishKnowledge] ✓ Saved new knowledge ID to database: {new_knowledge_id}")
     
-    # Step 8: Mark knowledge documents as published
+    # Step 11: Mark Speako knowledge documents as published
     mark_speako_knowledge_published(tenant_id=tenant_id, location_id=location_id)
     
-    # Step 9: Clean up old knowledge from database (best effort)
-    old_knowledge_ids = get_existing_elevenlabs_knowledge_ids(tenant_id, location_id)
-    deleted_old_knowledge = []
-    
-    if old_knowledge_ids:
-        logger.info(f"[PublishKnowledge] Attempting to delete {len(old_knowledge_ids)} old knowledge documents")
-        for old_id in old_knowledge_ids:
-            try:
-                if delete_knowledge(old_id):
-                    deleted_old_knowledge.append(old_id)
-                    logger.info(f"[PublishKnowledge] ✓ Deleted old knowledge: {old_id}")
-                else:
-                    logger.warning(f"[PublishKnowledge] ⚠️ Could not delete old knowledge: {old_id}")
-            except Exception as e:
-                logger.warning(
-                    f"[PublishKnowledge] Error deleting old knowledge {old_id}: {str(e)}"
-                )
-    
-    # Step 10: Mark publish job as completed
+    # Step 12: Mark publish job as completed
     from datetime import datetime
     
     # Prepare response JSON for database
