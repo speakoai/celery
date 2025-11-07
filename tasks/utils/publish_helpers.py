@@ -238,7 +238,7 @@ def publish_knowledge(
     update_publish_job_status(
         tenant_id=tenant_id,
         publish_job_id=publish_job_id,
-        status='completed',
+        status='succeeded',
         finished_at=datetime.utcnow(),
         http_status_code=200,
         response_json=response_data
