@@ -200,8 +200,7 @@ def publish_knowledge(
     
     # Step 9: Mark knowledge documents as published
     logger.info("[PublishKnowledge] Step 9: Marking knowledge as published")
-    knowledge_ids = [doc['param_id'] for doc in knowledge_docs]
-    mark_speako_knowledge_published(knowledge_ids)
+    mark_speako_knowledge_published(tenant_id=tenant_id, location_id=location_id)
     
     # Step 10: Clean up old knowledge (best effort - don't fail if this errors)
     deleted_old_knowledge = []
