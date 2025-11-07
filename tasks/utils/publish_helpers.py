@@ -132,11 +132,11 @@ def publish_knowledge(
     knowledge_name = f"Speako Knowledge - Tenant {tenant_id} Location {location_id}"
     
     try:
-        new_knowledge_id = upload_knowledge_file(
+        new_knowledge_id, new_knowledge_name = upload_knowledge_file(
             file_url=r2_url,
             name=knowledge_name
         )
-        logger.info(f"[PublishKnowledge] ✅ Created ElevenLabs knowledge: {new_knowledge_id}")
+        logger.info(f"[PublishKnowledge] ✅ Created ElevenLabs knowledge: id={new_knowledge_id}, name={new_knowledge_name}")
     except Exception as e:
         from datetime import datetime
         update_publish_job_status(
@@ -151,7 +151,28 @@ def publish_knowledge(
     # Step 5: Get existing knowledge IDs from database
     old_knowledge_ids = get_existing_elevenlabs_knowledge_ids(tenant_id, location_id)
     
-    # Step 6: Merge knowledge IDs (new + existing)
+    # Step 6: Build knowledge items array with proper structure
+    # New knowledge item
+    new_knowledge_item = {
+        "id": new_knowledge_id,
+        "name": new_knowledge_name,
+        "type": "file",
+        "usage_mode": "auto"
+    }
+    
+    # Old knowledge items (we only have IDs, so create minimal items)
+    old_knowledge_items = [
+        {
+            "id": kid,
+            "name": f"Legacy Knowledge {i+1}",  # Placeholder name
+            "type": "file",
+            "usage_mode": "auto"
+        }
+        for i, kid in enumerate(old_knowledge_ids)
+    ]
+    
+    # Merge: new + existing
+    merged_knowledge_items = [new_knowledge_item] + old_knowledge_items
     merged_knowledge_ids = [new_knowledge_id] + old_knowledge_ids
     
     logger.info(
@@ -163,7 +184,7 @@ def publish_knowledge(
     try:
         updated_config = update_agent_knowledge(
             agent_id=elevenlabs_agent_id,
-            knowledge_ids=merged_knowledge_ids
+            knowledge_items=merged_knowledge_items
         )
     except Exception as e:
         from datetime import datetime

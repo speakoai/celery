@@ -30,7 +30,7 @@ def _get_headers() -> Dict[str, str]:
     }
 
 
-def upload_knowledge_file(file_url: str, name: str) -> str:
+def upload_knowledge_file(file_url: str, name: str) -> tuple[str, str]:
     """
     Upload knowledge file to ElevenLabs from a public URL.
     
@@ -42,7 +42,7 @@ def upload_knowledge_file(file_url: str, name: str) -> str:
         name: Human-readable name for the knowledge document
         
     Returns:
-        knowledge_id: ElevenLabs knowledge document ID (e.g., "kb_abc123")
+        Tuple of (knowledge_id, knowledge_name) from ElevenLabs response
         
     Raises:
         requests.HTTPError: If API call fails
@@ -104,7 +104,7 @@ def upload_knowledge_file(file_url: str, name: str) -> str:
         logger.error(f"[ElevenLabs] ❌ REQUEST FAILED: {error_msg}")
         raise
     
-    # Step 4: Extract knowledge_id from response
+    # Step 4: Extract knowledge_id and name from response
     try:
         result = response.json()
     except Exception as e:
@@ -113,14 +113,16 @@ def upload_knowledge_file(file_url: str, name: str) -> str:
         raise ValueError(error_msg) from e
     
     knowledge_id = result.get('id')
+    knowledge_name = result.get('name')
+    
     if not knowledge_id:
         error_msg = f"No 'id' in ElevenLabs response: {result}"
         logger.error(f"[ElevenLabs] {error_msg}")
         raise ValueError(error_msg)
     
-    logger.info(f"[ElevenLabs] ✅ Created knowledge: {knowledge_id}")
+    logger.info(f"[ElevenLabs] ✅ Created knowledge: id={knowledge_id}, name={knowledge_name}")
     
-    return knowledge_id
+    return knowledge_id, knowledge_name
 
 
 def delete_knowledge(knowledge_id: str) -> bool:
@@ -234,16 +236,17 @@ def get_agent_config(agent_id: str) -> Dict[str, Any]:
         raise ValueError(error_msg) from e
 
 
-def update_agent_knowledge(agent_id: str, knowledge_ids: list) -> Dict[str, Any]:
+def update_agent_knowledge(agent_id: str, knowledge_items: list) -> Dict[str, Any]:
     """
     Update the knowledge base of an ElevenLabs agent.
     
-    This function REPLACES the entire knowledge_base array with the provided IDs.
-    Each knowledge entry uses usage_mode="auto" by default.
+    This function REPLACES the entire knowledge_base array with the provided items.
+    Each knowledge entry must include id, name, type, and usage_mode.
     
     Args:
         agent_id: ElevenLabs agent ID
-        knowledge_ids: List of knowledge document IDs to set (replaces existing)
+        knowledge_items: List of dicts with keys: 'id', 'name', 'type', 'usage_mode'
+                        Example: [{"id": "kb_123", "name": "FAQ", "type": "file", "usage_mode": "auto"}]
         
     Returns:
         Updated agent configuration
@@ -255,26 +258,32 @@ def update_agent_knowledge(agent_id: str, knowledge_ids: list) -> Dict[str, Any]
     logger.info("=" * 80)
     logger.info(f"[ElevenLabs] UPDATING AGENT KNOWLEDGE:")
     logger.info(f"[ElevenLabs]   Agent ID: {agent_id}")
-    logger.info(f"[ElevenLabs]   New Knowledge Count: {len(knowledge_ids)}")
-    logger.info(f"[ElevenLabs]   New Knowledge IDs: {knowledge_ids}")
+    logger.info(f"[ElevenLabs]   New Knowledge Count: {len(knowledge_items)}")
+    logger.info(f"[ElevenLabs]   New Knowledge Items: {knowledge_items}")
     logger.info("=" * 80)
     logger.info(f"[ElevenLabs] 📤 STARTING API CALL: PATCH {ELEVENLABS_BASE_URL}/agents/{agent_id}")
     
-    # Build knowledge_base array with usage_mode="auto"
+    # Build knowledge_base array with proper structure
     knowledge_base = [
         {
-            "knowledge_id": kid,
-            "usage_mode": "auto"
+            "type": item.get("type", "file"),  # Default to "file" if not specified
+            "name": item["name"],
+            "id": item["id"],
+            "usage_mode": item.get("usage_mode", "auto")  # Default to "auto"
         }
-        for kid in knowledge_ids
+        for item in knowledge_items
     ]
     
     logger.info(f"[ElevenLabs] Built knowledge_base payload: {knowledge_base}")
     
-    # Prepare PATCH payload (only update conversation_config.knowledge_base)
+    # Prepare PATCH payload with correct nesting: conversation_config.agent.prompt.knowledge_base
     payload = {
         "conversation_config": {
-            "knowledge_base": knowledge_base
+            "agent": {
+                "prompt": {
+                    "knowledge_base": knowledge_base
+                }
+            }
         }
     }
     
@@ -316,24 +325,36 @@ def update_agent_knowledge(agent_id: str, knowledge_ids: list) -> Dict[str, Any]
         
         updated_config = response.json()
         
-        # Log updated knowledge base
+        # Extract knowledge base from correct location: conversation_config.agent.prompt.knowledge_base
         updated_knowledge_ids = []
         if 'conversation_config' in updated_config:
             conv_config = updated_config['conversation_config']
-            if 'knowledge_base' in conv_config:
-                updated_knowledge_ids = [
-                    kb.get('knowledge_id') 
-                    for kb in conv_config.get('knowledge_base', [])
-                    if kb.get('knowledge_id')
-                ]
+            if 'agent' in conv_config:
+                agent_config = conv_config['agent']
+                if 'prompt' in agent_config:
+                    prompt_config = agent_config['prompt']
+                    if 'knowledge_base' in prompt_config:
+                        knowledge_base = prompt_config['knowledge_base']
+                        # Extract 'id' field (not 'knowledge_id')
+                        updated_knowledge_ids = [
+                            kb.get('id') 
+                            for kb in knowledge_base
+                            if kb.get('id')
+                        ]
         
         logger.info("=" * 80)
         logger.info(f"[ElevenLabs] AGENT UPDATE SUCCESSFUL!")
         logger.info(f"[ElevenLabs]   Agent ID: {agent_id}")
         logger.info(f"[ElevenLabs]   Updated Knowledge Count: {len(updated_knowledge_ids)}")
         logger.info(f"[ElevenLabs]   Updated Knowledge IDs: {updated_knowledge_ids}")
-        if 'conversation_config' in updated_config and 'knowledge_base' in updated_config['conversation_config']:
-            logger.info(f"[ElevenLabs]   Full Updated Knowledge Base: {updated_config['conversation_config']['knowledge_base']}")
+        
+        # Log full knowledge_base for debugging
+        try:
+            kb_full = updated_config['conversation_config']['agent']['prompt']['knowledge_base']
+            logger.info(f"[ElevenLabs]   Full Updated Knowledge Base: {kb_full}")
+        except KeyError:
+            logger.warning(f"[ElevenLabs]   Could not extract full knowledge_base from response")
+        
         logger.info("=" * 80)
         logger.info(f"[ElevenLabs] ✅ API CALL SUCCESSFUL: Updated agent configuration")
         
