@@ -15,6 +15,7 @@ from tasks.celery_app import app as celery_app
 from tasks.analyze_knowledge import analyze_knowledge_file
 from tasks.scrape_url import scrape_url_to_markdown
 from tasks.sync_speako_data import sync_speako_data
+from tasks.publish_elevenlabs_agent import publish_elevenlabs_agent
 # Additional imports for R2 uploads
 import boto3
 from werkzeug.utils import secure_filename
@@ -1466,4 +1467,74 @@ def api_sync_with_speako():
 
     except Exception as e:
         return jsonify({'error': 'Internal server error', 'message': str(e)}), 500
+
+
+@app.route('/api/agent/publish/update', methods=['POST'])
+@require_api_key
+def api_publish_elevenlabs_agent():
+    """
+    [aiagent] Publish ElevenLabs AI agent.
+
+    Expected JSON payload:
+    {
+      "tenant_id": "1",                                    // required
+      "location_id": "123",                                // required
+      "publish_job_id": "42",                              // required
+      "speako_task_id": "550e8400-e29b-41d4-a716-446655440000",  // optional correlation ID
+      "tenantIntegrationParam": {...}                      // optional integration metadata
+    }
+
+    Returns 202 with celery_task_id for polling at /api/task/<task_id>.
+    """
+    try:
+        # Be tolerant of clients missing Content-Type or sending invalid JSON
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({
+                'error': 'JSON payload required',
+                'message': 'Send a valid JSON body with Content-Type: application/json',
+                'content_type': request.headers.get('Content-Type', None)
+            }), 400
+
+        tenant_id = data.get('tenant_id')
+        location_id = data.get('location_id')
+        publish_job_id = data.get('publish_job_id')
+        speako_task_id = data.get('speako_task_id')
+        tenant_integration_param = data.get('tenantIntegrationParam')
+
+        # Validate required fields
+        missing = [k for k in ['tenant_id', 'location_id', 'publish_job_id'] if not data.get(k)]
+        if missing:
+            return jsonify({'error': 'Missing required fields', 'missing_fields': missing}), 400
+
+        # Enqueue publish task
+        task = publish_elevenlabs_agent.delay(
+            tenant_id=tenant_id,
+            location_id=location_id,
+            publish_job_id=publish_job_id,
+            speako_task_id=speako_task_id,
+            tenant_integration_param=tenant_integration_param,
+        )
+
+        # Return response similar to other knowledge endpoints
+        return jsonify({
+            'success': True,
+            'message': 'ElevenLabs agent publish task started',
+            'data': {
+                'analysis': {
+                    'status': 'queued',
+                    'mode': 'background',
+                    'celery_task_id': task.id
+                },
+                'tenant_id': tenant_id,
+                'location_id': location_id,
+                'publish_job_id': publish_job_id,
+                'source': 'publish_elevenlabs_agent',
+                **({'speako_task_id': speako_task_id} if speako_task_id else {})
+            }
+        }), 202
+
+    except Exception as e:
+        return jsonify({'error': 'Internal server error', 'message': str(e)}), 500
+
 
