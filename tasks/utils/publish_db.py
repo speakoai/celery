@@ -10,6 +10,9 @@ import psycopg2
 from psycopg2.extras import RealDictCursor, Json
 from typing import Optional, Dict, Any, List
 from datetime import datetime
+from celery.utils.log import get_task_logger
+
+logger = get_task_logger(__name__)
 
 
 def _get_conn():
@@ -31,6 +34,7 @@ def get_publish_job(tenant_id: str, publish_job_id: str) -> Optional[Dict[str, A
     Returns:
         Dict with publish job details if found, None otherwise
     """
+    logger.info(f"[publish_db] Fetching publish job: tenant_id={tenant_id}, publish_job_id={publish_job_id}")
     conn = _get_conn()
     try:
         with conn:
@@ -62,7 +66,17 @@ def get_publish_job(tenant_id: str, publish_job_id: str) -> Optional[Dict[str, A
                     (tenant_id, publish_job_id)
                 )
                 row = cur.fetchone()
-                return dict(row) if row else None
+                if row:
+                    result = dict(row)
+                    logger.info(
+                        f"[publish_db] Found publish job: job_type={result.get('job_type')}, "
+                        f"status={result.get('publish_status')}, "
+                        f"knowledge_file_url={result.get('knowledge_file_url')}"
+                    )
+                    return result
+                else:
+                    logger.warning(f"[publish_db] Publish job not found: tenant_id={tenant_id}, publish_job_id={publish_job_id}")
+                    return None
     finally:
         try:
             conn.close()
@@ -95,6 +109,10 @@ def update_publish_job_status(
         response_json: Optional response data from external API
         error_message: Optional error message
     """
+    logger.info(
+        f"[publish_db] Updating publish job: tenant_id={tenant_id}, publish_job_id={publish_job_id}, "
+        f"status={status}, knowledge_file_url={knowledge_file_url}"
+    )
     conn = _get_conn()
     try:
         with conn:
@@ -124,6 +142,10 @@ def update_publish_job_status(
                         tenant_id,
                         publish_job_id
                     )
+                )
+                rows_updated = cur.rowcount
+                logger.info(
+                    f"[publish_db] Updated {rows_updated} row(s) in publish_jobs table"
                 )
     finally:
         try:
@@ -192,6 +214,7 @@ def collect_speako_knowledge(tenant_id: str, location_id: str) -> List[Dict[str,
         List of dicts with keys: param_id, value_text, param_code, created_at
         Ordered by created_at ascending (oldest first)
     """
+    logger.info(f"[publish_db] Collecting Speako knowledge: tenant_id={tenant_id}, location_id={location_id}")
     conn = _get_conn()
     try:
         with conn:
@@ -215,7 +238,9 @@ def collect_speako_knowledge(tenant_id: str, location_id: str) -> List[Dict[str,
                     (tenant_id, location_id)
                 )
                 rows = cur.fetchall()
-                return [dict(row) for row in rows]
+                result = [dict(row) for row in rows]
+                logger.info(f"[publish_db] Found {len(result)} Speako knowledge entries")
+                return result
     finally:
         try:
             conn.close()

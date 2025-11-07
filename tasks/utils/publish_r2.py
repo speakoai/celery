@@ -8,6 +8,9 @@ import os
 import boto3
 from datetime import datetime
 from typing import List, Dict, Any, Tuple
+from celery.utils.log import get_task_logger
+
+logger = get_task_logger(__name__)
 
 
 # R2 Configuration from environment variables
@@ -53,6 +56,8 @@ def aggregate_knowledge_markdown(knowledge_entries: List[Dict[str, Any]]) -> Tup
     if not knowledge_entries:
         raise ValueError("Cannot aggregate empty knowledge entries list")
     
+    logger.info(f"[publish_r2] Aggregating {len(knowledge_entries)} knowledge entries")
+    
     # Extract value_text from each entry and join with markdown separator
     text_entries = [entry['value_text'] for entry in knowledge_entries]
     combined_text = '\n\n---\n\n'.join(text_entries)
@@ -64,6 +69,11 @@ def aggregate_knowledge_markdown(knowledge_entries: List[Dict[str, Any]]) -> Tup
     # If param_code contains location info, we could use it, but we'll keep it simple
     # The location_id will be passed separately in the upload function
     filename = f"knowledge_combined_{timestamp}.md"
+    
+    logger.info(
+        f"[publish_r2] Aggregated knowledge: filename={filename}, "
+        f"total_length={len(combined_text)} chars"
+    )
     
     return (combined_text, filename)
 
@@ -90,6 +100,11 @@ def upload_knowledge_to_r2(
     
     Upload path structure: {tenant_id}/{location_id}/knowledges/publish/{filename}
     """
+    logger.info(
+        f"[publish_r2] Uploading to R2: tenant_id={tenant_id}, location_id={location_id}, "
+        f"filename={filename}, content_size={len(content)} bytes"
+    )
+    
     r2_client = _get_r2_client()
     
     # Construct R2 key (path in bucket)
@@ -115,5 +130,9 @@ def upload_knowledge_to_r2(
     
     # Construct public URL
     public_url = f"{R2_PUBLIC_BASE_URL}/{r2_key}"
+    
+    logger.info(
+        f"[publish_r2] Successfully uploaded to R2: key={r2_key}, url={public_url}"
+    )
     
     return (r2_key, public_url)
