@@ -231,7 +231,7 @@ def collect_speako_knowledge(tenant_id: str, location_id: str) -> List[Dict[str,
                       AND location_id = %s
                       AND provider = 'speako' 
                       AND service = 'knowledge' 
-                      AND status = 'configured'
+                      AND status IN ('configured', 'published')
                       AND value_text IS NOT NULL
                     ORDER BY created_at ASC
                     """,
@@ -348,7 +348,7 @@ def mark_speako_knowledge_published(tenant_id: str, location_id: str) -> int:
                       AND location_id = %s
                       AND provider = 'speako' 
                       AND service = 'knowledge' 
-                      AND status = 'configured'
+                      AND status IN ('configured', 'published')
                     """,
                     (tenant_id, location_id)
                 )

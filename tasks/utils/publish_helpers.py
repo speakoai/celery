@@ -73,7 +73,6 @@ def publish_knowledge(
     )
     
     # Step 1: Validate publish job and get agent ID
-    logger.info("[PublishKnowledge] Step 1: Validating publish job")
     publish_job = get_publish_job(tenant_id, publish_job_id)
     if not publish_job:
         raise ValueError(
@@ -98,7 +97,6 @@ def publish_knowledge(
     logger.info(f"[PublishKnowledge] Found agent ID: {elevenlabs_agent_id}")
     
     # Step 2: Collect knowledge from Speako
-    logger.info("[PublishKnowledge] Step 2: Collecting Speako knowledge")
     knowledge_docs = collect_speako_knowledge(tenant_id, location_id)
     
     if not knowledge_docs:
@@ -110,7 +108,6 @@ def publish_knowledge(
     logger.info(f"[PublishKnowledge] Collected {len(knowledge_docs)} knowledge documents")
     
     # Step 3: Aggregate knowledge and upload to R2
-    logger.info("[PublishKnowledge] Step 3: Aggregating and uploading to R2")
     aggregated_content, suggested_filename = aggregate_knowledge_markdown(knowledge_docs)
     
     filename = f"knowledge_{tenant_id}_{location_id}.md"
@@ -130,10 +127,8 @@ def publish_knowledge(
         status='in_progress',
         knowledge_file_url=r2_url
     )
-    logger.info(f"[PublishKnowledge] Updated publish_jobs table with knowledge_file_url")
     
     # Step 4: Upload to ElevenLabs
-    logger.info("[PublishKnowledge] Step 4: Uploading to ElevenLabs")
     knowledge_name = f"Speako Knowledge - Tenant {tenant_id} Location {location_id}"
     
     try:
@@ -141,9 +136,8 @@ def publish_knowledge(
             file_url=r2_url,
             name=knowledge_name
         )
-        logger.info(f"[PublishKnowledge] Created ElevenLabs knowledge: {new_knowledge_id}")
+        logger.info(f"[PublishKnowledge] ✅ Created ElevenLabs knowledge: {new_knowledge_id}")
     except Exception as e:
-        logger.error(f"[PublishKnowledge] Failed to upload to ElevenLabs: {str(e)}")
         from datetime import datetime
         update_publish_job_status(
             tenant_id=tenant_id,
@@ -155,31 +149,23 @@ def publish_knowledge(
         raise RuntimeError(f"Failed to upload knowledge to ElevenLabs: {str(e)}") from e
     
     # Step 5: Get existing knowledge IDs from database
-    logger.info("[PublishKnowledge] Step 5: Fetching existing knowledge IDs")
     old_knowledge_ids = get_existing_elevenlabs_knowledge_ids(tenant_id, location_id)
-    logger.info(f"[PublishKnowledge] Found {len(old_knowledge_ids)} existing knowledge IDs")
     
     # Step 6: Merge knowledge IDs (new + existing)
-    logger.info("[PublishKnowledge] Step 6: Merging knowledge base")
     merged_knowledge_ids = [new_knowledge_id] + old_knowledge_ids
     
     logger.info(
-        f"[PublishKnowledge] Merged knowledge: new={new_knowledge_id}, "
-        f"old={old_knowledge_ids}, total={len(merged_knowledge_ids)}"
+        f"[PublishKnowledge] Merging knowledge: new={new_knowledge_id}, "
+        f"old_count={len(old_knowledge_ids)}, total={len(merged_knowledge_ids)}"
     )
     
     # Step 7: Update agent configuration
-    logger.info("[PublishKnowledge] Step 7: Updating agent configuration")
     try:
         updated_config = update_agent_knowledge(
             agent_id=elevenlabs_agent_id,
             knowledge_ids=merged_knowledge_ids
         )
-        logger.info(
-            f"[PublishKnowledge] Agent updated successfully: agent_id={elevenlabs_agent_id}"
-        )
     except Exception as e:
-        logger.error(f"[PublishKnowledge] Failed to update agent: {str(e)}")
         from datetime import datetime
         update_publish_job_status(
             tenant_id=tenant_id,
@@ -191,7 +177,6 @@ def publish_knowledge(
         raise RuntimeError(f"Failed to update agent configuration: {str(e)}") from e
     
     # Step 8: Save new knowledge ID to database
-    logger.info("[PublishKnowledge] Step 8: Saving knowledge ID to database")
     save_new_elevenlabs_knowledge_id(
         tenant_id=tenant_id,
         location_id=location_id,
@@ -199,31 +184,24 @@ def publish_knowledge(
     )
     
     # Step 9: Mark knowledge documents as published
-    logger.info("[PublishKnowledge] Step 9: Marking knowledge as published")
     mark_speako_knowledge_published(tenant_id=tenant_id, location_id=location_id)
     
     # Step 10: Clean up old knowledge (best effort - don't fail if this errors)
     deleted_old_knowledge = []
     if old_knowledge_ids:
-        logger.info(
-            f"[PublishKnowledge] Step 10: Cleaning up {len(old_knowledge_ids)} old knowledge documents"
-        )
+        logger.info(f"[PublishKnowledge] Deleting {len(old_knowledge_ids)} old knowledge documents")
         for old_id in old_knowledge_ids:
             try:
                 if delete_knowledge(old_id):
                     deleted_old_knowledge.append(old_id)
-                    logger.info(f"[PublishKnowledge] Deleted old knowledge: {old_id}")
                 else:
-                    logger.warning(f"[PublishKnowledge] Failed to delete old knowledge: {old_id}")
+                    logger.warning(f"[PublishKnowledge] Failed to delete: {old_id}")
             except Exception as e:
                 logger.warning(
                     f"[PublishKnowledge] Error deleting old knowledge {old_id}: {str(e)}"
                 )
-    else:
-        logger.info("[PublishKnowledge] Step 10: No old knowledge to clean up")
     
     # Step 11: Mark publish job as completed
-    logger.info("[PublishKnowledge] Step 11: Marking publish job as completed")
     from datetime import datetime
     
     # Prepare response JSON for database
@@ -256,7 +234,7 @@ def publish_knowledge(
     }
     
     logger.info(
-        f"[PublishKnowledge] Workflow completed successfully: "
+        f"[PublishKnowledge] ✅ Workflow completed: "
         f"agent_id={elevenlabs_agent_id}, new_knowledge_id={new_knowledge_id}, "
         f"total_knowledge={len(merged_knowledge_ids)}"
     )
