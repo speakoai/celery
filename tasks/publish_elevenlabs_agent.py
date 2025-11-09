@@ -89,7 +89,7 @@ def publish_elevenlabs_agent(
             logger.info(f"KNOWLEDGE COUNT: {publish_result.get('knowledge_count')}")
             logger.info("=" * 80)
             
-        elif job_type in ['settings', 'system-prompt', 'tools', 'full-agent']:
+        elif job_type in ['personality', 'greetings', 'tools', 'full-agent', 'voice-dict']:
             # PLACEHOLDER for other job types
             logger.info(f"[publish_elevenlabs_agent] Job type '{job_type}' - executing PLACEHOLDER workflow")
             logger.info(f"[publish_elevenlabs_agent] ⏳ Simulating work for 10 seconds...")
@@ -108,7 +108,7 @@ def publish_elevenlabs_agent(
             }
             
         else:
-            raise ValueError(f"Unsupported job_type: '{job_type}'. Valid types: settings, system-prompt, tools, knowledges, full-agent")
+            raise ValueError(f"Unsupported job_type: '{job_type}'. Valid types: personality, greetings, tools, knowledges, full-agent, voice-dict")
         
         # Prepare success response based on job_type
         result = {
