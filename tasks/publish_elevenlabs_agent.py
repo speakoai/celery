@@ -6,10 +6,12 @@ Currently a placeholder implementation with full task tracking for workflow test
 """
 
 import os
+import time
 from celery.utils.log import get_task_logger
 from tasks.celery_app import app
 from .utils.task_db import mark_task_running, mark_task_succeeded, mark_task_failed, upsert_tenant_integration_param
 from .utils.publish_helpers import publish_knowledge
+from .utils.publish_db import get_publish_job
 
 logger = get_task_logger(__name__)
 
@@ -56,40 +58,84 @@ def publish_elevenlabs_agent(
             upsert_tenant_integration_param(tenant_integration_param=tenant_integration_param)
             logger.info(f"[publish_elevenlabs_agent] Stored tenant integration params for task: {speako_task_id}")
         
-        # Execute the knowledge publishing workflow
-        logger.info(
-            f"[publish_elevenlabs_agent] Starting knowledge publishing workflow - "
-            f"tenant_id={tenant_id}, location_id={location_id}, publish_job_id={publish_job_id}"
-        )
+        # Get publish job to determine job type
+        publish_job = get_publish_job(tenant_id, publish_job_id)
         
-        publish_result = publish_knowledge(
-            tenant_id=tenant_id,
-            location_id=location_id,
-            publish_job_id=publish_job_id
-        )
+        if not publish_job:
+            raise ValueError(f"Publish job not found: tenant_id={tenant_id}, publish_job_id={publish_job_id}")
         
-        # Log the ElevenLabs agent ID prominently for cross-checking
-        elevenlabs_agent_id = publish_result.get('elevenlabs_agent_id')
-        logger.info("=" * 80)
-        logger.info(f"ELEVENLABS AGENT ID: {elevenlabs_agent_id}")
-        logger.info(f"NEW KNOWLEDGE ID: {publish_result.get('new_knowledge_id')}")
-        logger.info(f"KNOWLEDGE COUNT: {publish_result.get('knowledge_count')}")
-        logger.info("=" * 80)
+        job_type = publish_job.get('job_type', 'knowledges')  # Default to 'knowledges'
+        logger.info(f"[publish_elevenlabs_agent] Detected job_type: '{job_type}'")
         
-        # Prepare success response
+        # Branch based on job_type
+        if job_type == 'knowledges':
+            # EXISTING WORKFLOW - Knowledge publishing
+            logger.info(
+                f"[publish_elevenlabs_agent] Starting knowledge publishing workflow - "
+                f"tenant_id={tenant_id}, location_id={location_id}, publish_job_id={publish_job_id}"
+            )
+            
+            publish_result = publish_knowledge(
+                tenant_id=tenant_id,
+                location_id=location_id,
+                publish_job_id=publish_job_id
+            )
+            
+            # Log the ElevenLabs agent ID prominently for cross-checking
+            elevenlabs_agent_id = publish_result.get('elevenlabs_agent_id')
+            logger.info("=" * 80)
+            logger.info(f"ELEVENLABS AGENT ID: {elevenlabs_agent_id}")
+            logger.info(f"NEW KNOWLEDGE ID: {publish_result.get('new_knowledge_id')}")
+            logger.info(f"KNOWLEDGE COUNT: {publish_result.get('knowledge_count')}")
+            logger.info("=" * 80)
+            
+        elif job_type in ['settings', 'system-prompt', 'tools', 'full-agent']:
+            # PLACEHOLDER for other job types
+            logger.info(f"[publish_elevenlabs_agent] Job type '{job_type}' - executing PLACEHOLDER workflow")
+            logger.info(f"[publish_elevenlabs_agent] ⏳ Simulating work for 10 seconds...")
+            
+            time.sleep(10)
+            
+            logger.info(f"[publish_elevenlabs_agent] ✅ Placeholder workflow completed for job_type: '{job_type}'")
+            
+            # Build a generic success result
+            publish_result = {
+                'job_type': job_type,
+                'status': 'completed',
+                'message': f'Placeholder workflow completed for {job_type}',
+                'simulated': True,
+                'duration_seconds': 10
+            }
+            
+        else:
+            raise ValueError(f"Unsupported job_type: '{job_type}'. Valid types: settings, system-prompt, tools, knowledges, full-agent")
+        
+        # Prepare success response based on job_type
         result = {
             'success': True,
-            'message': 'ElevenLabs agent publish completed successfully',
+            'message': f'ElevenLabs agent {job_type} completed successfully',
             'tenant_id': tenant_id,
             'location_id': location_id,
             'publish_job_id': publish_job_id,
+            'job_type': job_type,
             'celery_task_id': celery_task_id,
-            'elevenlabs_agent_id': elevenlabs_agent_id,
-            'new_knowledge_id': publish_result.get('new_knowledge_id'),
-            'knowledge_count': publish_result.get('knowledge_count'),
-            'r2_url': publish_result.get('r2_url'),
-            'deleted_old_knowledge': publish_result.get('deleted_old_knowledge', [])
         }
+        
+        # Add job-specific fields
+        if job_type == 'knowledges':
+            result.update({
+                'elevenlabs_agent_id': publish_result.get('elevenlabs_agent_id'),
+                'new_knowledge_id': publish_result.get('new_knowledge_id'),
+                'knowledge_count': publish_result.get('knowledge_count'),
+                'r2_url': publish_result.get('r2_url'),
+                'deleted_old_knowledge': publish_result.get('deleted_old_knowledge', [])
+            })
+        else:
+            # Placeholder job types
+            result.update({
+                'simulated': True,
+                'placeholder_result': publish_result
+            })
         
         # Include speako_task_id in response if provided
         if speako_task_id:
