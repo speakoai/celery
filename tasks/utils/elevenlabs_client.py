@@ -466,3 +466,196 @@ def patch_elevenlabs_agent(agent_id: str, conversation_config: Dict[str, Any]) -
         error_msg = f"Failed to parse PATCH response for agent {agent_id}: {str(e)}"
         logger.error(f"[ElevenLabs] ❌ PARSE ERROR: {error_msg}")
         raise ValueError(error_msg) from e
+
+
+def create_pronunciation_dictionary(rules: list, name: str) -> tuple[str, str]:
+    """
+    Create a pronunciation dictionary in ElevenLabs from rules.
+    
+    Args:
+        rules: List of rule dicts with keys: 'string_to_replace', 'type', 'alias'
+               Example: [{"string_to_replace": "tomato", "type": "alias", "alias": "tuh-MAH-to"}]
+        name: Human-readable name for the dictionary (e.g., "{location_name} - {timestamp}")
+        
+    Returns:
+        Tuple of (dictionary_id, version_id) from ElevenLabs response
+        
+    Raises:
+        requests.HTTPError: If API call fails
+        ValueError: If response cannot be parsed
+    """
+    import json
+    
+    logger.info("=" * 80)
+    logger.info(f"[ElevenLabs] CREATING PRONUNCIATION DICTIONARY:")
+    logger.info(f"[ElevenLabs]   Name: {name}")
+    logger.info(f"[ElevenLabs]   Rules Count: {len(rules)}")
+    logger.info("=" * 80)
+    
+    # Prepare payload
+    payload = {
+        "rules": rules,
+        "name": name
+    }
+    
+    try:
+        url = "https://api.elevenlabs.io/v1/pronunciation-dictionaries/add-from-rules"
+        headers = _get_headers()
+        headers['Content-Type'] = 'application/json'
+        
+        # Log detailed raw request
+        logger.info("=" * 80)
+        logger.info(f"[ElevenLabs] 📤 RAW REQUEST:")
+        logger.info(f"[ElevenLabs]   Method: POST")
+        logger.info(f"[ElevenLabs]   URL: {url}")
+        logger.info(f"[ElevenLabs]   Headers: {dict(headers)}")
+        logger.info(f"[ElevenLabs]   Request Payload (JSON):")
+        logger.info(json.dumps(payload, indent=2))
+        logger.info("=" * 80)
+        
+        response = requests.post(
+            url,
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
+        
+        # Log detailed raw response
+        logger.info("=" * 80)
+        logger.info(f"[ElevenLabs] 📥 RAW RESPONSE:")
+        logger.info(f"[ElevenLabs]   Status Code: {response.status_code}")
+        logger.info(f"[ElevenLabs]   Response Headers: {dict(response.headers)}")
+        logger.info(f"[ElevenLabs]   Response Body:")
+        logger.info(response.text)
+        logger.info("=" * 80)
+        
+        response.raise_for_status()
+        
+        response_json = response.json()
+        
+        dictionary_id = response_json.get('id')
+        version_id = response_json.get('version_id')
+        
+        if not dictionary_id or not version_id:
+            error_msg = f"Missing 'id' or 'version_id' in response: {response_json}"
+            logger.error(f"[ElevenLabs] ❌ {error_msg}")
+            raise ValueError(error_msg)
+        
+        logger.info("=" * 80)
+        logger.info(f"[ElevenLabs] ✅ DICTIONARY CREATED SUCCESSFULLY!")
+        logger.info(f"[ElevenLabs]   Dictionary ID: {dictionary_id}")
+        logger.info(f"[ElevenLabs]   Version ID: {version_id}")
+        logger.info("=" * 80)
+        
+        return dictionary_id, version_id
+        
+    except requests.HTTPError as e:
+        error_msg = f"Failed to create dictionary: HTTP {e.response.status_code} - {e.response.text}"
+        logger.error(f"[ElevenLabs] ❌ API CALL FAILED: {error_msg}")
+        raise requests.HTTPError(error_msg, response=e.response) from e
+        
+    except requests.RequestException as e:
+        error_msg = f"Failed to create dictionary: {str(e)}"
+        logger.error(f"[ElevenLabs] ❌ REQUEST FAILED: {error_msg}")
+        raise
+        
+    except Exception as e:
+        error_msg = f"Failed to parse dictionary creation response: {str(e)}"
+        logger.error(f"[ElevenLabs] ❌ PARSE ERROR: {error_msg}")
+        raise ValueError(error_msg) from e
+
+
+def update_pronunciation_dictionary(dictionary_id: str, rules: list) -> tuple[str, str]:
+    """
+    Update an existing pronunciation dictionary in ElevenLabs.
+    
+    Args:
+        dictionary_id: ElevenLabs dictionary ID to update
+        rules: List of rule dicts with keys: 'string_to_replace', 'type', 'alias'
+               Example: [{"string_to_replace": "tomato", "type": "alias", "alias": "tuh-MAH-to"}]
+        
+    Returns:
+        Tuple of (dictionary_id, latest_version_id) from ElevenLabs response
+        
+    Raises:
+        requests.HTTPError: If API call fails
+        ValueError: If response cannot be parsed
+    """
+    import json
+    
+    logger.info("=" * 80)
+    logger.info(f"[ElevenLabs] UPDATING PRONUNCIATION DICTIONARY:")
+    logger.info(f"[ElevenLabs]   Dictionary ID: {dictionary_id}")
+    logger.info(f"[ElevenLabs]   Rules Count: {len(rules)}")
+    logger.info("=" * 80)
+    
+    # Prepare payload (NO NAME for update)
+    payload = {
+        "rules": rules
+    }
+    
+    try:
+        url = f"https://api.elevenlabs.io/v1/pronunciation-dictionaries/{dictionary_id}"
+        headers = _get_headers()
+        headers['Content-Type'] = 'application/json'
+        
+        # Log detailed raw request
+        logger.info("=" * 80)
+        logger.info(f"[ElevenLabs] 📤 RAW REQUEST:")
+        logger.info(f"[ElevenLabs]   Method: PATCH")
+        logger.info(f"[ElevenLabs]   URL: {url}")
+        logger.info(f"[ElevenLabs]   Headers: {dict(headers)}")
+        logger.info(f"[ElevenLabs]   Request Payload (JSON):")
+        logger.info(json.dumps(payload, indent=2))
+        logger.info("=" * 80)
+        
+        response = requests.patch(
+            url,
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
+        
+        # Log detailed raw response
+        logger.info("=" * 80)
+        logger.info(f"[ElevenLabs] 📥 RAW RESPONSE:")
+        logger.info(f"[ElevenLabs]   Status Code: {response.status_code}")
+        logger.info(f"[ElevenLabs]   Response Headers: {dict(response.headers)}")
+        logger.info(f"[ElevenLabs]   Response Body:")
+        logger.info(response.text)
+        logger.info("=" * 80)
+        
+        response.raise_for_status()
+        
+        response_json = response.json()
+        
+        returned_dict_id = response_json.get('id')
+        latest_version_id = response_json.get('latest_version_id')
+        
+        if not returned_dict_id or not latest_version_id:
+            error_msg = f"Missing 'id' or 'latest_version_id' in response: {response_json}"
+            logger.error(f"[ElevenLabs] ❌ {error_msg}")
+            raise ValueError(error_msg)
+        
+        logger.info("=" * 80)
+        logger.info(f"[ElevenLabs] ✅ DICTIONARY UPDATED SUCCESSFULLY!")
+        logger.info(f"[ElevenLabs]   Dictionary ID: {returned_dict_id}")
+        logger.info(f"[ElevenLabs]   Latest Version ID: {latest_version_id}")
+        logger.info("=" * 80)
+        
+        return returned_dict_id, latest_version_id
+        
+    except requests.HTTPError as e:
+        error_msg = f"Failed to update dictionary {dictionary_id}: HTTP {e.response.status_code} - {e.response.text}"
+        logger.error(f"[ElevenLabs] ❌ API CALL FAILED: {error_msg}")
+        raise requests.HTTPError(error_msg, response=e.response) from e
+        
+    except requests.RequestException as e:
+        error_msg = f"Failed to update dictionary {dictionary_id}: {str(e)}"
+        logger.error(f"[ElevenLabs] ❌ REQUEST FAILED: {error_msg}")
+        raise
+        
+    except Exception as e:
+        error_msg = f"Failed to parse dictionary update response: {str(e)}"
+        logger.error(f"[ElevenLabs] ❌ PARSE ERROR: {error_msg}")
+        raise ValueError(error_msg) from e

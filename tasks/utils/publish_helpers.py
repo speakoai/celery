@@ -804,7 +804,114 @@ def publish_voice_dict(
     
     logger.info(f"[PublishVoiceDict] Built conversation_config: {json.dumps(conversation_config, indent=2)}")
     
-    # Step 5: PATCH to ElevenLabs API
+    # Step 5: Collect and process dictionary entry
+    logger.info("[PublishVoiceDict] === STEP 5: Processing pronunciation dictionary ===")
+    
+    from .publish_db import collect_dictionary_entry, update_dictionary_param_text
+    from .elevenlabs_client import create_pronunciation_dictionary, update_pronunciation_dictionary
+    
+    dictionary_entry = collect_dictionary_entry(tenant_id, location_id)
+    dictionary_locator = None
+    dictionary_param_id = None
+    dict_created = False
+    dict_updated = False
+    dictionary_id = None
+    
+    if dictionary_entry:
+        param_id = dictionary_entry['param_id']
+        value_text = dictionary_entry.get('value_text')
+        value_json = dictionary_entry.get('value_json')
+        
+        logger.info(f"[PublishVoiceDict] Found dictionary entry: param_id={param_id}")
+        
+        # Validate rules
+        try:
+            rules = value_json if isinstance(value_json, list) else []
+            if not rules:
+                logger.warning("[PublishVoiceDict] Empty rules array, skipping dictionary")
+                dictionary_entry = None
+        except Exception as e:
+            logger.error(f"[PublishVoiceDict] Invalid value_json: {str(e)}, skipping dictionary")
+            dictionary_entry = None
+    
+    # Process dictionary if valid
+    if dictionary_entry and rules:
+        dictionary_param_id = param_id
+        
+        if not value_text or value_text.strip() == '':
+            # CREATE new dictionary
+            logger.info("[PublishVoiceDict] Creating new pronunciation dictionary...")
+            
+            # Generate name with timestamp (like knowledge)
+            timestamp = format_timestamp_for_location(timezone)
+            dict_name = f"{location_name} - {timestamp}"
+            
+            try:
+                dictionary_id, version_id = create_pronunciation_dictionary(rules, dict_name)
+                logger.info(f"[PublishVoiceDict] ✅ Created dictionary: id={dictionary_id}, version={version_id}")
+                
+                # Update param value_text with dictionary_id
+                update_dictionary_param_text(param_id, dictionary_id)
+                
+                dict_created = True
+                dictionary_locator = {
+                    "pronunciation_dictionary_id": dictionary_id,
+                    "version_id": version_id
+                }
+            except Exception as e:
+                logger.error(f"[PublishVoiceDict] Failed to create dictionary: {str(e)}")
+                # Re-raise to stop workflow
+                update_publish_job_status(
+                    tenant_id=tenant_id,
+                    publish_job_id=publish_job_id,
+                    status='failed',
+                    finished_at=datetime.utcnow(),
+                    error_message=str(e)
+                )
+                raise RuntimeError(f"Failed to create pronunciation dictionary: {str(e)}") from e
+        
+        else:
+            # UPDATE existing dictionary
+            dictionary_id = value_text.strip()
+            logger.info(f"[PublishVoiceDict] Updating existing dictionary: {dictionary_id}...")
+            
+            try:
+                returned_dict_id, latest_version_id = update_pronunciation_dictionary(dictionary_id, rules)
+                logger.info(f"[PublishVoiceDict] ✅ Updated dictionary: id={returned_dict_id}, version={latest_version_id}")
+                
+                # Check if dictionary_id changed (shouldn't happen, but handle it)
+                if returned_dict_id != dictionary_id:
+                    logger.warning(f"[PublishVoiceDict] Dictionary ID changed: {dictionary_id} → {returned_dict_id}")
+                    update_dictionary_param_text(param_id, returned_dict_id)
+                    dictionary_id = returned_dict_id
+                
+                dict_updated = True
+                dictionary_locator = {
+                    "pronunciation_dictionary_id": dictionary_id,
+                    "version_id": latest_version_id
+                }
+            except Exception as e:
+                logger.error(f"[PublishVoiceDict] Failed to update dictionary: {str(e)}")
+                # Re-raise to stop workflow
+                update_publish_job_status(
+                    tenant_id=tenant_id,
+                    publish_job_id=publish_job_id,
+                    status='failed',
+                    finished_at=datetime.utcnow(),
+                    error_message=str(e)
+                )
+                raise RuntimeError(f"Failed to update pronunciation dictionary: {str(e)}") from e
+    else:
+        logger.info("[PublishVoiceDict] No dictionary to process or invalid rules")
+    
+    # Step 6: Add dictionary locator to conversation_config if exists
+    if dictionary_locator:
+        if 'tts' not in conversation_config:
+            conversation_config['tts'] = {}
+        conversation_config['tts']['pronunciation_dictionary_locators'] = [dictionary_locator]
+        logger.info(f"[PublishVoiceDict] ✓ Added dictionary locator to conversation_config")
+    
+    # Step 7: PATCH to ElevenLabs API
     logger.info(f"[PublishVoiceDict] Sending PATCH request to ElevenLabs agent {elevenlabs_agent_id}...")
     
     try:
@@ -830,23 +937,34 @@ def publish_voice_dict(
         # Re-raise exception - params will NOT be marked as published
         raise RuntimeError(f"Failed to update ElevenLabs agent: {str(e)}") from e
     
-    # Step 6: Mark parameters as published (only reached if PATCH succeeded)
+    # Step 8: Mark parameters as published (only reached if PATCH succeeded)
     logger.info("[PublishVoiceDict] Marking params as published...")
+    
+    # Collect all param_ids to mark as published
+    all_param_ids = param_ids.copy()  # Voice dict params
+    if dictionary_param_id:
+        all_param_ids.append(dictionary_param_id)
+        logger.info(f"[PublishVoiceDict] Including dictionary param_id={dictionary_param_id}")
+    
     params_updated = mark_voice_dict_params_published(
         tenant_id=tenant_id,
         location_id=location_id,
-        param_ids=param_ids
+        param_ids=all_param_ids
     )
     
     logger.info(f"[PublishVoiceDict] ✓ Marked {params_updated} params as published")
     
-    # Step 7: Update publish job status (only reached if PATCH succeeded)
+    # Step 9: Update publish job status (only reached if PATCH succeeded)
     response_data = {
         'elevenlabs_agent_id': elevenlabs_agent_id,
         'http_status_code': http_status_code,
         'params_count': len(params),
         'params_updated': params_updated,
-        'conversation_config': conversation_config
+        'conversation_config': conversation_config,
+        'dictionary_processed': dictionary_entry is not None,
+        'dictionary_created': dict_created,
+        'dictionary_updated': dict_updated,
+        'dictionary_id': dictionary_id
     }
     
     update_publish_job_status(
@@ -865,12 +983,17 @@ def publish_voice_dict(
         'params_count': len(params),
         'params_updated': params_updated,
         'conversation_config': conversation_config,
-        'processed_param_ids': param_ids
+        'processed_param_ids': all_param_ids,
+        'dictionary_processed': dictionary_entry is not None,
+        'dictionary_created': dict_created,
+        'dictionary_updated': dict_updated,
+        'dictionary_id': dictionary_id
     }
     
     logger.info(
         f"[PublishVoiceDict] ✅ Workflow completed: "
-        f"agent_id={elevenlabs_agent_id}, params_count={len(params)}, params_updated={params_updated}"
+        f"agent_id={elevenlabs_agent_id}, params_count={len(params)}, params_updated={params_updated}, "
+        f"dictionary_processed={dictionary_entry is not None}, dict_created={dict_created}, dict_updated={dict_updated}"
     )
     
     return result

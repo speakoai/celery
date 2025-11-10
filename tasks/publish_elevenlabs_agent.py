@@ -128,6 +128,10 @@ def publish_elevenlabs_agent(
             logger.info(f"HTTP STATUS: {publish_result.get('http_status_code')}")
             logger.info(f"PARAMS COUNT: {publish_result.get('params_count')}")
             logger.info(f"PARAMS UPDATED: {publish_result.get('params_updated')}")
+            logger.info(f"DICTIONARY PROCESSED: {publish_result.get('dictionary_processed')}")
+            logger.info(f"DICTIONARY CREATED: {publish_result.get('dictionary_created')}")
+            logger.info(f"DICTIONARY UPDATED: {publish_result.get('dictionary_updated')}")
+            logger.info(f"DICTIONARY ID: {publish_result.get('dictionary_id')}")
             logger.info("=" * 80)
             
         elif job_type in ['personality', 'tools', 'full-agent']:
@@ -183,7 +187,11 @@ def publish_elevenlabs_agent(
                 'http_status_code': publish_result.get('http_status_code'),
                 'params_count': publish_result.get('params_count'),
                 'params_updated': publish_result.get('params_updated'),
-                'processed_param_ids': publish_result.get('processed_param_ids')
+                'processed_param_ids': publish_result.get('processed_param_ids'),
+                'dictionary_processed': publish_result.get('dictionary_processed'),
+                'dictionary_created': publish_result.get('dictionary_created'),
+                'dictionary_updated': publish_result.get('dictionary_updated'),
+                'dictionary_id': publish_result.get('dictionary_id')
             })
         else:
             # Placeholder job types

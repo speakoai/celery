@@ -933,7 +933,7 @@ def mark_voice_dict_params_published(tenant_id: str, location_id: str, param_ids
                     SET status = 'published', updated_at = now()
                     WHERE tenant_id = %s 
                       AND location_id = %s
-                      AND service IN ('agent', 'turn', 'conversation', 'tts')
+                      AND service IN ('agent', 'turn', 'conversation', 'tts', 'dictionary')
                       AND param_id = ANY(%s)
                       AND status = 'configured'
                     """,
@@ -941,6 +941,89 @@ def mark_voice_dict_params_published(tenant_id: str, location_id: str, param_ids
                 )
                 rows_updated = cur.rowcount
                 logger.info(f"[publish_db] ✓ Marked {rows_updated} voice dict params as published")
+                return rows_updated
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def collect_dictionary_entry(tenant_id: str, location_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Collect the dictionary entry for a location (single entry).
+    
+    Args:
+        tenant_id: Tenant identifier
+        location_id: Location identifier
+    
+    Returns:
+        Dict with keys: param_id, tenant_id, location_id, value_text, value_json
+        Returns None if no entry found
+    """
+    logger.info(f"[publish_db] Collecting dictionary entry: tenant_id={tenant_id}, location_id={location_id}")
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT 
+                        param_id,
+                        tenant_id,
+                        location_id,
+                        value_text,
+                        value_json
+                    FROM tenant_integration_params 
+                    WHERE tenant_id = %s 
+                      AND location_id = %s
+                      AND status = 'configured'
+                      AND service = 'dictionary'
+                    LIMIT 1
+                    """,
+                    (tenant_id, location_id)
+                )
+                row = cur.fetchone()
+                if row:
+                    result = dict(row)
+                    logger.info(f"[publish_db] Found dictionary entry: param_id={result['param_id']}")
+                    return result
+                else:
+                    logger.info(f"[publish_db] No dictionary entry found")
+                    return None
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def update_dictionary_param_text(param_id: int, dictionary_id: str) -> int:
+    """
+    Update value_text field with dictionary_id after create/update.
+    
+    Args:
+        param_id: Parameter ID to update
+        dictionary_id: ElevenLabs dictionary ID to store
+    
+    Returns:
+        Number of rows updated
+    """
+    logger.info(f"[publish_db] Updating dictionary param_id={param_id} with dictionary_id={dictionary_id}")
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE tenant_integration_params 
+                    SET value_text = %s, updated_at = now()
+                    WHERE param_id = %s
+                    """,
+                    (dictionary_id, param_id)
+                )
+                rows_updated = cur.rowcount
+                logger.info(f"[publish_db] ✓ Updated {rows_updated} dictionary param")
                 return rows_updated
     finally:
         try:
