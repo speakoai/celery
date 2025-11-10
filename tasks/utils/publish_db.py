@@ -514,7 +514,32 @@ def upsert_ai_prompt(
                 row = cur.fetchone()
                 prompt_id = int(row[0]) if row else None
                 
-                logger.info(f"[publish_db] Inserted new AI prompt: prompt_id={prompt_id}")
+                logger.info(f"[publish_db] Inserted new AI prompt: prompt_id={prompt_id}, version={new_version}")
+                
+                # Cleanup old versions if exceeding the limit (keep max 3 versions)
+                if new_version > 3:
+                    version_threshold = new_version - 3
+                    cur.execute(
+                        """
+                        DELETE FROM tenant_ai_prompts
+                        WHERE tenant_id = %s 
+                          AND location_id = %s
+                          AND type_code = %s
+                          AND locale = %s
+                          AND channel = %s
+                          AND version <= %s
+                          AND is_active = false
+                        """,
+                        (tenant_id, location_id, type_code, locale, channel, version_threshold)
+                    )
+                    
+                    deleted_count = cur.rowcount
+                    if deleted_count > 0:
+                        logger.info(
+                            f"[publish_db] Deleted {deleted_count} old version(s) "
+                            f"(version <= {version_threshold}) to maintain 3-version limit"
+                        )
+                
                 return prompt_id
     finally:
         try:
