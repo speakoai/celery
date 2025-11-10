@@ -448,11 +448,30 @@ def upsert_ai_prompt(
     try:
         with conn:
             with conn.cursor() as cur:
-                # Deactivate existing active prompts with same type/locale/channel
+                # Get the current maximum version for this type_code
+                cur.execute(
+                    """
+                    SELECT COALESCE(MAX(version), 0) as max_version
+                    FROM tenant_ai_prompts
+                    WHERE tenant_id = %s 
+                      AND location_id = %s
+                      AND type_code = %s
+                      AND locale = %s
+                      AND channel = %s
+                    """,
+                    (tenant_id, location_id, type_code, locale, channel)
+                )
+                row = cur.fetchone()
+                current_max_version = row[0] if row else 0
+                new_version = current_max_version + 1
+                
+                logger.info(f"[publish_db] Current max version: {current_max_version}, new version: {new_version}")
+                
+                # Deactivate existing active prompts with same type/locale/channel and set archived_at
                 cur.execute(
                     """
                     UPDATE tenant_ai_prompts
-                    SET is_active = false, updated_at = now()
+                    SET is_active = false, archived_at = now(), updated_at = now()
                     WHERE tenant_id = %s 
                       AND location_id = %s
                       AND type_code = %s
@@ -465,16 +484,16 @@ def upsert_ai_prompt(
                 
                 deactivated_count = cur.rowcount
                 if deactivated_count > 0:
-                    logger.info(f"[publish_db] Deactivated {deactivated_count} existing prompt(s)")
+                    logger.info(f"[publish_db] Deactivated {deactivated_count} existing prompt(s) and set archived_at")
                 
-                # Insert new prompt
+                # Insert new prompt with incremented version
                 cur.execute(
                     """
                     INSERT INTO tenant_ai_prompts
                         (tenant_id, location_id, name, type_code, locale, channel, title, body_template, 
-                         variables_schema, metadata, is_active, effective_from)
+                         variables_schema, metadata, version, is_active, effective_from)
                     VALUES
-                        (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, true, now())
+                        (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, true, now())
                     RETURNING prompt_id
                     """,
                     (
@@ -487,7 +506,8 @@ def upsert_ai_prompt(
                         title,
                         body_template,
                         Json(variables_schema or {}),
-                        Json(metadata or {})
+                        Json(metadata or {}),
+                        new_version
                     )
                 )
                 
