@@ -265,7 +265,7 @@ def collect_speako_greetings(tenant_id: str, location_id: str) -> List[Dict[str,
         location_id: Location identifier
     
     Returns:
-        List of dicts with keys: param_id, value_text
+        List of dicts with keys: param_id, value_text, param_code
         Ordered by created_at ascending (oldest first)
     """
     logger.info(f"[publish_db] Collecting Speako greetings: tenant_id={tenant_id}, location_id={location_id}")
@@ -277,7 +277,8 @@ def collect_speako_greetings(tenant_id: str, location_id: str) -> List[Dict[str,
                     """
                     SELECT 
                         param_id,
-                        value_text
+                        value_text,
+                        param_code
                     FROM tenant_integration_params 
                     WHERE tenant_id = %s 
                       AND location_id = %s
@@ -292,6 +293,49 @@ def collect_speako_greetings(tenant_id: str, location_id: str) -> List[Dict[str,
                 result = [dict(row) for row in rows]
                 logger.info(f"[publish_db] Found {len(result)} Speako greeting entries")
                 return result
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def get_ai_prompt_type(param_code: str) -> Optional[Dict[str, Any]]:
+    """
+    Get AI prompt type details from ai_prompt_types table.
+    
+    Args:
+        param_code: The param_code to look up (maps to ai_prompt_types.code)
+    
+    Returns:
+        Dict with keys: code, display_name, description, variables_schema
+        Returns None if not found
+    """
+    logger.info(f"[publish_db] Looking up AI prompt type: param_code={param_code}")
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT 
+                        code,
+                        display_name,
+                        description,
+                        variables_schema
+                    FROM ai_prompt_types 
+                    WHERE code = %s
+                    """,
+                    (param_code,)
+                )
+                row = cur.fetchone()
+                if row:
+                    result = dict(row)
+                    logger.info(f"[publish_db] Found AI prompt type: code={result['code']}, display_name={result['display_name']}")
+                    return result
+                else:
+                    logger.warning(f"[publish_db] AI prompt type not found for param_code={param_code}")
+                    return None
     finally:
         try:
             conn.close()

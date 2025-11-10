@@ -431,6 +431,7 @@ def publish_greetings(
     from .publish_db import (
         collect_speako_greetings,
         get_location_operation_hours,
+        get_ai_prompt_type,
         upsert_ai_prompt,
         mark_greeting_params_published
     )
@@ -485,10 +486,25 @@ def publish_greetings(
     for entry in greeting_entries:
         param_id = entry['param_id']
         template_text = entry['value_text']
+        param_code = entry.get('param_code')
         
         if not template_text:
             logger.warning(f"[PublishGreetings] Skipping param_id={param_id} - empty value_text")
             continue
+        
+        # Look up AI prompt type from ai_prompt_types table
+        prompt_type = None
+        if param_code:
+            prompt_type = get_ai_prompt_type(param_code)
+        
+        if not prompt_type:
+            logger.warning(f"[PublishGreetings] No prompt type found for param_code={param_code}, using defaults")
+            type_code = param_code or 'unknown'
+            display_name = f'Greeting {param_id}'
+        else:
+            type_code = prompt_type['code']
+            display_name = prompt_type['display_name']
+            logger.info(f"[PublishGreetings] Using prompt type: code={type_code}, display_name={display_name}")
         
         # Replace variables in template
         resolved_text = template_text
@@ -499,21 +515,21 @@ def publish_greetings(
                 logger.info(f"[PublishGreetings] Replaced {placeholder} in param_id={param_id}")
         
         # Store in tenant_ai_prompts
-        # TODO: Determine proper type_code based on greeting type
         try:
             prompt_id = upsert_ai_prompt(
                 tenant_id=tenant_id,
                 location_id=location_id,
-                type_code='first_message_after',  # TODO: Make this dynamic
-                title=f'Greeting {param_id}',
+                type_code=type_code,
+                title=display_name,
+                name=display_name,
                 body_template=resolved_text,
-                metadata={'source_param_id': param_id}
+                metadata={'source_param_id': param_id, 'param_code': param_code}
             )
             
             if prompt_id:
                 prompts_created += 1
                 processed_param_ids.append(param_id)
-                logger.info(f"[PublishGreetings] ✓ Created prompt_id={prompt_id} from param_id={param_id}")
+                logger.info(f"[PublishGreetings] ✓ Created prompt_id={prompt_id} (type_code={type_code}) from param_id={param_id}")
         except Exception as e:
             logger.error(f"[PublishGreetings] ✗ Failed to create prompt from param_id={param_id}: {str(e)}")
             # Continue processing other entries
