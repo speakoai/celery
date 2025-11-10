@@ -859,3 +859,91 @@ def get_privacy_url(tenant_id: str) -> str:
             conn.close()
         except Exception:
             pass
+
+
+def collect_voice_dict_params(tenant_id: str, location_id: str) -> List[Dict[str, Any]]:
+    """
+    Collect all configured voice dictionary parameters for a location.
+    
+    Args:
+        tenant_id: Tenant identifier
+        location_id: Location identifier
+    
+    Returns:
+        List of dicts with keys: param_id, service, param_code, value_text, value_numeric
+        Ordered by created_at ascending (oldest first)
+    """
+    logger.info(f"[publish_db] Collecting voice dict params: tenant_id={tenant_id}, location_id={location_id}")
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT 
+                        param_id,
+                        service,
+                        param_code,
+                        value_text,
+                        value_numeric
+                    FROM tenant_integration_params 
+                    WHERE tenant_id = %s 
+                      AND location_id = %s
+                      AND status = 'configured'
+                      AND service IN ('agent', 'turn', 'conversation', 'tts')
+                    ORDER BY created_at ASC
+                    """,
+                    (tenant_id, location_id)
+                )
+                rows = cur.fetchall()
+                result = [dict(row) for row in rows]
+                logger.info(f"[publish_db] Found {len(result)} voice dict params")
+                return result
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def mark_voice_dict_params_published(tenant_id: str, location_id: str, param_ids: List[int]) -> int:
+    """
+    Mark voice dict parameters as 'published' after successful processing.
+    
+    Args:
+        tenant_id: Tenant identifier
+        location_id: Location identifier
+        param_ids: List of param_ids to mark as published
+    
+    Returns:
+        Number of rows updated
+    """
+    if not param_ids:
+        logger.info("[publish_db] No param_ids provided, skipping mark as published")
+        return 0
+    
+    logger.info(f"[publish_db] Marking {len(param_ids)} voice dict params as published: {param_ids}")
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE tenant_integration_params 
+                    SET status = 'published', updated_at = now()
+                    WHERE tenant_id = %s 
+                      AND location_id = %s
+                      AND service IN ('agent', 'turn', 'conversation', 'tts')
+                      AND param_id = ANY(%s)
+                      AND status = 'configured'
+                    """,
+                    (tenant_id, location_id, param_ids)
+                )
+                rows_updated = cur.rowcount
+                logger.info(f"[publish_db] ✓ Marked {rows_updated} voice dict params as published")
+                return rows_updated
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass

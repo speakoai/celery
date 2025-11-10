@@ -10,7 +10,7 @@ import time
 from celery.utils.log import get_task_logger
 from tasks.celery_app import app
 from .utils.task_db import mark_task_running, mark_task_succeeded, mark_task_failed, upsert_tenant_integration_param
-from .utils.publish_helpers import publish_knowledge, publish_greetings
+from .utils.publish_helpers import publish_knowledge, publish_greetings, publish_voice_dict
 from .utils.publish_db import get_publish_job
 
 logger = get_task_logger(__name__)
@@ -109,7 +109,28 @@ def publish_elevenlabs_agent(
             logger.info(f"PROCESSED PARAM IDS: {publish_result.get('processed_param_ids')}")
             logger.info("=" * 80)
             
-        elif job_type in ['personality', 'tools', 'full-agent', 'voice-dict']:
+        elif job_type == 'voice-dict':
+            # REAL WORKFLOW - Voice dictionary publishing
+            logger.info(
+                f"[publish_elevenlabs_agent] Starting voice-dict publishing workflow - "
+                f"tenant_id={tenant_id}, location_id={location_id}, publish_job_id={publish_job_id}"
+            )
+            
+            publish_result = publish_voice_dict(
+                tenant_id=tenant_id,
+                location_id=location_id,
+                publish_job_id=publish_job_id
+            )
+            
+            # Log the results prominently
+            logger.info("=" * 80)
+            logger.info(f"ELEVENLABS AGENT ID: {publish_result.get('elevenlabs_agent_id')}")
+            logger.info(f"HTTP STATUS: {publish_result.get('http_status_code')}")
+            logger.info(f"PARAMS COUNT: {publish_result.get('params_count')}")
+            logger.info(f"PARAMS UPDATED: {publish_result.get('params_updated')}")
+            logger.info("=" * 80)
+            
+        elif job_type in ['personality', 'tools', 'full-agent']:
             # PLACEHOLDER for other job types
             logger.info(f"[publish_elevenlabs_agent] Job type '{job_type}' - executing PLACEHOLDER workflow")
             logger.info(f"[publish_elevenlabs_agent] ⏳ Simulating work for 10 seconds...")
@@ -128,7 +149,7 @@ def publish_elevenlabs_agent(
             }
             
         else:
-            raise ValueError(f"Unsupported job_type: '{job_type}'. Valid types: knowledges, greetings, personality, tools, full-agent, voice-dict")
+            raise ValueError(f"Unsupported job_type: '{job_type}'. Valid types: knowledges, greetings, voice-dict, personality, tools, full-agent")
         
         # Prepare success response based on job_type
         result = {
@@ -154,6 +175,14 @@ def publish_elevenlabs_agent(
             result.update({
                 'prompts_created': publish_result.get('prompts_created'),
                 'total_entries': publish_result.get('total_entries'),
+                'processed_param_ids': publish_result.get('processed_param_ids')
+            })
+        elif job_type == 'voice-dict':
+            result.update({
+                'elevenlabs_agent_id': publish_result.get('elevenlabs_agent_id'),
+                'http_status_code': publish_result.get('http_status_code'),
+                'params_count': publish_result.get('params_count'),
+                'params_updated': publish_result.get('params_updated'),
                 'processed_param_ids': publish_result.get('processed_param_ids')
             })
         else:

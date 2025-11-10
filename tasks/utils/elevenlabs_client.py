@@ -374,3 +374,95 @@ def update_agent_knowledge(agent_id: str, knowledge_items: list) -> Dict[str, An
         error_msg = f"Failed to parse update response for agent {agent_id}: {str(e)}"
         logger.error(f"[ElevenLabs] ❌ PARSE ERROR: {error_msg}")
         raise ValueError(error_msg) from e
+
+
+def patch_elevenlabs_agent(agent_id: str, conversation_config: Dict[str, Any]) -> tuple[int, Dict[str, Any]]:
+    """
+    PATCH conversation_config to an ElevenLabs agent.
+    
+    This function sends a PATCH request to update the agent's conversation configuration.
+    Used for updating voice settings, turn settings, and conversation parameters.
+    
+    Args:
+        agent_id: ElevenLabs agent ID
+        conversation_config: Dictionary with conversation_config structure
+                            Example: {"tts": {"voice_id": "...", "speed": 1.05}, "turn": {...}, "conversation": {...}}
+        
+    Returns:
+        Tuple of (http_status_code, response_json)
+        
+    Raises:
+        requests.HTTPError: If API call fails
+        ValueError: If response cannot be parsed
+    """
+    import json
+    
+    logger.info("=" * 80)
+    logger.info(f"[ElevenLabs] PATCHING AGENT CONVERSATION CONFIG:")
+    logger.info(f"[ElevenLabs]   Agent ID: {agent_id}")
+    logger.info(f"[ElevenLabs]   Conversation Config:")
+    logger.info(json.dumps(conversation_config, indent=2))
+    logger.info("=" * 80)
+    
+    # Prepare PATCH payload
+    payload = {
+        "conversation_config": conversation_config
+    }
+    
+    try:
+        url = f"{ELEVENLABS_BASE_URL}/agents/{agent_id}"
+        headers = _get_headers()
+        headers['Content-Type'] = 'application/json'
+        
+        # Log detailed raw request
+        logger.info("=" * 80)
+        logger.info(f"[ElevenLabs] 📤 RAW REQUEST:")
+        logger.info(f"[ElevenLabs]   Method: PATCH")
+        logger.info(f"[ElevenLabs]   URL: {url}")
+        logger.info(f"[ElevenLabs]   Headers: {dict(headers)}")
+        logger.info(f"[ElevenLabs]   Request Payload (JSON):")
+        logger.info(json.dumps(payload, indent=2))
+        logger.info("=" * 80)
+        
+        response = requests.patch(
+            url,
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
+        
+        # Log detailed raw response
+        logger.info("=" * 80)
+        logger.info(f"[ElevenLabs] 📥 RAW RESPONSE:")
+        logger.info(f"[ElevenLabs]   Status Code: {response.status_code}")
+        logger.info(f"[ElevenLabs]   Response Headers: {dict(response.headers)}")
+        logger.info(f"[ElevenLabs]   Response Body:")
+        logger.info(response.text)
+        logger.info("=" * 80)
+        
+        response.raise_for_status()
+        
+        response_json = response.json()
+        
+        logger.info("=" * 80)
+        logger.info(f"[ElevenLabs] ✅ PATCH SUCCESSFUL!")
+        logger.info(f"[ElevenLabs]   Agent ID: {agent_id}")
+        logger.info(f"[ElevenLabs]   HTTP Status: {response.status_code}")
+        logger.info("=" * 80)
+        
+        return response.status_code, response_json
+        
+    except requests.HTTPError as e:
+        error_msg = f"Failed to PATCH agent {agent_id}: HTTP {e.response.status_code} - {e.response.text}"
+        logger.error(f"[ElevenLabs] ❌ API CALL FAILED: {error_msg}")
+        raise requests.HTTPError(error_msg, response=e.response) from e
+        
+    except requests.RequestException as e:
+        error_msg = f"Failed to PATCH agent {agent_id}: {str(e)}"
+        logger.error(f"[ElevenLabs] ❌ REQUEST FAILED: {error_msg}")
+        raise
+        
+    except Exception as e:
+        error_msg = f"Failed to parse PATCH response for agent {agent_id}: {str(e)}"
+        logger.error(f"[ElevenLabs] ❌ PARSE ERROR: {error_msg}")
+        raise ValueError(error_msg) from e

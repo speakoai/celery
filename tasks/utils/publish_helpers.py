@@ -666,3 +666,211 @@ def publish_greetings(
     )
     
     return result
+
+
+def publish_voice_dict(
+    tenant_id: int,
+    location_id: int,
+    publish_job_id: int
+) -> Dict[str, Any]:
+    """
+    Complete workflow for publishing voice dictionary (conversation config) to ElevenLabs agent.
+    
+    This function orchestrates the voice dict publishing process:
+    1. Validates the publish job
+    2. Collects voice dict parameters from tenant_integration_params
+    3. Builds conversation_config JSON payload
+    4. PATCH to ElevenLabs agent API
+    5. Marks parameters as published (only if PATCH succeeds)
+    
+    Args:
+        tenant_id: Tenant identifier
+        location_id: Location identifier
+        publish_job_id: Publish job identifier
+        
+    Returns:
+        Dictionary containing:
+            - elevenlabs_agent_id: ElevenLabs agent ID
+            - http_status_code: HTTP status from ElevenLabs API
+            - params_count: Number of parameters processed
+            - params_updated: Number of parameters marked as published
+            - conversation_config: The payload sent to ElevenLabs
+            - processed_param_ids: List of param_ids marked as published
+            
+    Raises:
+        ValueError: If publish job is invalid or no params found
+        RuntimeError: If PATCH to ElevenLabs fails
+    """
+    logger.info(
+        f"[PublishVoiceDict] Starting workflow: tenant_id={tenant_id}, "
+        f"location_id={location_id}, publish_job_id={publish_job_id}"
+    )
+    
+    # Import here to avoid circular imports
+    from .publish_db import (
+        collect_voice_dict_params,
+        mark_voice_dict_params_published
+    )
+    from .elevenlabs_client import patch_elevenlabs_agent
+    
+    # Step 1: Validate publish job
+    publish_job = get_publish_job(tenant_id, publish_job_id)
+    if not publish_job:
+        raise ValueError(
+            f"Publish job not found: tenant_id={tenant_id}, publish_job_id={publish_job_id}"
+        )
+    
+    # Mark as processing
+    update_publish_job_status(
+        tenant_id=tenant_id,
+        publish_job_id=publish_job_id,
+        status='in_progress',
+        started_at=datetime.utcnow()
+    )
+    
+    # Step 2: Get ElevenLabs Agent ID
+    elevenlabs_agent_id, location_name, timezone = get_elevenlabs_agent_id(tenant_id, location_id)
+    if not elevenlabs_agent_id:
+        raise ValueError(
+            f"ElevenLabs agent ID not found: tenant_id={tenant_id}, location_id={location_id}"
+        )
+    
+    logger.info(f"[PublishVoiceDict] Found agent ID: {elevenlabs_agent_id}")
+    
+    # Step 3: Collect voice dict parameters
+    params = collect_voice_dict_params(tenant_id, location_id)
+    
+    if not params:
+        logger.warning("[PublishVoiceDict] No voice dict params found")
+        raise ValueError(
+            f"No voice dict params found for tenant_id={tenant_id}, location_id={location_id}"
+        )
+    
+    logger.info(f"[PublishVoiceDict] Collected {len(params)} voice dict params")
+    
+    # Store param_ids for later marking as published
+    param_ids = [p['param_id'] for p in params]
+    
+    # Step 4: Build conversation_config JSON payload
+    logger.info("[PublishVoiceDict] Building conversation_config payload...")
+    
+    conversation_config = {
+        "tts": {},
+        "turn": {},
+        "conversation": {}
+    }
+    
+    # Map parameters to conversation_config structure
+    for param in params:
+        service = param.get('service')
+        param_code = param.get('param_code')
+        value_text = param.get('value_text')
+        value_numeric = param.get('value_numeric')
+        
+        logger.info(f"[PublishVoiceDict] Processing: service={service}, param_code={param_code}")
+        
+        try:
+            # service='agent' + param_code='voice_id' → conversation_config.tts.voice_id (string)
+            if service == 'agent' and param_code == 'voice_id':
+                conversation_config['tts']['voice_id'] = value_text
+                logger.info(f"[PublishVoiceDict]   → tts.voice_id = {value_text}")
+            
+            # service='tts' + param_code='speed' → conversation_config.tts.speed (float)
+            elif service == 'tts' and param_code == 'speed':
+                conversation_config['tts']['speed'] = float(value_numeric) if value_numeric is not None else None
+                logger.info(f"[PublishVoiceDict]   → tts.speed = {conversation_config['tts']['speed']}")
+            
+            # service='turn' + param_code='turn_timeout' → conversation_config.turn.turn_timeout (int)
+            elif service == 'turn' and param_code == 'turn_timeout':
+                conversation_config['turn']['turn_timeout'] = int(value_numeric) if value_numeric is not None else None
+                logger.info(f"[PublishVoiceDict]   → turn.turn_timeout = {conversation_config['turn']['turn_timeout']}")
+            
+            # service='conversation' + param_code='silence_end_call_timeout' → conversation_config.turn.silence_end_call_timeout (int)
+            elif service == 'conversation' and param_code == 'silence_end_call_timeout':
+                conversation_config['turn']['silence_end_call_timeout'] = int(value_numeric) if value_numeric is not None else None
+                logger.info(f"[PublishVoiceDict]   → turn.silence_end_call_timeout = {conversation_config['turn']['silence_end_call_timeout']}")
+            
+            # service='conversation' + param_code='max_duration_seconds' → conversation_config.conversation.max_duration_seconds (int)
+            elif service == 'conversation' and param_code == 'max_duration_seconds':
+                conversation_config['conversation']['max_duration_seconds'] = int(value_numeric) if value_numeric is not None else None
+                logger.info(f"[PublishVoiceDict]   → conversation.max_duration_seconds = {conversation_config['conversation']['max_duration_seconds']}")
+            
+            else:
+                logger.warning(f"[PublishVoiceDict]   → Unrecognized service/param_code combination, skipping")
+        
+        except (ValueError, TypeError) as e:
+            logger.error(f"[PublishVoiceDict]   → Error converting value: {str(e)}")
+            raise ValueError(f"Invalid value for {service}.{param_code}: {str(e)}")
+    
+    logger.info(f"[PublishVoiceDict] Built conversation_config: {json.dumps(conversation_config, indent=2)}")
+    
+    # Step 5: PATCH to ElevenLabs API
+    logger.info(f"[PublishVoiceDict] Sending PATCH request to ElevenLabs agent {elevenlabs_agent_id}...")
+    
+    try:
+        http_status_code, response_json = patch_elevenlabs_agent(
+            agent_id=elevenlabs_agent_id,
+            conversation_config=conversation_config
+        )
+        
+        logger.info(f"[PublishVoiceDict] ✅ PATCH successful: status={http_status_code}")
+        
+    except Exception as e:
+        logger.error(f"[PublishVoiceDict] ✗ PATCH failed: {str(e)}")
+        
+        # Update publish job as failed
+        update_publish_job_status(
+            tenant_id=tenant_id,
+            publish_job_id=publish_job_id,
+            status='failed',
+            finished_at=datetime.utcnow(),
+            error_message=str(e)
+        )
+        
+        # Re-raise exception - params will NOT be marked as published
+        raise RuntimeError(f"Failed to update ElevenLabs agent: {str(e)}") from e
+    
+    # Step 6: Mark parameters as published (only reached if PATCH succeeded)
+    logger.info("[PublishVoiceDict] Marking params as published...")
+    params_updated = mark_voice_dict_params_published(
+        tenant_id=tenant_id,
+        location_id=location_id,
+        param_ids=param_ids
+    )
+    
+    logger.info(f"[PublishVoiceDict] ✓ Marked {params_updated} params as published")
+    
+    # Step 7: Update publish job status (only reached if PATCH succeeded)
+    response_data = {
+        'elevenlabs_agent_id': elevenlabs_agent_id,
+        'http_status_code': http_status_code,
+        'params_count': len(params),
+        'params_updated': params_updated,
+        'conversation_config': conversation_config
+    }
+    
+    update_publish_job_status(
+        tenant_id=tenant_id,
+        publish_job_id=publish_job_id,
+        status='succeeded',
+        finished_at=datetime.utcnow(),
+        http_status_code=http_status_code,
+        response_json=response_data
+    )
+    
+    # Prepare result
+    result = {
+        'elevenlabs_agent_id': elevenlabs_agent_id,
+        'http_status_code': http_status_code,
+        'params_count': len(params),
+        'params_updated': params_updated,
+        'conversation_config': conversation_config,
+        'processed_param_ids': param_ids
+    }
+    
+    logger.info(
+        f"[PublishVoiceDict] ✅ Workflow completed: "
+        f"agent_id={elevenlabs_agent_id}, params_count={len(params)}, params_updated={params_updated}"
+    )
+    
+    return result
