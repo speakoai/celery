@@ -5,6 +5,8 @@ This module orchestrates the complete publishing workflow by coordinating
 database operations, R2 storage, and ElevenLabs API calls.
 """
 
+import os
+import json
 from typing import Dict, Any
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -33,6 +35,73 @@ from .elevenlabs_client import (
 )
 
 logger = get_task_logger(__name__)
+
+# OpenAI Configuration
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_BASE_URL = "https://api.openai.com/v1/chat/completions"
+
+
+def get_human_friendly_operation_hours(schedule_json: Dict[str, Any]) -> str:
+    """
+    Convert business hours JSON to natural, human-friendly text using OpenAI.
+    
+    Args:
+        schedule_json: Dict with day names as keys and schedule as values
+                      Example: {"Monday": [{"start_time": "09:00", "end_time": "17:00"}]}
+    
+    Returns:
+        Human-friendly operation hours string
+        Example: "Monday to Friday 9 AM to 5 PM, weekends 10 AM to 4 PM"
+    """
+    if not OPENAI_API_KEY:
+        logger.error("[OpenAI] API key not set - cannot generate friendly hours")
+        return "Please check our website for current operating hours."
+    
+    try:
+        logger.info(f"[OpenAI] Converting operation hours to natural language")
+        logger.info(f"[OpenAI] Schedule JSON: {json.dumps(schedule_json)}")
+        
+        response = requests.post(
+            OPENAI_BASE_URL,
+            headers={
+                'Authorization': f'Bearer {OPENAI_API_KEY}',
+                'Content-Type': 'application/json',
+            },
+            json={
+                'model': 'gpt-4o-mini',
+                'messages': [
+                    {
+                        'role': 'system',
+                        'content': 'You are converting business hours to natural speech. Return ONLY the conversational hours text - no greetings, no "here are", no formatting, no explanations. Just the hours in natural language as if you are speaking directly to a customer. Keep it concise and friendly. Example: "Monday to Friday 9 AM to 5 PM, weekends 10 AM to 4 PM".'
+                    },
+                    {
+                        'role': 'user',
+                        'content': f'Convert to natural speech: {json.dumps(schedule_json)}'
+                    }
+                ],
+                'max_tokens': 100,
+                'temperature': 0.1
+            },
+            timeout=30
+        )
+        
+        if not response.ok:
+            logger.error(f"[OpenAI] API error: {response.status_code} - {response.text}")
+            return "Please check our website for current operating hours."
+        
+        data = response.json()
+        friendly_hours = data.get('choices', [{}])[0].get('message', {}).get('content', '').strip()
+        
+        if not friendly_hours:
+            logger.warning("[OpenAI] Empty response from API")
+            return "Please check our website for current operating hours."
+        
+        logger.info(f"[OpenAI] ✅ Generated friendly hours: {friendly_hours}")
+        return friendly_hours
+        
+    except Exception as e:
+        logger.error(f"[OpenAI] Error calling API: {str(e)}")
+        return "Please check our website for current operating hours."
 
 
 def format_timestamp_for_location(timezone_str: str) -> str:
