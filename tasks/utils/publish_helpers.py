@@ -391,3 +391,168 @@ def publish_knowledge(
     )
     
     return result
+
+
+def publish_greetings(
+    tenant_id: int,
+    location_id: int,
+    publish_job_id: int
+) -> Dict[str, Any]:
+    """
+    Complete workflow for publishing greetings/prompts.
+    
+    This function orchestrates the greetings publishing process:
+    1. Validates the publish job
+    2. Collects greeting templates from tenant_integration_params
+    3. Resolves dynamic variables ({{operation_hours}}, {{business_name}}, etc.)
+    4. Stores resolved prompts in tenant_ai_prompts table
+    5. Marks greeting entries as published
+    
+    Args:
+        tenant_id: Tenant identifier
+        location_id: Location identifier
+        publish_job_id: Publish job identifier
+        
+    Returns:
+        Dictionary containing:
+            - prompts_created: Number of prompts created
+            - processed_param_ids: List of param_ids marked as published
+            
+    Raises:
+        ValueError: If publish job is invalid
+        RuntimeError: If critical steps fail
+    """
+    logger.info(
+        f"[PublishGreetings] Starting workflow: tenant_id={tenant_id}, "
+        f"location_id={location_id}, publish_job_id={publish_job_id}"
+    )
+    
+    # Import here to avoid circular imports
+    from .publish_db import (
+        collect_speako_greetings,
+        get_location_operation_hours,
+        upsert_ai_prompt,
+        mark_greeting_params_published
+    )
+    
+    # Step 1: Validate publish job
+    publish_job = get_publish_job(tenant_id, publish_job_id)
+    if not publish_job:
+        raise ValueError(
+            f"Publish job not found: tenant_id={tenant_id}, publish_job_id={publish_job_id}"
+        )
+    
+    # Mark as processing
+    update_publish_job_status(
+        tenant_id=tenant_id,
+        publish_job_id=publish_job_id,
+        status='in_progress',
+        started_at=datetime.utcnow()
+    )
+    
+    # Step 2: Collect greeting templates
+    greeting_entries = collect_speako_greetings(tenant_id, location_id)
+    
+    if not greeting_entries:
+        logger.warning("[PublishGreetings] No greeting entries found")
+        raise ValueError(
+            f"No greetings found for tenant_id={tenant_id}, location_id={location_id}"
+        )
+    
+    logger.info(f"[PublishGreetings] Collected {len(greeting_entries)} greeting entries")
+    
+    # Step 3: Resolve {{operation_hours}} variable
+    logger.info("[PublishGreetings] Resolving {{operation_hours}} variable")
+    
+    schedule_json = get_location_operation_hours(tenant_id, location_id)
+    operation_hours_text = get_human_friendly_operation_hours(schedule_json)
+    
+    logger.info(f"[PublishGreetings] ✓ Operation hours: {operation_hours_text}")
+    
+    # Step 4: TODO - Resolve other variables
+    # {{business_name}}, {{location_name}}, {{ai_agent_name}}, etc.
+    # For now, we'll just replace what we have
+    
+    variables = {
+        'operation_hours': operation_hours_text,
+        # TODO: Add other variables here
+    }
+    
+    # Step 5: Process each greeting entry and store in tenant_ai_prompts
+    prompts_created = 0
+    processed_param_ids = []
+    
+    for entry in greeting_entries:
+        param_id = entry['param_id']
+        template_text = entry['value_text']
+        
+        if not template_text:
+            logger.warning(f"[PublishGreetings] Skipping param_id={param_id} - empty value_text")
+            continue
+        
+        # Replace variables in template
+        resolved_text = template_text
+        for var_name, var_value in variables.items():
+            placeholder = f"{{{{{var_name}}}}}"
+            if placeholder in resolved_text:
+                resolved_text = resolved_text.replace(placeholder, var_value)
+                logger.info(f"[PublishGreetings] Replaced {placeholder} in param_id={param_id}")
+        
+        # Store in tenant_ai_prompts
+        # TODO: Determine proper type_code based on greeting type
+        try:
+            prompt_id = upsert_ai_prompt(
+                tenant_id=tenant_id,
+                location_id=location_id,
+                type_code='first_message_after',  # TODO: Make this dynamic
+                title=f'Greeting {param_id}',
+                body_template=resolved_text,
+                metadata={'source_param_id': param_id}
+            )
+            
+            if prompt_id:
+                prompts_created += 1
+                processed_param_ids.append(param_id)
+                logger.info(f"[PublishGreetings] ✓ Created prompt_id={prompt_id} from param_id={param_id}")
+        except Exception as e:
+            logger.error(f"[PublishGreetings] ✗ Failed to create prompt from param_id={param_id}: {str(e)}")
+            # Continue processing other entries
+    
+    # Step 6: Mark greeting entries as published
+    if processed_param_ids:
+        updated_count = mark_greeting_params_published(
+            tenant_id=tenant_id,
+            location_id=location_id,
+            param_ids=processed_param_ids
+        )
+        logger.info(f"[PublishGreetings] ✓ Marked {updated_count} entries as published")
+    
+    # Step 7: Mark publish job as completed
+    response_data = {
+        'prompts_created': prompts_created,
+        'processed_param_ids': processed_param_ids,
+        'total_entries': len(greeting_entries)
+    }
+    
+    update_publish_job_status(
+        tenant_id=tenant_id,
+        publish_job_id=publish_job_id,
+        status='succeeded',
+        finished_at=datetime.utcnow(),
+        http_status_code=200,
+        response_json=response_data
+    )
+    
+    # Prepare result
+    result = {
+        'prompts_created': prompts_created,
+        'processed_param_ids': processed_param_ids,
+        'total_entries': len(greeting_entries)
+    }
+    
+    logger.info(
+        f"[PublishGreetings] ✅ Workflow completed: "
+        f"created {prompts_created} prompts from {len(greeting_entries)} entries"
+    )
+    
+    return result

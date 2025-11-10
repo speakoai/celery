@@ -10,7 +10,7 @@ import time
 from celery.utils.log import get_task_logger
 from tasks.celery_app import app
 from .utils.task_db import mark_task_running, mark_task_succeeded, mark_task_failed, upsert_tenant_integration_param
-from .utils.publish_helpers import publish_knowledge
+from .utils.publish_helpers import publish_knowledge, publish_greetings
 from .utils.publish_db import get_publish_job
 
 logger = get_task_logger(__name__)
@@ -89,7 +89,27 @@ def publish_elevenlabs_agent(
             logger.info(f"KNOWLEDGE COUNT: {publish_result.get('knowledge_count')}")
             logger.info("=" * 80)
             
-        elif job_type in ['personality', 'greetings', 'tools', 'full-agent', 'voice-dict']:
+        elif job_type == 'greetings':
+            # REAL WORKFLOW - Greetings publishing
+            logger.info(
+                f"[publish_elevenlabs_agent] Starting greetings publishing workflow - "
+                f"tenant_id={tenant_id}, location_id={location_id}, publish_job_id={publish_job_id}"
+            )
+            
+            publish_result = publish_greetings(
+                tenant_id=tenant_id,
+                location_id=location_id,
+                publish_job_id=publish_job_id
+            )
+            
+            # Log the results prominently
+            logger.info("=" * 80)
+            logger.info(f"PROMPTS CREATED: {publish_result.get('prompts_created')}")
+            logger.info(f"TOTAL ENTRIES: {publish_result.get('total_entries')}")
+            logger.info(f"PROCESSED PARAM IDS: {publish_result.get('processed_param_ids')}")
+            logger.info("=" * 80)
+            
+        elif job_type in ['personality', 'tools', 'full-agent', 'voice-dict']:
             # PLACEHOLDER for other job types
             logger.info(f"[publish_elevenlabs_agent] Job type '{job_type}' - executing PLACEHOLDER workflow")
             logger.info(f"[publish_elevenlabs_agent] ⏳ Simulating work for 10 seconds...")
@@ -108,7 +128,7 @@ def publish_elevenlabs_agent(
             }
             
         else:
-            raise ValueError(f"Unsupported job_type: '{job_type}'. Valid types: personality, greetings, tools, knowledges, full-agent, voice-dict")
+            raise ValueError(f"Unsupported job_type: '{job_type}'. Valid types: knowledges, greetings, personality, tools, full-agent, voice-dict")
         
         # Prepare success response based on job_type
         result = {
@@ -129,6 +149,12 @@ def publish_elevenlabs_agent(
                 'knowledge_count': publish_result.get('knowledge_count'),
                 'r2_url': publish_result.get('r2_url'),
                 'deleted_old_knowledge': publish_result.get('deleted_old_knowledge', [])
+            })
+        elif job_type == 'greetings':
+            result.update({
+                'prompts_created': publish_result.get('prompts_created'),
+                'total_entries': publish_result.get('total_entries'),
+                'processed_param_ids': publish_result.get('processed_param_ids')
             })
         else:
             # Placeholder job types
