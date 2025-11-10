@@ -404,9 +404,7 @@ def publish_greetings(
     This function orchestrates the greetings publishing process:
     1. Validates the publish job
     2. Collects greeting templates from tenant_integration_params
-    3. Resolves dynamic variables ({{operation_hours}}, {{business_name}}, etc.)
-    4. Stores resolved prompts in tenant_ai_prompts table
-    5. Marks greeting entries as published
+    3. Marks greeting entries as published
     
     Args:
         tenant_id: Tenant identifier
@@ -415,7 +413,6 @@ def publish_greetings(
         
     Returns:
         Dictionary containing:
-            - prompts_created: Number of prompts created
             - processed_param_ids: List of param_ids marked as published
             
     Raises:
@@ -431,8 +428,9 @@ def publish_greetings(
     from .publish_db import (
         collect_speako_greetings,
         get_location_operation_hours,
-        get_ai_prompt_type,
-        upsert_ai_prompt,
+        get_business_name,
+        get_location_name,
+        get_privacy_url,
         mark_greeting_params_published
     )
     
@@ -462,79 +460,175 @@ def publish_greetings(
     
     logger.info(f"[PublishGreetings] Collected {len(greeting_entries)} greeting entries")
     
-    # Step 3: Resolve {{operation_hours}} variable
-    logger.info("[PublishGreetings] Resolving {{operation_hours}} variable")
+    # ===== PASS 1: Build Variable Dictionary =====
+    logger.info("[PublishGreetings] === PASS 1: Building variable dictionary ===")
+    variables = {}
     
+    # Database-derived variables (Level 0 - no dependencies)
+    logger.info("[PublishGreetings] Resolving database-derived variables...")
+    
+    # {{operation_hours}}
     schedule_json = get_location_operation_hours(tenant_id, location_id)
-    operation_hours_text = get_human_friendly_operation_hours(schedule_json)
+    variables['operation_hours'] = get_human_friendly_operation_hours(schedule_json)
+    logger.info(f"[PublishGreetings] ✓ operation_hours: {variables['operation_hours']}")
     
-    logger.info(f"[PublishGreetings] ✓ Operation hours: {operation_hours_text}")
+    # {{business_name}}
+    variables['business_name'] = get_business_name(tenant_id)
+    logger.info(f"[PublishGreetings] ✓ business_name: {variables['business_name']}")
     
-    # Step 4: TODO - Resolve other variables
-    # {{business_name}}, {{location_name}}, {{ai_agent_name}}, etc.
-    # For now, we'll just replace what we have
+    # {{location_name}}
+    variables['location_name'] = get_location_name(tenant_id, location_id)
+    logger.info(f"[PublishGreetings] ✓ location_name: {variables['location_name']}")
     
-    variables = {
-        'operation_hours': operation_hours_text,
-        # TODO: Add other variables here
-    }
+    # {{privacy_url}}
+    variables['privacy_url'] = get_privacy_url(tenant_id)
+    logger.info(f"[PublishGreetings] ✓ privacy_url: {variables['privacy_url']}")
     
-    # Step 5: Process each greeting entry and store in tenant_ai_prompts
+    # Greeting-derived variables (Level 1 - may depend on Level 0)
+    logger.info("[PublishGreetings] Extracting greeting-derived variables...")
+    
+    # Build a lookup map for param_code → value_text
+    greeting_map = {entry['param_code']: entry['value_text'] for entry in greeting_entries if entry.get('param_code')}
+    
+    # Helper function to resolve variables in a text
+    def resolve_variables(text: str, available_vars: dict) -> str:
+        """Replace all {{variable}} placeholders except {{customer_first_name}}"""
+        result = text
+        for var_name, var_value in available_vars.items():
+            placeholder = f"{{{{{var_name}}}}}"
+            if placeholder in result:
+                result = result.replace(placeholder, var_value or '')
+        return result
+    
+    # {{ai_agent_name}} - from param_code='agent_name'
+    if 'agent_name' in greeting_map:
+        # Resolve any variables within agent_name first
+        variables['ai_agent_name'] = resolve_variables(greeting_map['agent_name'], variables)
+        logger.info(f"[PublishGreetings] ✓ ai_agent_name: {variables['ai_agent_name']}")
+    else:
+        variables['ai_agent_name'] = ''
+        logger.warning("[PublishGreetings] ⚠️ ai_agent_name not found (param_code='agent_name' missing)")
+    
+    # {{after_hours_message}} - from param_code='after_hours'
+    if 'after_hours' in greeting_map:
+        # Resolve any variables within after_hours (e.g., {{operation_hours}})
+        variables['after_hours_message'] = resolve_variables(greeting_map['after_hours'], variables)
+        logger.info(f"[PublishGreetings] ✓ after_hours_message: {variables['after_hours_message']}")
+    else:
+        variables['after_hours_message'] = ''
+        logger.warning("[PublishGreetings] ⚠️ after_hours_message not found (param_code='after_hours' missing)")
+    
+    # {{recording_disclosure}} - from param_code='recording_disclosure'
+    if 'recording_disclosure' in greeting_map:
+        # Resolve any variables within recording_disclosure
+        variables['recording_disclosure'] = resolve_variables(greeting_map['recording_disclosure'], variables)
+        logger.info(f"[PublishGreetings] ✓ recording_disclosure: {variables['recording_disclosure']}")
+    else:
+        variables['recording_disclosure'] = ''
+        logger.warning("[PublishGreetings] ⚠️ recording_disclosure not found (param_code='recording_disclosure' missing)")
+    
+    logger.info(f"[PublishGreetings] Variable dictionary built with {len(variables)} variables")
+    
+    # ===== PASS 2: Replace Variables in All Greeting Entries =====
+    logger.info("[PublishGreetings] === PASS 2: Replacing variables in all greeting entries ===")
+    
+    for entry in greeting_entries:
+        original_text = entry.get('value_text', '')
+        param_id = entry['param_id']
+        param_code = entry.get('param_code', 'unknown')
+        
+        # Skip if empty
+        if not original_text:
+            continue
+        
+        # Replace all variables except {{customer_first_name}}
+        resolved_text = resolve_variables(original_text, variables)
+        
+        # Check if anything changed
+        if resolved_text != original_text:
+            entry['value_text'] = resolved_text
+            logger.info(f"[PublishGreetings] ✓ Resolved variables in param_id={param_id} (param_code={param_code})")
+        else:
+            logger.info(f"[PublishGreetings] - No variables to replace in param_id={param_id} (param_code={param_code})")
+    
+    # ===== STEP 3: Insert Prompts into tenant_ai_prompts Table =====
+    logger.info("[PublishGreetings] === STEP 3: Inserting prompts into tenant_ai_prompts ===")
+    
+    from .publish_db import upsert_ai_prompt
+    
     prompts_created = 0
-    processed_param_ids = []
     
     for entry in greeting_entries:
         param_id = entry['param_id']
-        template_text = entry['value_text']
-        param_code = entry.get('param_code')
+        param_code = entry.get('param_code', '')
+        resolved_text = entry.get('value_text', '')
         
-        if not template_text:
-            logger.warning(f"[PublishGreetings] Skipping param_id={param_id} - empty value_text")
+        # Only process initial_greeting and return_customer
+        if param_code not in ['initial_greeting', 'return_customer']:
+            logger.info(f"[PublishGreetings] Skipping insertion for param_code={param_code} (not a prompt type)")
             continue
         
-        # Look up AI prompt type from ai_prompt_types table
-        prompt_type = None
-        if param_code:
-            prompt_type = get_ai_prompt_type(param_code)
+        if not resolved_text:
+            logger.warning(f"[PublishGreetings] Skipping param_id={param_id} - empty resolved text")
+            continue
         
-        if not prompt_type:
-            logger.warning(f"[PublishGreetings] No prompt type found for param_code={param_code}, using defaults")
-            type_code = param_code or 'unknown'
-            display_name = f'Greeting {param_id}'
-        else:
-            type_code = prompt_type['code']
-            display_name = prompt_type['display_name']
-            logger.info(f"[PublishGreetings] Using prompt type: code={type_code}, display_name={display_name}")
+        logger.info(f"[PublishGreetings] Processing param_code={param_code}, param_id={param_id}")
         
-        # Replace variables in template
-        resolved_text = template_text
-        for var_name, var_value in variables.items():
-            placeholder = f"{{{{{var_name}}}}}"
-            if placeholder in resolved_text:
-                resolved_text = resolved_text.replace(placeholder, var_value)
-                logger.info(f"[PublishGreetings] Replaced {placeholder} in param_id={param_id}")
+        # Determine type codes and names based on param_code
+        if param_code == 'initial_greeting':
+            base_type_code = 'first_message'
+            base_name = 'Initial Greeting'
+            after_type_code = 'first_message_after'
+            after_name = 'Initial Greeting With After Hour Message'
+        elif param_code == 'return_customer':
+            base_type_code = 'first_message_customer'
+            base_name = 'Return Customer Greeting'
+            after_type_code = 'first_message_customer_after'
+            after_name = 'Return Customer Greeting With After Hour Message'
         
-        # Store in tenant_ai_prompts
+        # Create base version (remove {{after_hours_message}} placeholder)
+        base_text = resolved_text.replace('{{after_hours_message}}', '').strip()
+        
         try:
-            prompt_id = upsert_ai_prompt(
+            base_prompt_id = upsert_ai_prompt(
                 tenant_id=tenant_id,
                 location_id=location_id,
-                type_code=type_code,
-                title=display_name,
-                name=display_name,
-                body_template=resolved_text,
-                metadata={'source_param_id': param_id, 'param_code': param_code}
+                type_code=base_type_code,
+                title=base_name,
+                name=base_name,
+                body_template=base_text,
+                metadata={'source_param_id': param_id, 'param_code': param_code, 'version': 'base'}
             )
             
-            if prompt_id:
+            if base_prompt_id:
                 prompts_created += 1
-                processed_param_ids.append(param_id)
-                logger.info(f"[PublishGreetings] ✓ Created prompt_id={prompt_id} (type_code={type_code}) from param_id={param_id}")
+                logger.info(f"[PublishGreetings] ✓ Created base prompt: prompt_id={base_prompt_id}, type_code={base_type_code}")
         except Exception as e:
-            logger.error(f"[PublishGreetings] ✗ Failed to create prompt from param_id={param_id}: {str(e)}")
-            # Continue processing other entries
+            logger.error(f"[PublishGreetings] ✗ Failed to create base prompt for param_id={param_id}: {str(e)}")
+        
+        # Create after-hours version (use fully resolved text)
+        try:
+            after_prompt_id = upsert_ai_prompt(
+                tenant_id=tenant_id,
+                location_id=location_id,
+                type_code=after_type_code,
+                title=after_name,
+                name=after_name,
+                body_template=resolved_text,
+                metadata={'source_param_id': param_id, 'param_code': param_code, 'version': 'after_hours'}
+            )
+            
+            if after_prompt_id:
+                prompts_created += 1
+                logger.info(f"[PublishGreetings] ✓ Created after-hours prompt: prompt_id={after_prompt_id}, type_code={after_type_code}")
+        except Exception as e:
+            logger.error(f"[PublishGreetings] ✗ Failed to create after-hours prompt for param_id={param_id}: {str(e)}")
     
-    # Step 6: Mark greeting entries as published
+    logger.info(f"[PublishGreetings] Total prompts created: {prompts_created}")
+    
+    # Step 4: Mark greeting entries as published
+    processed_param_ids = [entry['param_id'] for entry in greeting_entries]
+    
     if processed_param_ids:
         updated_count = mark_greeting_params_published(
             tenant_id=tenant_id,
@@ -543,7 +637,7 @@ def publish_greetings(
         )
         logger.info(f"[PublishGreetings] ✓ Marked {updated_count} entries as published")
     
-    # Step 7: Mark publish job as completed
+    # Step 5: Mark publish job as completed
     response_data = {
         'prompts_created': prompts_created,
         'processed_param_ids': processed_param_ids,
@@ -568,7 +662,7 @@ def publish_greetings(
     
     logger.info(
         f"[PublishGreetings] ✅ Workflow completed: "
-        f"created {prompts_created} prompts from {len(greeting_entries)} entries"
+        f"created {prompts_created} prompts, marked {len(processed_param_ids)} entries as published"
     )
     
     return result

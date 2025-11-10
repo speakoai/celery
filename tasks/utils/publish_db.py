@@ -711,3 +711,106 @@ def delete_old_elevenlabs_knowledge_ids(
             conn.close()
         except Exception:
             pass
+
+
+def get_business_name(tenant_id: str) -> str:
+    """
+    Get business name from tenants table.
+    
+    Args:
+        tenant_id: Tenant identifier
+    
+    Returns:
+        Business name string
+    """
+    logger.info(f"[publish_db] Fetching business name: tenant_id={tenant_id}")
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT name FROM tenants WHERE tenant_id = %s",
+                    (tenant_id,)
+                )
+                row = cur.fetchone()
+                if row:
+                    business_name = row[0]
+                    logger.info(f"[publish_db] Found business name: {business_name}")
+                    return business_name
+                else:
+                    logger.warning(f"[publish_db] Business name not found for tenant_id={tenant_id}")
+                    return ""
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def get_location_name(tenant_id: str, location_id: str) -> str:
+    """
+    Get location name from locations table.
+    
+    Args:
+        tenant_id: Tenant identifier
+        location_id: Location identifier
+    
+    Returns:
+        Location name string
+    """
+    logger.info(f"[publish_db] Fetching location name: tenant_id={tenant_id}, location_id={location_id}")
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT name FROM locations WHERE tenant_id = %s AND location_id = %s",
+                    (tenant_id, location_id)
+                )
+                row = cur.fetchone()
+                if row:
+                    location_name = row[0]
+                    logger.info(f"[publish_db] Found location name: {location_name}")
+                    return location_name
+                else:
+                    logger.warning(f"[publish_db] Location name not found for tenant_id={tenant_id}, location_id={location_id}")
+                    return ""
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def get_privacy_url(tenant_id: str) -> str:
+    """
+    Get privacy policy URL from tenant_info table.
+    
+    Args:
+        tenant_id: Tenant identifier
+    
+    Returns:
+        Privacy policy URL string
+    """
+    logger.info(f"[publish_db] Fetching privacy URL: tenant_id={tenant_id}")
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT privacy_policy_url FROM tenant_info WHERE tenant_id = %s",
+                    (tenant_id,)
+                )
+                row = cur.fetchone()
+                if row and row[0]:
+                    privacy_url = row[0]
+                    logger.info(f"[publish_db] Found privacy URL: {privacy_url}")
+                    return privacy_url
+                else:
+                    logger.warning(f"[publish_db] Privacy URL not found for tenant_id={tenant_id}")
+                    return ""
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
