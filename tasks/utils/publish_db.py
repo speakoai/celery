@@ -1030,3 +1030,127 @@ def update_dictionary_param_text(param_id: int, dictionary_id: str) -> int:
             conn.close()
         except Exception:
             pass
+
+
+def get_prompt_fragments(fragment_keys: List[str]) -> Dict[str, str]:
+    """
+    Fetch multiple prompt fragments in a single database query (optimized).
+    
+    Args:
+        fragment_keys: List of fragment_key values to fetch
+    
+    Returns:
+        Dict mapping fragment_key to template_text
+        Example: {'personality': '{{traits}}...', 'response_style_concise': 'Keep responses brief...'}
+    """
+    if not fragment_keys:
+        logger.warning("[publish_db] No fragment_keys provided, returning empty dict")
+        return {}
+    
+    logger.info(f"[publish_db] Fetching {len(fragment_keys)} prompt fragments: {fragment_keys}")
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT fragment_key, template_text
+                    FROM ai_prompt_fragment
+                    WHERE fragment_key = ANY(%s)
+                    """,
+                    (fragment_keys,)
+                )
+                rows = cur.fetchall()
+                result = {row['fragment_key']: row['template_text'] for row in rows}
+                logger.info(f"[publish_db] Found {len(result)} prompt fragments")
+                return result
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def collect_personality_params(tenant_id: str, location_id: str) -> List[Dict[str, Any]]:
+    """
+    Collect personality parameters from tenant_integration_params.
+    
+    Args:
+        tenant_id: Tenant identifier
+        location_id: Location identifier
+    
+    Returns:
+        List of dicts with keys: id, param_code, param_text, param_json
+        Ordered by param_code
+    """
+    logger.info(f"[publish_db] Collecting personality params: tenant_id={tenant_id}, location_id={location_id}")
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT id, param_code, param_text, param_json
+                    FROM tenant_integration_params
+                    WHERE tenant_id = %s
+                      AND location_id = %s
+                      AND service = 'agents'
+                      AND provider = 'elevenlabs'
+                      AND param_code IN ('traits', 'tone_of_voice', 'response_style', 'temperature', 'custom_instruction')
+                      AND status = 'active'
+                    ORDER BY param_code
+                    """,
+                    (tenant_id, location_id)
+                )
+                rows = cur.fetchall()
+                result = [dict(row) for row in rows]
+                logger.info(f"[publish_db] Found {len(result)} personality params")
+                return result
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def mark_personality_params_published(tenant_id: str, location_id: str, param_ids: List[int]) -> int:
+    """
+    Mark personality parameters as 'published' after successful processing.
+    
+    Args:
+        tenant_id: Tenant identifier
+        location_id: Location identifier
+        param_ids: List of param IDs to mark as published
+    
+    Returns:
+        Number of rows updated
+    """
+    if not param_ids:
+        logger.info("[publish_db] No param_ids provided, skipping mark as published")
+        return 0
+    
+    logger.info(f"[publish_db] Marking {len(param_ids)} personality params as published: {param_ids}")
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE tenant_integration_params
+                    SET status = 'published',
+                        updated_at = now()
+                    WHERE tenant_id = %s
+                      AND location_id = %s
+                      AND id = ANY(%s)
+                    RETURNING id, param_code
+                    """,
+                    (tenant_id, location_id, param_ids)
+                )
+                rows_updated = cur.rowcount
+                logger.info(f"[publish_db] ✓ Marked {rows_updated} personality params as published")
+                return rows_updated
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass

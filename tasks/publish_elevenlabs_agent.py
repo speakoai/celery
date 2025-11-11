@@ -10,7 +10,7 @@ import time
 from celery.utils.log import get_task_logger
 from tasks.celery_app import app
 from .utils.task_db import mark_task_running, mark_task_succeeded, mark_task_failed, upsert_tenant_integration_param
-from .utils.publish_helpers import publish_knowledge, publish_greetings, publish_voice_dict
+from .utils.publish_helpers import publish_knowledge, publish_greetings, publish_voice_dict, publish_personality
 from .utils.publish_db import get_publish_job
 
 logger = get_task_logger(__name__)
@@ -134,7 +134,28 @@ def publish_elevenlabs_agent(
             logger.info(f"DICTIONARY ID: {publish_result.get('dictionary_id')}")
             logger.info("=" * 80)
             
-        elif job_type in ['personality', 'tools', 'full-agent']:
+        elif job_type == 'personality':
+            # REAL WORKFLOW - Personality publishing
+            logger.info(
+                f"[publish_elevenlabs_agent] Starting personality publishing workflow - "
+                f"tenant_id={tenant_id}, location_id={location_id}, publish_job_id={publish_job_id}"
+            )
+            
+            publish_result = publish_personality(
+                tenant_id=tenant_id,
+                location_id=location_id,
+                publish_job_id=publish_job_id
+            )
+            
+            # Log the results prominently
+            logger.info("=" * 80)
+            logger.info(f"PROMPT CREATED: {publish_result.get('prompt_created')}")
+            logger.info(f"PROMPT ID: {publish_result.get('prompt_id')}")
+            logger.info(f"PARAMS UPDATED: {publish_result.get('params_updated')}")
+            logger.info(f"PROCESSED PARAM IDS: {publish_result.get('processed_param_ids')}")
+            logger.info("=" * 80)
+            
+        elif job_type in ['tools', 'full-agent']:
             # PLACEHOLDER for other job types
             logger.info(f"[publish_elevenlabs_agent] Job type '{job_type}' - executing PLACEHOLDER workflow")
             logger.info(f"[publish_elevenlabs_agent] ⏳ Simulating work for 10 seconds...")
@@ -192,6 +213,13 @@ def publish_elevenlabs_agent(
                 'dictionary_created': publish_result.get('dictionary_created'),
                 'dictionary_updated': publish_result.get('dictionary_updated'),
                 'dictionary_id': publish_result.get('dictionary_id')
+            })
+        elif job_type == 'personality':
+            result.update({
+                'prompt_created': publish_result.get('prompt_created'),
+                'prompt_id': publish_result.get('prompt_id'),
+                'params_updated': publish_result.get('params_updated'),
+                'processed_param_ids': publish_result.get('processed_param_ids')
             })
         else:
             # Placeholder job types

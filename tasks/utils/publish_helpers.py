@@ -997,3 +997,162 @@ def publish_voice_dict(
     )
     
     return result
+
+
+def publish_personality(tenant_id: str, location_id: str, publish_job_id: str) -> Dict[str, Any]:
+    """
+    Publish personality configuration to tenant_ai_prompts.
+    
+    Phase 1: Handle traits, tone_of_voice, response_style
+    Phase 2: Handle temperature and custom_instruction (future implementation)
+    
+    Args:
+        tenant_id: Tenant identifier
+        location_id: Location identifier
+        publish_job_id: Publish job identifier
+    
+    Returns:
+        Dict with keys: prompt_created, prompt_id, params_updated, processed_param_ids
+    """
+    logger.info(
+        f"[PublishPersonality] Starting workflow - "
+        f"tenant_id={tenant_id}, location_id={location_id}, publish_job_id={publish_job_id}"
+    )
+    
+    # Import database functions
+    from .publish_db import (
+        collect_personality_params,
+        get_prompt_fragments,
+        upsert_ai_prompt,
+        mark_personality_params_published
+    )
+    
+    # Step 1: Collect personality params
+    logger.info("[PublishPersonality] Collecting personality parameters...")
+    params = collect_personality_params(tenant_id, location_id)
+    
+    if not params:
+        logger.warning("[PublishPersonality] No personality parameters found")
+        return {
+            'prompt_created': False,
+            'prompt_id': None,
+            'params_updated': 0,
+            'processed_param_ids': []
+        }
+    
+    logger.info(f"[PublishPersonality] Found {len(params)} personality params")
+    
+    # Step 2: Build param_map for easy lookup
+    param_map = {p['param_code']: p['param_text'] for p in params}
+    logger.info(f"[PublishPersonality] Param map keys: {list(param_map.keys())}")
+    
+    # Step 3: Fetch ALL prompt fragments in ONE query (optimized)
+    logger.info("[PublishPersonality] Fetching prompt fragments (optimized single query)...")
+    fragments = get_prompt_fragments([
+        'personality',
+        'response_style_concise',
+        'response_style_balanced',
+        'response_style_detailed'
+    ])
+    
+    logger.info(f"[PublishPersonality] Fetched {len(fragments)} fragments: {list(fragments.keys())}")
+    
+    # Step 4: Get the personality template
+    personality_template = fragments.get('personality', '')
+    
+    if not personality_template:
+        logger.error("[PublishPersonality] Personality template not found in ai_prompt_fragment")
+        raise ValueError("Personality template not found in ai_prompt_fragment table")
+    
+    logger.info(f"[PublishPersonality] Personality template: {personality_template[:100]}...")
+    
+    # Step 5: Replace {{traits}}
+    traits_value = param_map.get('traits', '')
+    personality_template = personality_template.replace('{{traits}}', traits_value)
+    logger.info(f"[PublishPersonality] ✓ Replaced {{{{traits}}}} with: {traits_value[:50]}...")
+    
+    # Step 6: Replace {{tone_of_voice}}
+    tone_value = param_map.get('tone_of_voice', '')
+    personality_template = personality_template.replace('{{tone_of_voice}}', tone_value)
+    logger.info(f"[PublishPersonality] ✓ Replaced {{{{tone_of_voice}}}} with: {tone_value[:50]}...")
+    
+    # Step 7: Replace {{response_style}} with conditional mapping
+    response_style_value = param_map.get('response_style', '').strip()
+    logger.info(f"[PublishPersonality] Response style value: '{response_style_value}'")
+    
+    if response_style_value == 'Concise':
+        response_style_text = fragments.get('response_style_concise', '')
+        logger.info(f"[PublishPersonality] → Using 'Concise' template")
+    elif response_style_value == 'Balanced':
+        response_style_text = fragments.get('response_style_balanced', '')
+        logger.info(f"[PublishPersonality] → Using 'Balanced' template")
+    elif response_style_value == 'Detailed':
+        response_style_text = fragments.get('response_style_detailed', '')
+        logger.info(f"[PublishPersonality] → Using 'Detailed' template")
+    else:
+        response_style_text = ''
+        logger.warning(f"[PublishPersonality] ⚠ Unknown response_style value: '{response_style_value}'")
+    
+    personality_template = personality_template.replace('{{response_style}}', response_style_text)
+    logger.info(f"[PublishPersonality] ✓ Replaced {{{{response_style}}}} with: {response_style_text[:50]}...")
+    
+    # Step 8: Insert completed personality to tenant_ai_prompts
+    logger.info("[PublishPersonality] Inserting personality prompt to tenant_ai_prompts...")
+    prompt_id = upsert_ai_prompt(
+        tenant_id=tenant_id,
+        location_id=location_id,
+        type_code='personality',
+        title='Agent Personality Configuration',
+        body_template=personality_template
+    )
+    
+    logger.info(f"[PublishPersonality] ✓ Inserted prompt_id={prompt_id}")
+    
+    # Step 9: Mark ONLY traits/tone/style as published (not temperature/custom_instruction)
+    param_ids_to_mark = [
+        p['id'] for p in params 
+        if p['param_code'] in ['traits', 'tone_of_voice', 'response_style']
+    ]
+    
+    logger.info(f"[PublishPersonality] Marking {len(param_ids_to_mark)} params as published (excluding temperature/custom_instruction)")
+    
+    params_updated = mark_personality_params_published(
+        tenant_id=tenant_id,
+        location_id=location_id,
+        param_ids=param_ids_to_mark
+    )
+    
+    logger.info(f"[PublishPersonality] ✓ Marked {params_updated} params as published")
+    
+    # Step 10: Update publish job status
+    from .publish_db import update_publish_job_status
+    
+    response_data = {
+        'prompt_created': True,
+        'prompt_id': prompt_id,
+        'params_updated': params_updated,
+        'processed_param_ids': param_ids_to_mark
+    }
+    
+    update_publish_job_status(
+        tenant_id=tenant_id,
+        publish_job_id=publish_job_id,
+        status='succeeded',
+        finished_at=datetime.utcnow(),
+        response_json=response_data
+    )
+    
+    # Step 11: Return results
+    result = {
+        'prompt_created': True,
+        'prompt_id': prompt_id,
+        'params_updated': params_updated,
+        'processed_param_ids': param_ids_to_mark
+    }
+    
+    logger.info(
+        f"[PublishPersonality] ✅ Workflow completed: "
+        f"prompt_id={prompt_id}, params_updated={params_updated}"
+    )
+    
+    return result
