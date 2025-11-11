@@ -1042,8 +1042,30 @@ def publish_personality(tenant_id: str, location_id: str, publish_job_id: str) -
     
     logger.info(f"[PublishPersonality] Found {len(params)} personality params")
     
-    # Step 2: Build param_map for easy lookup
-    param_map = {p['param_code']: p['value_text'] for p in params}
+    # Step 2: Build param_map for easy lookup - extract from value_json
+    param_map = {}
+    for p in params:
+        value_json = p.get('value_json')
+        param_code = p['param_code']
+        
+        if value_json and isinstance(value_json, list) and len(value_json) > 0:
+            # Join array elements with ", " for traits and tone_of_voice
+            # For response_style, just extract the first element
+            if param_code in ['traits', 'tone_of_voice']:
+                param_map[param_code] = ', '.join(str(v) for v in value_json)
+                logger.info(f"[PublishPersonality] {param_code}: {param_map[param_code]}")
+            elif param_code == 'response_style':
+                param_map[param_code] = str(value_json[0])
+                logger.info(f"[PublishPersonality] {param_code}: {param_map[param_code]}")
+            else:
+                # For other params (temperature, custom_instruction), just store as-is
+                param_map[param_code] = value_json
+                logger.info(f"[PublishPersonality] {param_code}: stored as-is")
+        else:
+            # Fallback to empty string if value_json is None or empty
+            param_map[param_code] = ''
+            logger.warning(f"[PublishPersonality] {param_code}: empty/null value_json, using empty string")
+    
     logger.info(f"[PublishPersonality] Param map keys: {list(param_map.keys())}")
     
     # Step 3: Fetch ALL prompt fragments in ONE query (optimized)
