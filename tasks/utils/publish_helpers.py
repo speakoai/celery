@@ -1043,7 +1043,7 @@ def publish_personality(tenant_id: str, location_id: str, publish_job_id: str) -
     logger.info(f"[PublishPersonality] Found {len(params)} personality params")
     
     # Step 2: Build param_map for easy lookup
-    param_map = {p['param_code']: p['param_text'] for p in params}
+    param_map = {p['param_code']: p['value_text'] for p in params}
     logger.info(f"[PublishPersonality] Param map keys: {list(param_map.keys())}")
     
     # Step 3: Fetch ALL prompt fragments in ONE query (optimized)
@@ -1110,7 +1110,7 @@ def publish_personality(tenant_id: str, location_id: str, publish_job_id: str) -
     
     # Step 9: Mark ONLY traits/tone/style as published (not temperature/custom_instruction)
     param_ids_to_mark = [
-        p['id'] for p in params 
+        p['param_id'] for p in params 
         if p['param_code'] in ['traits', 'tone_of_voice', 'response_style']
     ]
     

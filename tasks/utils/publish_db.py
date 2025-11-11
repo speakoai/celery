@@ -1080,7 +1080,7 @@ def collect_personality_params(tenant_id: str, location_id: str) -> List[Dict[st
         location_id: Location identifier
     
     Returns:
-        List of dicts with keys: id, param_code, param_text, param_json
+        List of dicts with keys: param_id, param_code, value_text, value_json
         Ordered by param_code
     """
     logger.info(f"[publish_db] Collecting personality params: tenant_id={tenant_id}, location_id={location_id}")
@@ -1090,14 +1090,14 @@ def collect_personality_params(tenant_id: str, location_id: str) -> List[Dict[st
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
                     """
-                    SELECT id, param_code, param_text, param_json
+                    SELECT param_id, param_code, value_text, value_json
                     FROM tenant_integration_params
                     WHERE tenant_id = %s
                       AND location_id = %s
                       AND service = 'agents'
                       AND provider = 'elevenlabs'
                       AND param_code IN ('traits', 'tone_of_voice', 'response_style', 'temperature', 'custom_instruction')
-                      AND status = 'active'
+                      AND status = 'configured'
                     ORDER BY param_code
                     """,
                     (tenant_id, location_id)
@@ -1141,8 +1141,8 @@ def mark_personality_params_published(tenant_id: str, location_id: str, param_id
                         updated_at = now()
                     WHERE tenant_id = %s
                       AND location_id = %s
-                      AND id = ANY(%s)
-                    RETURNING id, param_code
+                      AND param_id = ANY(%s)
+                    RETURNING param_id, param_code
                     """,
                     (tenant_id, location_id, param_ids)
                 )
