@@ -31,7 +31,8 @@ from .elevenlabs_client import (
     upload_knowledge_file,
     delete_knowledge,
     get_agent_config,
-    update_agent_knowledge
+    update_agent_knowledge,
+    patch_elevenlabs_agent
 )
 
 logger = get_task_logger(__name__)
@@ -1191,10 +1192,8 @@ def publish_personality(tenant_id: str, location_id: str, publish_job_id: str) -
     if temperature_param and temperature_param.get('value_numeric') is not None:
         logger.info("[PublishPersonality] Processing temperature...")
         
-        # Get ElevenLabs agent ID
-        from .elevenlabs_client import get_elevenlabs_agent_id, patch_elevenlabs_agent
-        
-        agent_id = get_elevenlabs_agent_id(tenant_id, location_id)
+        # Get ElevenLabs agent ID (returns tuple: agent_id, location_name, timezone)
+        agent_id, _, _ = get_elevenlabs_agent_id(tenant_id, location_id)
         if not agent_id:
             logger.error("[PublishPersonality] Cannot process temperature: ElevenLabs agent_id not found")
             raise ValueError(f"ElevenLabs agent_id not found for tenant_id={tenant_id}, location_id={location_id}")
@@ -1213,9 +1212,9 @@ def publish_personality(tenant_id: str, location_id: str, publish_job_id: str) -
         }
         
         try:
-            # PATCH to ElevenLabs
-            response = patch_elevenlabs_agent(agent_id, conversation_config)
-            logger.info(f"[PublishPersonality] ✓ Temperature PATCH successful: HTTP {response.status_code}")
+            # PATCH to ElevenLabs (returns tuple: status_code, response_dict)
+            status_code, response_dict = patch_elevenlabs_agent(agent_id, conversation_config)
+            logger.info(f"[PublishPersonality] ✓ Temperature PATCH successful: HTTP {status_code}")
             temperature_updated = True
             
         except Exception as e:
