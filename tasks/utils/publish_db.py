@@ -1080,7 +1080,7 @@ def collect_personality_params(tenant_id: str, location_id: str) -> List[Dict[st
         location_id: Location identifier
     
     Returns:
-        List of dicts with keys: param_id, param_code, value_text, value_json
+        List of dicts with keys: param_id, param_code, value_text, value_json, value_numeric
         Ordered by param_code
     """
     logger.info(f"[publish_db] Collecting personality params: tenant_id={tenant_id}, location_id={location_id}")
@@ -1090,7 +1090,7 @@ def collect_personality_params(tenant_id: str, location_id: str) -> List[Dict[st
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
                     """
-                    SELECT param_id, param_code, value_text, value_json
+                    SELECT param_id, param_code, value_text, value_json, value_numeric
                     FROM tenant_integration_params
                     WHERE tenant_id = %s
                       AND location_id = %s
