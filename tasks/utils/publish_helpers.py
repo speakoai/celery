@@ -1042,12 +1042,23 @@ def publish_personality(tenant_id: str, location_id: str, publish_job_id: str) -
     
     logger.info(f"[PublishPersonality] Found {len(params)} personality params")
     
-    # Step 2: Build param_map for easy lookup - extract from value_json
+    # Step 2: Build param_map for easy lookup - extract from value_json or value_text
     param_map = {}
     for p in params:
         value_json = p.get('value_json')
+        value_text = p.get('value_text')
         param_code = p['param_code']
         
+        # Handle custom_instruction from value_text (not value_json)
+        if param_code == 'custom_instruction':
+            param_map[param_code] = value_text or ''
+            if value_text:
+                logger.info(f"[PublishPersonality] custom_instruction: {value_text[:50]}...")
+            else:
+                logger.info(f"[PublishPersonality] custom_instruction: empty/null, using empty string")
+            continue  # Skip to next param
+        
+        # Handle other params from value_json (existing logic)
         if value_json and isinstance(value_json, list) and len(value_json) > 0:
             # Join array elements with ", " for traits and tone_of_voice
             # For response_style, just extract the first element
@@ -1058,13 +1069,15 @@ def publish_personality(tenant_id: str, location_id: str, publish_job_id: str) -
                 param_map[param_code] = str(value_json[0])
                 logger.info(f"[PublishPersonality] {param_code}: {param_map[param_code]}")
             else:
-                # For other params (temperature, custom_instruction), just store as-is
+                # For other params (temperature), just store as-is
                 param_map[param_code] = value_json
                 logger.info(f"[PublishPersonality] {param_code}: stored as-is")
         else:
             # Fallback to empty string if value_json is None or empty
             param_map[param_code] = ''
-            logger.warning(f"[PublishPersonality] {param_code}: empty/null value_json, using empty string")
+            # Only warn for required params
+            if param_code in ['traits', 'tone_of_voice', 'response_style']:
+                logger.warning(f"[PublishPersonality] {param_code}: empty/null value_json, using empty string")
     
     logger.info(f"[PublishPersonality] Param map keys: {list(param_map.keys())}")
     
@@ -1074,7 +1087,8 @@ def publish_personality(tenant_id: str, location_id: str, publish_job_id: str) -
         'personality',
         'response_style_concise',
         'response_style_balanced',
-        'response_style_detailed'
+        'response_style_detailed',
+        'custom_instruction'
     ])
     
     logger.info(f"[PublishPersonality] Fetched {len(fragments)} fragments: {list(fragments.keys())}")
@@ -1123,20 +1137,69 @@ def publish_personality(tenant_id: str, location_id: str, publish_job_id: str) -
     prompt_id = upsert_ai_prompt(
         tenant_id=tenant_id,
         location_id=location_id,
+        name='Personality',
         type_code='personality',
         title='Agent Personality Configuration',
         body_template=personality_template
     )
     
-    logger.info(f"[PublishPersonality] ✓ Inserted prompt_id={prompt_id}")
+    logger.info(f"[PublishPersonality] ✓ Inserted personality prompt_id={prompt_id}")
     
-    # Step 9: Mark ONLY traits/tone/style as published (not temperature/custom_instruction)
+    # Step 8.5: Process custom_instruction (if exists)
+    custom_instruction_value = param_map.get('custom_instruction', '').strip()
+    custom_instruction_prompt_id = None
+    
+    if custom_instruction_value:
+        logger.info("[PublishPersonality] Processing custom_instruction...")
+        
+        # Get custom_instruction template
+        custom_instruction_template = fragments.get('custom_instruction', '')
+        
+        if not custom_instruction_template:
+            logger.error("[PublishPersonality] custom_instruction template not found in ai_prompt_fragment")
+            raise ValueError("custom_instruction template not found in ai_prompt_fragment table")
+        
+        logger.info(f"[PublishPersonality] custom_instruction template: {custom_instruction_template[:100]}...")
+        
+        # Replace {{custom_instruction}} variable
+        custom_instruction_resolved = custom_instruction_template.replace(
+            '{{custom_instruction}}', 
+            custom_instruction_value
+        )
+        
+        logger.info(f"[PublishPersonality] ✓ Replaced {{{{custom_instruction}}}} with: {custom_instruction_value[:50]}...")
+        
+        # Insert custom_instruction to tenant_ai_prompts
+        custom_instruction_prompt_id = upsert_ai_prompt(
+            tenant_id=tenant_id,
+            location_id=location_id,
+            name='Custom Instruction',
+            type_code='custom_instruction',
+            title='Agent Custom Instruction',
+            body_template=custom_instruction_resolved
+        )
+        
+        logger.info(f"[PublishPersonality] ✓ Inserted custom_instruction prompt_id={custom_instruction_prompt_id}")
+    else:
+        logger.info("[PublishPersonality] No custom_instruction value provided, skipping")
+    
+    # Step 9: Mark traits/tone/style as published (always) + custom_instruction (if processed)
     param_ids_to_mark = [
         p['param_id'] for p in params 
         if p['param_code'] in ['traits', 'tone_of_voice', 'response_style']
     ]
     
-    logger.info(f"[PublishPersonality] Marking {len(param_ids_to_mark)} params as published (excluding temperature/custom_instruction)")
+    # Also mark custom_instruction as published if it was processed
+    if custom_instruction_value:
+        custom_instruction_param = next(
+            (p for p in params if p['param_code'] == 'custom_instruction'), 
+            None
+        )
+        if custom_instruction_param:
+            param_ids_to_mark.append(custom_instruction_param['param_id'])
+            logger.info("[PublishPersonality] Including custom_instruction in published params")
+    
+    logger.info(f"[PublishPersonality] Marking {len(param_ids_to_mark)} params as published (excluding temperature)")
     
     params_updated = mark_personality_params_published(
         tenant_id=tenant_id,
@@ -1152,6 +1215,8 @@ def publish_personality(tenant_id: str, location_id: str, publish_job_id: str) -
     response_data = {
         'prompt_created': True,
         'prompt_id': prompt_id,
+        'custom_instruction_created': custom_instruction_prompt_id is not None,
+        'custom_instruction_prompt_id': custom_instruction_prompt_id,
         'params_updated': params_updated,
         'processed_param_ids': param_ids_to_mark
     }
@@ -1168,6 +1233,8 @@ def publish_personality(tenant_id: str, location_id: str, publish_job_id: str) -
     result = {
         'prompt_created': True,
         'prompt_id': prompt_id,
+        'custom_instruction_created': custom_instruction_prompt_id is not None,
+        'custom_instruction_prompt_id': custom_instruction_prompt_id,
         'params_updated': params_updated,
         'processed_param_ids': param_ids_to_mark
     }

@@ -151,6 +151,8 @@ def publish_elevenlabs_agent(
             logger.info("=" * 80)
             logger.info(f"PROMPT CREATED: {publish_result.get('prompt_created')}")
             logger.info(f"PROMPT ID: {publish_result.get('prompt_id')}")
+            logger.info(f"CUSTOM INSTRUCTION CREATED: {publish_result.get('custom_instruction_created')}")
+            logger.info(f"CUSTOM INSTRUCTION PROMPT ID: {publish_result.get('custom_instruction_prompt_id')}")
             logger.info(f"PARAMS UPDATED: {publish_result.get('params_updated')}")
             logger.info(f"PROCESSED PARAM IDS: {publish_result.get('processed_param_ids')}")
             logger.info("=" * 80)
@@ -218,6 +220,8 @@ def publish_elevenlabs_agent(
             result.update({
                 'prompt_created': publish_result.get('prompt_created'),
                 'prompt_id': publish_result.get('prompt_id'),
+                'custom_instruction_created': publish_result.get('custom_instruction_created'),
+                'custom_instruction_prompt_id': publish_result.get('custom_instruction_prompt_id'),
                 'params_updated': publish_result.get('params_updated'),
                 'processed_param_ids': publish_result.get('processed_param_ids')
             })
