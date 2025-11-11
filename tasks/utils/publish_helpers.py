@@ -1183,7 +1183,56 @@ def publish_personality(tenant_id: str, location_id: str, publish_job_id: str) -
     else:
         logger.info("[PublishPersonality] No custom_instruction value provided, skipping")
     
-    # Step 9: Mark traits/tone/style as published (always) + custom_instruction (if processed)
+    # Step 8.6: Process temperature (if exists)
+    temperature_param = next((p for p in params if p['param_code'] == 'temperature'), None)
+    temperature_updated = False
+    temperature_value = None
+    
+    if temperature_param and temperature_param.get('value_numeric') is not None:
+        logger.info("[PublishPersonality] Processing temperature...")
+        
+        # Get ElevenLabs agent ID
+        from .elevenlabs_client import get_elevenlabs_agent_id, patch_elevenlabs_agent
+        
+        agent_id = get_elevenlabs_agent_id(tenant_id, location_id)
+        if not agent_id:
+            logger.error("[PublishPersonality] Cannot process temperature: ElevenLabs agent_id not found")
+            raise ValueError(f"ElevenLabs agent_id not found for tenant_id={tenant_id}, location_id={location_id}")
+        
+        # Convert Decimal to float
+        temperature_value = float(temperature_param['value_numeric'])
+        logger.info(f"[PublishPersonality] Temperature value: {temperature_value}")
+        
+        # Build conversation_config payload
+        conversation_config = {
+            "agent": {
+                "prompt": {
+                    "temperature": temperature_value
+                }
+            }
+        }
+        
+        try:
+            # PATCH to ElevenLabs
+            response = patch_elevenlabs_agent(agent_id, conversation_config)
+            logger.info(f"[PublishPersonality] ✓ Temperature PATCH successful: HTTP {response.status_code}")
+            temperature_updated = True
+            
+        except Exception as e:
+            logger.error(f"[PublishPersonality] Failed to PATCH temperature: {str(e)}")
+            from .publish_db import update_publish_job_status
+            update_publish_job_status(
+                tenant_id=tenant_id,
+                publish_job_id=publish_job_id,
+                status='failed',
+                finished_at=datetime.utcnow(),
+                error_message=f"Failed to PATCH temperature: {str(e)}"
+            )
+            raise RuntimeError(f"Failed to PATCH temperature to ElevenLabs: {str(e)}") from e
+    else:
+        logger.info("[PublishPersonality] No temperature value provided, skipping")
+    
+    # Step 9: Mark traits/tone/style as published (always) + custom_instruction (if processed) + temperature (if updated)
     param_ids_to_mark = [
         p['param_id'] for p in params 
         if p['param_code'] in ['traits', 'tone_of_voice', 'response_style']
@@ -1199,7 +1248,12 @@ def publish_personality(tenant_id: str, location_id: str, publish_job_id: str) -
             param_ids_to_mark.append(custom_instruction_param['param_id'])
             logger.info("[PublishPersonality] Including custom_instruction in published params")
     
-    logger.info(f"[PublishPersonality] Marking {len(param_ids_to_mark)} params as published (excluding temperature)")
+    # Also mark temperature as published if it was updated
+    if temperature_updated and temperature_param:
+        param_ids_to_mark.append(temperature_param['param_id'])
+        logger.info("[PublishPersonality] Including temperature in published params")
+    
+    logger.info(f"[PublishPersonality] Marking {len(param_ids_to_mark)} params as published")
     
     params_updated = mark_personality_params_published(
         tenant_id=tenant_id,
@@ -1217,6 +1271,8 @@ def publish_personality(tenant_id: str, location_id: str, publish_job_id: str) -
         'prompt_id': prompt_id,
         'custom_instruction_created': custom_instruction_prompt_id is not None,
         'custom_instruction_prompt_id': custom_instruction_prompt_id,
+        'temperature_updated': temperature_updated,
+        'temperature_value': temperature_value,
         'params_updated': params_updated,
         'processed_param_ids': param_ids_to_mark
     }
@@ -1235,6 +1291,8 @@ def publish_personality(tenant_id: str, location_id: str, publish_job_id: str) -
         'prompt_id': prompt_id,
         'custom_instruction_created': custom_instruction_prompt_id is not None,
         'custom_instruction_prompt_id': custom_instruction_prompt_id,
+        'temperature_updated': temperature_updated,
+        'temperature_value': temperature_value,
         'params_updated': params_updated,
         'processed_param_ids': param_ids_to_mark
     }
