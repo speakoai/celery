@@ -1186,7 +1186,7 @@ def collect_tool_params(tenant_id: str, location_id: str) -> List[Dict[str, Any]
                       AND tip.location_id = %s
                       AND tip.service = 'tool'
                       AND tip.provider = 'speako'
-                      AND tip.status = 'configured'
+                      AND tip.status IN ('configured', 'published')
                       AND att.is_active = true
                     ORDER BY tip.param_code
                     """,
