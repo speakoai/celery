@@ -1302,3 +1302,200 @@ def publish_personality(tenant_id: str, location_id: str, publish_job_id: str) -
     )
     
     return result
+
+
+def publish_tools(tenant_id: str, location_id: str, publish_job_id: str) -> Dict[str, Any]:
+    """
+    Publish tool configurations to ElevenLabs agent.
+    
+    Workflow:
+    1. Collect tool params from tenant_integration_params (joined with ai_tool_types)
+    2. Filter params with enabled=true (skip greetings, skip disabled)
+    3. Extract and deduplicate tool_ids
+    4. PATCH tool_ids to ElevenLabs agent
+    5. Mark enabled params as published
+    
+    Args:
+        tenant_id: Tenant identifier
+        location_id: Location identifier
+        publish_job_id: Publish job identifier
+    
+    Returns:
+        Dict with keys: elevenlabs_agent_id, http_status_code, params_count, 
+                       enabled_params_count, unique_tool_ids_count, tool_ids,
+                       params_updated, processed_param_ids
+    """
+    logger.info(
+        f"[PublishTools] Starting workflow - "
+        f"tenant_id={tenant_id}, location_id={location_id}, publish_job_id={publish_job_id}"
+    )
+    
+    # Import database functions
+    from .publish_db import (
+        collect_tool_params,
+        mark_tool_params_published,
+        update_publish_job_status
+    )
+    
+    # Step 1: Update publish job status to in_progress
+    update_publish_job_status(
+        tenant_id=tenant_id,
+        publish_job_id=publish_job_id,
+        status='in_progress',
+        started_at=datetime.utcnow()
+    )
+    
+    # Step 2: Get ElevenLabs agent ID
+    elevenlabs_agent_id, location_name, timezone = get_elevenlabs_agent_id(tenant_id, location_id)
+    if not elevenlabs_agent_id:
+        raise ValueError(
+            f"ElevenLabs agent ID not found: tenant_id={tenant_id}, location_id={location_id}"
+        )
+    
+    logger.info(f"[PublishTools] Found agent ID: {elevenlabs_agent_id}")
+    
+    # Step 3: Collect tool params with JOIN
+    logger.info("[PublishTools] Collecting tool parameters...")
+    params = collect_tool_params(tenant_id, location_id)
+    
+    if not params:
+        logger.warning("[PublishTools] No tool params found")
+        # Send empty array to ElevenLabs as per requirements
+        logger.info("[PublishTools] Sending empty tool_ids array to ElevenLabs")
+        params_count = 0
+        enabled_params = []
+        unique_tool_ids = []
+    else:
+        logger.info(f"[PublishTools] Found {len(params)} tool params")
+        params_count = len(params)
+        
+        # Step 4: Filter and extract tool_ids
+        logger.info("[PublishTools] Filtering enabled tools and extracting tool_ids...")
+        all_tool_ids = []
+        enabled_params = []
+        
+        for param in params:
+            param_code = param['param_code']
+            value_json = param.get('value_json', {})
+            tool_ids = param.get('tool_ids', [])
+            
+            # Skip greetings
+            if param_code == 'greetings':
+                logger.info(f"[PublishTools] Skipping greetings tool: param_code={param_code}")
+                continue
+            
+            # Check if enabled
+            enabled = value_json.get('enabled', False) if value_json else False
+            
+            if not enabled:
+                logger.info(f"[PublishTools] Skipping disabled tool: param_code={param_code}")
+                continue
+            
+            # Validate tool_ids from ai_tool_types
+            if not tool_ids or len(tool_ids) == 0:
+                error_msg = f"tool_ids is NULL or empty for param_code={param_code} in ai_tool_types table"
+                logger.error(f"[PublishTools] {error_msg}")
+                update_publish_job_status(
+                    tenant_id=tenant_id,
+                    publish_job_id=publish_job_id,
+                    status='failed',
+                    finished_at=datetime.utcnow(),
+                    error_message=error_msg
+                )
+                raise ValueError(error_msg)
+            
+            logger.info(f"[PublishTools] Enabled tool: param_code={param_code}, tool_ids={tool_ids}")
+            enabled_params.append(param)
+            all_tool_ids.extend(tool_ids)
+        
+        # Step 5: Deduplicate tool_ids
+        unique_tool_ids = list(set(all_tool_ids))
+        logger.info(f"[PublishTools] Extracted {len(all_tool_ids)} total tool_ids, {len(unique_tool_ids)} unique")
+        logger.info(f"[PublishTools] Unique tool_ids: {unique_tool_ids}")
+    
+    # Step 6: Build conversation_config payload
+    logger.info("[PublishTools] Building conversation_config payload...")
+    conversation_config = {
+        "agent": {
+            "prompt": {
+                "tool_ids": unique_tool_ids
+            }
+        }
+    }
+    
+    logger.info(f"[PublishTools] Payload: {json.dumps(conversation_config)}")
+    
+    # Step 7: PATCH to ElevenLabs
+    logger.info(f"[PublishTools] Sending PATCH request to ElevenLabs agent {elevenlabs_agent_id}...")
+    
+    try:
+        status_code, response_dict = patch_elevenlabs_agent(
+            agent_id=elevenlabs_agent_id,
+            conversation_config=conversation_config
+        )
+        logger.info(f"[PublishTools] ✓ PATCH successful: HTTP {status_code}")
+        
+    except Exception as e:
+        logger.error(f"[PublishTools] Failed to PATCH ElevenLabs: {str(e)}")
+        update_publish_job_status(
+            tenant_id=tenant_id,
+            publish_job_id=publish_job_id,
+            status='failed',
+            finished_at=datetime.utcnow(),
+            error_message=f"Failed to PATCH ElevenLabs: {str(e)}"
+        )
+        raise RuntimeError(f"Failed to PATCH tool_ids to ElevenLabs: {str(e)}") from e
+    
+    # Step 8: Mark enabled params as published
+    enabled_param_ids = [p['param_id'] for p in enabled_params]
+    
+    if enabled_param_ids:
+        logger.info(f"[PublishTools] Marking {len(enabled_param_ids)} enabled params as published")
+        params_updated = mark_tool_params_published(
+            tenant_id=tenant_id,
+            location_id=location_id,
+            param_ids=enabled_param_ids
+        )
+        logger.info(f"[PublishTools] ✓ Marked {params_updated} params as published")
+    else:
+        logger.info("[PublishTools] No enabled params to mark as published")
+        params_updated = 0
+    
+    # Step 9: Update publish job status
+    response_data = {
+        'elevenlabs_agent_id': elevenlabs_agent_id,
+        'http_status_code': status_code,
+        'params_count': params_count,
+        'enabled_params_count': len(enabled_params),
+        'unique_tool_ids_count': len(unique_tool_ids),
+        'tool_ids': unique_tool_ids,
+        'params_updated': params_updated,
+        'processed_param_ids': enabled_param_ids
+    }
+    
+    update_publish_job_status(
+        tenant_id=tenant_id,
+        publish_job_id=publish_job_id,
+        status='succeeded',
+        finished_at=datetime.utcnow(),
+        response_json=response_data
+    )
+    
+    # Step 10: Return results
+    result = {
+        'elevenlabs_agent_id': elevenlabs_agent_id,
+        'http_status_code': status_code,
+        'params_count': params_count,
+        'enabled_params_count': len(enabled_params),
+        'unique_tool_ids_count': len(unique_tool_ids),
+        'tool_ids': unique_tool_ids,
+        'params_updated': params_updated,
+        'processed_param_ids': enabled_param_ids
+    }
+    
+    logger.info(
+        f"[PublishTools] ✅ Workflow completed: "
+        f"agent_id={elevenlabs_agent_id}, unique_tool_ids={len(unique_tool_ids)}, params_updated={params_updated}"
+    )
+    
+    return result

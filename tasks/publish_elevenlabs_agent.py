@@ -10,7 +10,7 @@ import time
 from celery.utils.log import get_task_logger
 from tasks.celery_app import app
 from .utils.task_db import mark_task_running, mark_task_succeeded, mark_task_failed, upsert_tenant_integration_param
-from .utils.publish_helpers import publish_knowledge, publish_greetings, publish_voice_dict, publish_personality
+from .utils.publish_helpers import publish_knowledge, publish_greetings, publish_voice_dict, publish_personality, publish_tools
 from .utils.publish_db import get_publish_job
 
 logger = get_task_logger(__name__)
@@ -159,8 +159,33 @@ def publish_elevenlabs_agent(
             logger.info(f"PROCESSED PARAM IDS: {publish_result.get('processed_param_ids')}")
             logger.info("=" * 80)
             
-        elif job_type in ['tools', 'full-agent']:
-            # PLACEHOLDER for other job types
+        elif job_type == 'tools':
+            # REAL WORKFLOW - Tools publishing
+            logger.info(
+                f"[publish_elevenlabs_agent] Starting tools publishing workflow - "
+                f"tenant_id={tenant_id}, location_id={location_id}, publish_job_id={publish_job_id}"
+            )
+            
+            publish_result = publish_tools(
+                tenant_id=tenant_id,
+                location_id=location_id,
+                publish_job_id=publish_job_id
+            )
+            
+            # Log the results prominently
+            logger.info("=" * 80)
+            logger.info(f"ELEVENLABS AGENT ID: {publish_result.get('elevenlabs_agent_id')}")
+            logger.info(f"HTTP STATUS: {publish_result.get('http_status_code')}")
+            logger.info(f"PARAMS COUNT: {publish_result.get('params_count')}")
+            logger.info(f"ENABLED PARAMS COUNT: {publish_result.get('enabled_params_count')}")
+            logger.info(f"UNIQUE TOOL IDS COUNT: {publish_result.get('unique_tool_ids_count')}")
+            logger.info(f"TOOL IDS: {publish_result.get('tool_ids')}")
+            logger.info(f"PARAMS UPDATED: {publish_result.get('params_updated')}")
+            logger.info(f"PROCESSED PARAM IDS: {publish_result.get('processed_param_ids')}")
+            logger.info("=" * 80)
+            
+        elif job_type == 'full-agent':
+            # PLACEHOLDER for full-agent job type
             logger.info(f"[publish_elevenlabs_agent] Job type '{job_type}' - executing PLACEHOLDER workflow")
             logger.info(f"[publish_elevenlabs_agent] ⏳ Simulating work for 10 seconds...")
             
@@ -229,8 +254,19 @@ def publish_elevenlabs_agent(
                 'params_updated': publish_result.get('params_updated'),
                 'processed_param_ids': publish_result.get('processed_param_ids')
             })
+        elif job_type == 'tools':
+            result.update({
+                'elevenlabs_agent_id': publish_result.get('elevenlabs_agent_id'),
+                'http_status_code': publish_result.get('http_status_code'),
+                'params_count': publish_result.get('params_count'),
+                'enabled_params_count': publish_result.get('enabled_params_count'),
+                'unique_tool_ids_count': publish_result.get('unique_tool_ids_count'),
+                'tool_ids': publish_result.get('tool_ids'),
+                'params_updated': publish_result.get('params_updated'),
+                'processed_param_ids': publish_result.get('processed_param_ids')
+            })
         else:
-            # Placeholder job types
+            # Placeholder job types (full-agent)
             result.update({
                 'simulated': True,
                 'placeholder_result': publish_result

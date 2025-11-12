@@ -1154,3 +1154,95 @@ def mark_personality_params_published(tenant_id: str, location_id: str, param_id
             conn.close()
         except Exception:
             pass
+
+
+def collect_tool_params(tenant_id: str, location_id: str) -> List[Dict[str, Any]]:
+    """
+    Collect tool parameters from tenant_integration_params with tool_ids from ai_tool_types.
+    
+    Args:
+        tenant_id: Tenant identifier
+        location_id: Location identifier
+    
+    Returns:
+        List of dicts with keys: param_id, param_code, value_json, tool_ids
+        Ordered by param_code
+    """
+    logger.info(f"[publish_db] Collecting tool params: tenant_id={tenant_id}, location_id={location_id}")
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT 
+                        tip.param_id,
+                        tip.param_code,
+                        tip.value_json,
+                        att.tool_ids
+                    FROM tenant_integration_params tip
+                    INNER JOIN ai_tool_types att ON tip.param_code = att.key
+                    WHERE tip.tenant_id = %s
+                      AND tip.location_id = %s
+                      AND tip.service = 'tool'
+                      AND tip.provider = 'speako'
+                      AND tip.status = 'configured'
+                      AND att.is_active = true
+                    ORDER BY tip.param_code
+                    """,
+                    (tenant_id, location_id)
+                )
+                rows = cur.fetchall()
+                result = [dict(row) for row in rows]
+                logger.info(f"[publish_db] Found {len(result)} tool params")
+                return result
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def mark_tool_params_published(tenant_id: str, location_id: str, param_ids: List[int]) -> int:
+    """
+    Mark tool parameters as 'published' after successful processing.
+    
+    Args:
+        tenant_id: Tenant identifier
+        location_id: Location identifier
+        param_ids: List of param IDs to mark as published
+    
+    Returns:
+        Number of rows updated
+    """
+    if not param_ids:
+        logger.info("[publish_db] No param_ids provided, skipping mark as published")
+        return 0
+    
+    logger.info(f"[publish_db] Marking {len(param_ids)} tool params as published: {param_ids}")
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE tenant_integration_params
+                    SET status = 'published',
+                        updated_at = now()
+                    WHERE tenant_id = %s
+                      AND location_id = %s
+                      AND service = 'tool'
+                      AND provider = 'speako'
+                      AND param_id = ANY(%s)
+                    RETURNING param_id, param_code
+                    """,
+                    (tenant_id, location_id, param_ids)
+                )
+                rows_updated = cur.rowcount
+                logger.info(f"[publish_db] ✓ Marked {rows_updated} tool params as published")
+                return rows_updated
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
