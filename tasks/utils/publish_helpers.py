@@ -1446,6 +1446,106 @@ def publish_tools(tenant_id: str, location_id: str, publish_job_id: str) -> Dict
         )
         raise RuntimeError(f"Failed to PATCH tool_ids to ElevenLabs: {str(e)}") from e
     
+    # Step 7.5: Compose and insert tools prompt
+    prompt_created = False
+    prompt_id = None
+    
+    if len(unique_tool_ids) > 0:
+        logger.info("[PublishTools] Starting tools prompt composition...")
+        
+        try:
+            # Step 7.5.1: Get location_type
+            from .publish_db import get_location_type, get_tool_prompt_template, get_tool_service_prompts, upsert_ai_prompt
+            
+            location_type = get_location_type(tenant_id, location_id)
+            logger.info(f"[PublishTools] Location type: {location_type}")
+            
+            # Step 7.5.2: Get tool prompt template
+            template = get_tool_prompt_template()
+            logger.info(f"[PublishTools] Loaded template: {len(template)} characters")
+            
+            # Step 7.5.3: Get service prompts for all eligible tools
+            tool_prompts_data = get_tool_service_prompts(unique_tool_ids)
+            
+            if not tool_prompts_data:
+                logger.warning("[PublishTools] No service_prompts found for any tools, skipping prompt composition")
+            else:
+                # Step 7.5.4: Extract and filter prompts by location_type
+                extracted_prompts = []
+                
+                for tool_data in tool_prompts_data:
+                    tool_id = tool_data['tool_id']
+                    service_prompts = tool_data.get('service_prompts')
+                    
+                    if not service_prompts:
+                        logger.warning(f"[PublishTools] No service_prompts for tool_id={tool_id}, skipping")
+                        continue
+                    
+                    # Navigate JSON: service_prompts.by_service_type.{location_type}
+                    by_service_type = service_prompts.get('by_service_type', {})
+                    
+                    # Determine which service type to use
+                    if location_type == 'rest':
+                        service_key = 'rest'
+                    elif location_type == 'service':
+                        service_key = 'service'
+                    else:
+                        service_key = 'service'  # Default to service
+                        logger.info(f"[PublishTools] Using 'service' as default for location_type={location_type}")
+                    
+                    service_prompts_array = by_service_type.get(service_key, [])
+                    
+                    if not service_prompts_array:
+                        logger.warning(f"[PublishTools] No prompts for tool_id={tool_id}, service={service_key}")
+                        continue
+                    
+                    # Extract markdown from all prompts in array
+                    for prompt_obj in service_prompts_array:
+                        markdown = prompt_obj.get('markdown', '')
+                        if markdown:
+                            extracted_prompts.append(markdown)
+                            logger.info(f"[PublishTools] ✓ Extracted prompt for tool_id={tool_id}, service={service_key}")
+                
+                if not extracted_prompts:
+                    logger.warning("[PublishTools] No prompts extracted, skipping prompt composition")
+                else:
+                    # Step 7.5.5: Compose final prompt
+                    # Join all extracted prompts with double newlines
+                    all_tool_prompts = '\n\n'.join(extracted_prompts)
+                    
+                    # Replace literal \n with actual newlines
+                    all_tool_prompts = all_tool_prompts.replace('\\n', '\n')
+                    
+                    # Combine template + tool prompts
+                    final_prompt = f"{template}\n\n{all_tool_prompts}"
+                    
+                    logger.info(f"[PublishTools] Composed final prompt: {len(final_prompt)} characters, {len(extracted_prompts)} tool prompts")
+                    
+                    # Step 7.5.6: Insert into tenant_ai_prompts
+                    prompt_id = upsert_ai_prompt(
+                        tenant_id=tenant_id,
+                        location_id=location_id,
+                        name='Use of Tools',
+                        type_code='tools',
+                        title='Use of Tools',
+                        body_template=final_prompt
+                    )
+                    
+                    prompt_created = True
+                    logger.info(f"[PublishTools] ✓ Inserted tools prompt: prompt_id={prompt_id}")
+        
+        except ValueError as e:
+            # Template not found or location not found - log warning but don't fail
+            logger.warning(f"[PublishTools] Could not compose tools prompt: {str(e)}")
+            logger.warning("[PublishTools] Continuing workflow without prompt composition")
+        
+        except Exception as e:
+            # Other errors - log error but don't fail workflow
+            logger.error(f"[PublishTools] Error during prompt composition: {str(e)}")
+            logger.error("[PublishTools] Continuing workflow without prompt composition")
+    else:
+        logger.info("[PublishTools] No tools to process, skipping prompt composition")
+    
     # Step 8: Mark enabled params as published
     enabled_param_ids = [p['param_id'] for p in enabled_params]
     
@@ -1469,6 +1569,8 @@ def publish_tools(tenant_id: str, location_id: str, publish_job_id: str) -> Dict
         'enabled_params_count': len(enabled_params),
         'unique_tool_ids_count': len(unique_tool_ids),
         'tool_ids': unique_tool_ids,
+        'prompt_created': prompt_created,
+        'prompt_id': prompt_id,
         'params_updated': params_updated,
         'processed_param_ids': enabled_param_ids
     }
@@ -1489,6 +1591,8 @@ def publish_tools(tenant_id: str, location_id: str, publish_job_id: str) -> Dict
         'enabled_params_count': len(enabled_params),
         'unique_tool_ids_count': len(unique_tool_ids),
         'tool_ids': unique_tool_ids,
+        'prompt_created': prompt_created,
+        'prompt_id': prompt_id,
         'params_updated': params_updated,
         'processed_param_ids': enabled_param_ids
     }

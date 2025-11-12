@@ -1246,3 +1246,133 @@ def mark_tool_params_published(tenant_id: str, location_id: str, param_ids: List
             conn.close()
         except Exception:
             pass
+
+
+def get_location_type(tenant_id: str, location_id: str) -> str:
+    """
+    Get location_type from locations table.
+    
+    Args:
+        tenant_id: Tenant identifier
+        location_id: Location identifier
+    
+    Returns:
+        Location type string ('rest', 'service', 'pending', etc.)
+    
+    Raises:
+        ValueError: If location not found
+    """
+    logger.info(f"[publish_db] Getting location_type: tenant_id={tenant_id}, location_id={location_id}")
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT location_type
+                    FROM locations
+                    WHERE tenant_id = %s
+                      AND location_id = %s
+                    """,
+                    (tenant_id, location_id)
+                )
+                row = cur.fetchone()
+                
+                if not row:
+                    raise ValueError(
+                        f"Location not found: tenant_id={tenant_id}, location_id={location_id}"
+                    )
+                
+                location_type = row[0]
+                logger.info(f"[publish_db] Found location_type: {location_type}")
+                return location_type
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def get_tool_prompt_template() -> str:
+    """
+    Get tool prompt template from ai_prompt_fragment.
+    
+    Returns:
+        Template text string
+    
+    Raises:
+        ValueError: If template not found
+    """
+    logger.info("[publish_db] Fetching tool prompt template: fragment_key='use_of_tools'")
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT template_text
+                    FROM ai_prompt_fragment
+                    WHERE fragment_key = 'use_of_tools'
+                    """,
+                    ()
+                )
+                row = cur.fetchone()
+                
+                if not row:
+                    raise ValueError("Tool prompt template not found: fragment_key='use_of_tools'")
+                
+                template_text = row[0]
+                logger.info(f"[publish_db] Found template: {len(template_text)} characters")
+                return template_text
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def get_tool_service_prompts(tool_ids: List[str]) -> List[Dict[str, Any]]:
+    """
+    Get service_prompts for multiple tools from ai_tools table.
+    
+    Args:
+        tool_ids: List of tool IDs
+    
+    Returns:
+        List of dicts with keys: tool_id, service_prompts
+        Example: [{'tool_id': 'tool1', 'service_prompts': {...}}, ...]
+    """
+    if not tool_ids:
+        logger.info("[publish_db] No tool_ids provided, returning empty list")
+        return []
+    
+    logger.info(f"[publish_db] Fetching service_prompts for {len(tool_ids)} tools: {tool_ids}")
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT tool_id, service_prompts
+                    FROM ai_tools
+                    WHERE tool_id = ANY(%s)
+                    ORDER BY tool_id
+                    """,
+                    (tool_ids,)
+                )
+                rows = cur.fetchall()
+                result = [dict(row) for row in rows]
+                logger.info(f"[publish_db] Found service_prompts for {len(result)} tools")
+                
+                # Log missing tools
+                found_tool_ids = {row['tool_id'] for row in result}
+                missing_tool_ids = set(tool_ids) - found_tool_ids
+                if missing_tool_ids:
+                    logger.warning(f"[publish_db] Tools not found in ai_tools table: {list(missing_tool_ids)}")
+                
+                return result
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
