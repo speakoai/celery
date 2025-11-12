@@ -1095,13 +1095,15 @@ def publish_personality(tenant_id: str, location_id: str, publish_job_id: str) -
     logger.info(f"[PublishPersonality] Fetched {len(fragments)} fragments: {list(fragments.keys())}")
     
     # Step 4: Get the personality template
-    personality_template = fragments.get('personality', '')
+    personality_fragment = fragments.get('personality', {})
+    personality_template = personality_fragment.get('template_text', '')
+    personality_sort_order = personality_fragment.get('sort_order', 0)
     
     if not personality_template:
         logger.error("[PublishPersonality] Personality template not found in ai_prompt_fragment")
         raise ValueError("Personality template not found in ai_prompt_fragment table")
     
-    logger.info(f"[PublishPersonality] Personality template: {personality_template[:100]}...")
+    logger.info(f"[PublishPersonality] Personality template: {personality_template[:100]}... (sort_order={personality_sort_order})")
     
     # Step 5: Replace {{traits}}
     traits_value = param_map.get('traits', '')
@@ -1118,13 +1120,13 @@ def publish_personality(tenant_id: str, location_id: str, publish_job_id: str) -
     logger.info(f"[PublishPersonality] Response style value: '{response_style_value}'")
     
     if response_style_value == 'Concise':
-        response_style_text = fragments.get('response_style_concise', '')
+        response_style_text = fragments.get('response_style_concise', {}).get('template_text', '')
         logger.info(f"[PublishPersonality] → Using 'Concise' template")
     elif response_style_value == 'Balanced':
-        response_style_text = fragments.get('response_style_balanced', '')
+        response_style_text = fragments.get('response_style_balanced', {}).get('template_text', '')
         logger.info(f"[PublishPersonality] → Using 'Balanced' template")
     elif response_style_value == 'Detailed':
-        response_style_text = fragments.get('response_style_detailed', '')
+        response_style_text = fragments.get('response_style_detailed', {}).get('template_text', '')
         logger.info(f"[PublishPersonality] → Using 'Detailed' template")
     else:
         response_style_text = ''
@@ -1141,7 +1143,8 @@ def publish_personality(tenant_id: str, location_id: str, publish_job_id: str) -
         name='Personality',
         type_code='personality',
         title='Agent Personality Configuration',
-        body_template=personality_template
+        body_template=personality_template,
+        sort_order=personality_sort_order
     )
     
     logger.info(f"[PublishPersonality] ✓ Inserted personality prompt_id={prompt_id}")
@@ -1154,13 +1157,15 @@ def publish_personality(tenant_id: str, location_id: str, publish_job_id: str) -
         logger.info("[PublishPersonality] Processing custom_instruction...")
         
         # Get custom_instruction template
-        custom_instruction_template = fragments.get('custom_instruction', '')
+        custom_instruction_fragment = fragments.get('custom_instruction', {})
+        custom_instruction_template = custom_instruction_fragment.get('template_text', '')
+        custom_instruction_sort_order = custom_instruction_fragment.get('sort_order', 0)
         
         if not custom_instruction_template:
             logger.error("[PublishPersonality] custom_instruction template not found in ai_prompt_fragment")
             raise ValueError("custom_instruction template not found in ai_prompt_fragment table")
         
-        logger.info(f"[PublishPersonality] custom_instruction template: {custom_instruction_template[:100]}...")
+        logger.info(f"[PublishPersonality] custom_instruction template: {custom_instruction_template[:100]}... (sort_order={custom_instruction_sort_order})")
         
         # Replace {{custom_instruction}} variable
         custom_instruction_resolved = custom_instruction_template.replace(
@@ -1177,7 +1182,8 @@ def publish_personality(tenant_id: str, location_id: str, publish_job_id: str) -
             name='Custom Instruction',
             type_code='custom_instruction',
             title='Agent Custom Instruction',
-            body_template=custom_instruction_resolved
+            body_template=custom_instruction_resolved,
+            sort_order=custom_instruction_sort_order
         )
         
         logger.info(f"[PublishPersonality] ✓ Inserted custom_instruction prompt_id={custom_instruction_prompt_id}")
@@ -1461,8 +1467,10 @@ def publish_tools(tenant_id: str, location_id: str, publish_job_id: str) -> Dict
             logger.info(f"[PublishTools] Location type: {location_type}")
             
             # Step 7.5.2: Get tool prompt template
-            template = get_tool_prompt_template()
-            logger.info(f"[PublishTools] Loaded template: {len(template)} characters")
+            template_data = get_tool_prompt_template()
+            template = template_data['template_text']
+            template_sort_order = template_data['sort_order']
+            logger.info(f"[PublishTools] Loaded template: {len(template)} characters, sort_order={template_sort_order}")
             
             # Step 7.5.3: Get service prompts for all eligible tools
             tool_prompts_data = get_tool_service_prompts(unique_tool_ids)
@@ -1528,7 +1536,8 @@ def publish_tools(tenant_id: str, location_id: str, publish_job_id: str) -> Dict
                         name='Use of Tools',
                         type_code='use_of_tools',
                         title='Use of Tools',
-                        body_template=final_prompt
+                        body_template=final_prompt,
+                        sort_order=template_sort_order
                     )
                     
                     prompt_created = True

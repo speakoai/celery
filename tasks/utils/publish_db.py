@@ -419,7 +419,8 @@ def upsert_ai_prompt(
     locale: str = 'en-US',
     channel: str = 'web',
     variables_schema: Dict[str, Any] = None,
-    metadata: Dict[str, Any] = None
+    metadata: Dict[str, Any] = None,
+    sort_order: int = 0
 ) -> int:
     """
     Insert or update AI prompt in tenant_ai_prompts table.
@@ -438,6 +439,7 @@ def upsert_ai_prompt(
         channel: Channel (default: 'web')
         variables_schema: Optional variables schema as dict
         metadata: Optional metadata as dict
+        sort_order: Sort order for the prompt (default: 0)
     
     Returns:
         prompt_id of the inserted/updated record
@@ -491,9 +493,9 @@ def upsert_ai_prompt(
                     """
                     INSERT INTO tenant_ai_prompts
                         (tenant_id, location_id, name, type_code, locale, channel, title, body_template, 
-                         variables_schema, metadata, version, is_active, effective_from)
+                         variables_schema, metadata, version, is_active, effective_from, sort_order)
                     VALUES
-                        (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, true, now())
+                        (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, true, now(), %s)
                     RETURNING prompt_id
                     """,
                     (
@@ -507,7 +509,8 @@ def upsert_ai_prompt(
                         body_template,
                         Json(variables_schema or {}),
                         Json(metadata or {}),
-                        new_version
+                        new_version,
+                        sort_order
                     )
                 )
                 
@@ -1032,7 +1035,7 @@ def update_dictionary_param_text(param_id: int, dictionary_id: str) -> int:
             pass
 
 
-def get_prompt_fragments(fragment_keys: List[str]) -> Dict[str, str]:
+def get_prompt_fragments(fragment_keys: List[str]) -> Dict[str, Dict[str, Any]]:
     """
     Fetch multiple prompt fragments in a single database query (optimized).
     
@@ -1040,8 +1043,11 @@ def get_prompt_fragments(fragment_keys: List[str]) -> Dict[str, str]:
         fragment_keys: List of fragment_key values to fetch
     
     Returns:
-        Dict mapping fragment_key to template_text
-        Example: {'personality': '{{traits}}...', 'response_style_concise': 'Keep responses brief...'}
+        Dict mapping fragment_key to dict with template_text and sort_order
+        Example: {
+            'personality': {'template_text': '{{traits}}...', 'sort_order': 100},
+            'response_style_concise': {'template_text': 'Keep responses brief...', 'sort_order': 200}
+        }
     """
     if not fragment_keys:
         logger.warning("[publish_db] No fragment_keys provided, returning empty dict")
@@ -1054,14 +1060,20 @@ def get_prompt_fragments(fragment_keys: List[str]) -> Dict[str, str]:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
                     """
-                    SELECT fragment_key, template_text
+                    SELECT fragment_key, template_text, sort_order
                     FROM ai_prompt_fragment
                     WHERE fragment_key = ANY(%s)
                     """,
                     (fragment_keys,)
                 )
                 rows = cur.fetchall()
-                result = {row['fragment_key']: row['template_text'] for row in rows}
+                result = {
+                    row['fragment_key']: {
+                        'template_text': row['template_text'],
+                        'sort_order': row['sort_order']
+                    }
+                    for row in rows
+                }
                 logger.info(f"[publish_db] Found {len(result)} prompt fragments")
                 return result
     finally:
@@ -1293,12 +1305,12 @@ def get_location_type(tenant_id: str, location_id: str) -> str:
             pass
 
 
-def get_tool_prompt_template() -> str:
+def get_tool_prompt_template() -> Dict[str, Any]:
     """
     Get tool prompt template from ai_prompt_fragment.
     
     Returns:
-        Template text string
+        Dict with keys: template_text, sort_order
     
     Raises:
         ValueError: If template not found
@@ -1310,7 +1322,7 @@ def get_tool_prompt_template() -> str:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT template_text
+                    SELECT template_text, sort_order
                     FROM ai_prompt_fragment
                     WHERE fragment_key = 'use_of_tools'
                     """,
@@ -1322,8 +1334,12 @@ def get_tool_prompt_template() -> str:
                     raise ValueError("Tool prompt template not found: fragment_key='use_of_tools'")
                 
                 template_text = row[0]
-                logger.info(f"[publish_db] Found template: {len(template_text)} characters")
-                return template_text
+                sort_order = row[1]
+                logger.info(f"[publish_db] Found template: {len(template_text)} characters, sort_order={sort_order}")
+                return {
+                    'template_text': template_text,
+                    'sort_order': sort_order
+                }
     finally:
         try:
             conn.close()
