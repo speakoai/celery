@@ -1526,7 +1526,7 @@ def publish_tools(tenant_id: str, location_id: str, publish_job_id: str) -> Dict
                         tenant_id=tenant_id,
                         location_id=location_id,
                         name='Use of Tools',
-                        type_code='tools',
+                        type_code='use_of_tools',
                         title='Use of Tools',
                         body_template=final_prompt
                     )
