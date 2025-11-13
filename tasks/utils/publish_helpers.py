@@ -18,6 +18,8 @@ from .publish_db import (
     update_publish_job_status,
     get_elevenlabs_agent_id,
     collect_speako_knowledge,
+    collect_and_partition_knowledge,
+    process_special_knowledge_entry,
     get_existing_elevenlabs_knowledge_ids,
     save_new_elevenlabs_knowledge_id,
     mark_speako_knowledge_published,
@@ -200,19 +202,107 @@ def publish_knowledge(
     logger.info(f"[PublishKnowledge] Location: name='{location_name}', timezone='{location_timezone}'")
 
     
-    # Step 2: Collect knowledge from Speako
-    knowledge_docs = collect_speako_knowledge(tenant_id, location_id)
+    # Step 2: Collect and partition knowledge from Speako
+    business_info_entry, locations_entry, other_knowledge_entries = collect_and_partition_knowledge(tenant_id, location_id)
     
-    if not knowledge_docs:
+    total_knowledge_count = len(other_knowledge_entries)
+    if business_info_entry:
+        total_knowledge_count += 1
+    if locations_entry:
+        total_knowledge_count += 1
+    
+    if total_knowledge_count == 0:
         logger.warning("[PublishKnowledge] No knowledge documents found")
         raise ValueError(
             f"No knowledge found for tenant_id={tenant_id}, location_id={location_id}"
         )
     
-    logger.info(f"[PublishKnowledge] Collected {len(knowledge_docs)} knowledge documents")
+    logger.info(
+        f"[PublishKnowledge] Partitioned knowledge: "
+        f"business_info={'found' if business_info_entry else 'not found'}, "
+        f"locations={'found' if locations_entry else 'not found'}, "
+        f"other_knowledge={len(other_knowledge_entries)} entries"
+    )
+    
+    # Step 2.5: Process special knowledge (business_info, locations) to tenant_ai_prompts
+    special_knowledge_param_ids = []
+    
+    # Process business_info if found
+    if business_info_entry:
+        logger.info("[PublishKnowledge] Processing business_info to tenant_ai_prompts...")
+        business_info_prompt_id = process_special_knowledge_entry(
+            tenant_id=tenant_id,
+            location_id=location_id,
+            entry=business_info_entry,
+            fragment_key='business_info',
+            type_code='business_info',
+            name='Business Info',
+            title='Business Info'
+        )
+        if business_info_prompt_id:
+            logger.info(f"[PublishKnowledge] ✓ Created business_info prompt_id={business_info_prompt_id}")
+            special_knowledge_param_ids.append(business_info_entry['param_id'])
+        else:
+            logger.warning("[PublishKnowledge] ⚠️ Skipped business_info (fragment not found or processing failed)")
+    else:
+        logger.info("[PublishKnowledge] No business_info entry found, skipping")
+    
+    # Process locations if found
+    if locations_entry:
+        logger.info("[PublishKnowledge] Processing locations to tenant_ai_prompts...")
+        locations_prompt_id = process_special_knowledge_entry(
+            tenant_id=tenant_id,
+            location_id=location_id,
+            entry=locations_entry,
+            fragment_key='other_locations',
+            type_code='other_locations',
+            name='Other Locations',
+            title='Other Locations'
+        )
+        if locations_prompt_id:
+            logger.info(f"[PublishKnowledge] ✓ Created other_locations prompt_id={locations_prompt_id}")
+            special_knowledge_param_ids.append(locations_entry['param_id'])
+        else:
+            logger.warning("[PublishKnowledge] ⚠️ Skipped locations (fragment not found or processing failed)")
+    else:
+        logger.info("[PublishKnowledge] No locations entry found, skipping")
+    
+    # Check if there's any regular knowledge to upload to ElevenLabs
+    if not other_knowledge_entries:
+        logger.info("[PublishKnowledge] No regular knowledge entries to upload to ElevenLabs")
+        logger.info("[PublishKnowledge] Only special knowledge processed to tenant_ai_prompts")
+        
+        # Mark special knowledge as published
+        if special_knowledge_param_ids:
+            mark_speako_knowledge_published(
+                tenant_id=tenant_id,
+                location_id=location_id,
+                param_ids=special_knowledge_param_ids
+            )
+            logger.info(f"[PublishKnowledge] ✓ Marked {len(special_knowledge_param_ids)} special knowledge entries as published")
+        
+        # Update publish job as completed
+        update_publish_job_status(
+            tenant_id=tenant_id,
+            publish_job_id=publish_job_id,
+            status='succeeded',
+            finished_at=datetime.utcnow(),
+            response_json={
+                'message': 'Only special knowledge processed',
+                'special_knowledge_count': len(special_knowledge_param_ids)
+            }
+        )
+        
+        return {
+            'elevenlabs_agent_id': elevenlabs_agent_id,
+            'special_knowledge_count': len(special_knowledge_param_ids),
+            'message': 'Only special knowledge processed to tenant_ai_prompts'
+        }
+    
+    logger.info(f"[PublishKnowledge] Processing {len(other_knowledge_entries)} regular knowledge entries for ElevenLabs")
     
     # Step 3: Aggregate knowledge and upload to R2
-    aggregated_content, suggested_filename = aggregate_knowledge_markdown(knowledge_docs)
+    aggregated_content, suggested_filename = aggregate_knowledge_markdown(other_knowledge_entries)
     
     filename = f"knowledge_{tenant_id}_{location_id}.md"
     r2_key, r2_url = upload_knowledge_to_r2(
@@ -345,15 +435,19 @@ def publish_knowledge(
     )
     logger.info(f"[PublishKnowledge] ✓ Saved new knowledge ID to database: {new_knowledge_id}")
     
-    # Step 11: Mark ONLY the collected Speako knowledge documents as published
-    # Extract param_ids from the knowledge docs collected in Step 2
-    collected_param_ids = [doc['param_id'] for doc in knowledge_docs]
-    logger.info(f"[PublishKnowledge] Marking {len(collected_param_ids)} knowledge entries as published: {collected_param_ids}")
+    # Step 11: Mark all knowledge documents as published (special + regular)
+    # Combine special knowledge param_ids + regular knowledge param_ids
+    regular_knowledge_param_ids = [doc['param_id'] for doc in other_knowledge_entries]
+    all_param_ids = special_knowledge_param_ids + regular_knowledge_param_ids
+    
+    logger.info(f"[PublishKnowledge] Marking {len(all_param_ids)} knowledge entries as published: {all_param_ids}")
+    logger.info(f"[PublishKnowledge] - Special knowledge: {len(special_knowledge_param_ids)} entries")
+    logger.info(f"[PublishKnowledge] - Regular knowledge: {len(regular_knowledge_param_ids)} entries")
     
     mark_speako_knowledge_published(
         tenant_id=tenant_id, 
         location_id=location_id,
-        param_ids=collected_param_ids
+        param_ids=all_param_ids
     )
     
     # Step 12: Mark publish job as completed
@@ -364,7 +458,9 @@ def publish_knowledge(
         'elevenlabs_agent_id': elevenlabs_agent_id,
         'new_knowledge_id': new_knowledge_id,
         'deleted_old_knowledge': deleted_old_knowledge,
-        'knowledge_count': len(knowledge_docs)
+        'special_knowledge_count': len(special_knowledge_param_ids),
+        'regular_knowledge_count': len(regular_knowledge_param_ids),
+        'total_knowledge_count': len(all_param_ids)
     }
     
     update_publish_job_status(
@@ -383,7 +479,9 @@ def publish_knowledge(
         'old_knowledge_ids': old_knowledge_ids,
         'deleted_old_knowledge': deleted_old_knowledge,
         'r2_url': r2_url,
-        'knowledge_count': len(knowledge_docs)
+        'special_knowledge_count': len(special_knowledge_param_ids),
+        'regular_knowledge_count': len(regular_knowledge_param_ids),
+        'total_knowledge_count': len(all_param_ids)
     }
     
     logger.info(

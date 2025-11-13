@@ -8,7 +8,7 @@ including publish job management, knowledge collection, and status tracking.
 import os
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime
 from celery.utils.log import get_task_logger
 
@@ -254,6 +254,177 @@ def collect_speako_knowledge(tenant_id: str, location_id: str) -> List[Dict[str,
             conn.close()
         except Exception:
             pass
+
+
+def collect_and_partition_knowledge(
+    tenant_id: str, 
+    location_id: str
+) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], List[Dict[str, Any]]]:
+    """
+    Collect all knowledge and partition into special and regular entries.
+    
+    Special knowledge (business_info, locations) will be processed separately
+    and saved to tenant_ai_prompts table instead of being uploaded to ElevenLabs.
+    
+    Args:
+        tenant_id: Tenant identifier
+        location_id: Location identifier
+    
+    Returns:
+        Tuple of:
+        - business_info_entry: Entry with param_code='business_info' or None
+        - locations_entry: Entry with param_code='locations' or None  
+        - other_knowledge_entries: All other knowledge entries (list)
+    """
+    logger.info(f"[publish_db] Collecting and partitioning knowledge: tenant_id={tenant_id}, location_id={location_id}")
+    
+    # Get all knowledge entries
+    all_knowledge = collect_speako_knowledge(tenant_id, location_id)
+    
+    # Partition into special and regular entries
+    business_info_entry = None
+    locations_entry = None
+    other_knowledge_entries = []
+    
+    for entry in all_knowledge:
+        param_code = entry.get('param_code')
+        
+        if param_code == 'business_info':
+            business_info_entry = entry
+            logger.info(f"[publish_db] Found business_info entry: param_id={entry['param_id']}")
+        elif param_code == 'locations':
+            locations_entry = entry
+            logger.info(f"[publish_db] Found locations entry: param_id={entry['param_id']}")
+        else:
+            other_knowledge_entries.append(entry)
+    
+    logger.info(
+        f"[publish_db] Partitioned knowledge: "
+        f"business_info={'found' if business_info_entry else 'not found'}, "
+        f"locations={'found' if locations_entry else 'not found'}, "
+        f"other_knowledge={len(other_knowledge_entries)} entries"
+    )
+    
+    return (business_info_entry, locations_entry, other_knowledge_entries)
+
+
+def get_knowledge_fragment_template(fragment_key: str) -> Optional[Dict[str, Any]]:
+    """
+    Get template from ai_prompt_fragment for knowledge processing.
+    
+    Args:
+        fragment_key: Fragment key ('business_info' or 'other_locations')
+    
+    Returns:
+        Dict with {'template_text': '...', 'sort_order': 100} or None if not found
+    """
+    logger.info(f"[publish_db] Fetching knowledge fragment template: fragment_key='{fragment_key}'")
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT template_text, sort_order
+                    FROM ai_prompt_fragment
+                    WHERE fragment_key = %s
+                    """,
+                    (fragment_key,)
+                )
+                row = cur.fetchone()
+                
+                if not row:
+                    logger.warning(f"[publish_db] Fragment template not found: fragment_key='{fragment_key}'")
+                    return None
+                
+                template_text = row[0]
+                sort_order = row[1]
+                logger.info(f"[publish_db] Found fragment template: {len(template_text)} characters, sort_order={sort_order}")
+                return {
+                    'template_text': template_text,
+                    'sort_order': sort_order
+                }
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def process_special_knowledge_entry(
+    tenant_id: str,
+    location_id: str,
+    entry: Dict[str, Any],
+    fragment_key: str,
+    type_code: str,
+    name: str,
+    title: str
+) -> Optional[int]:
+    """
+    Process a special knowledge entry using fragment template and save to tenant_ai_prompts.
+    
+    Variable replacement logic:
+    - For business_info: replaces {{business_info}} with entry's value_text
+    - For locations: replaces {{locations}} with entry's value_text
+    
+    Args:
+        tenant_id: Tenant identifier
+        location_id: Location identifier
+        entry: Knowledge entry dict with keys: param_id, value_text, param_code
+        fragment_key: Fragment key to fetch template ('business_info' or 'other_locations')
+        type_code: Type code for tenant_ai_prompts ('business_info' or 'other_locations')
+        name: Name for the prompt
+        title: Title for the prompt
+    
+    Returns:
+        prompt_id if successful, None if fragment not found or processing failed
+    """
+    logger.info(f"[publish_db] Processing special knowledge: fragment_key='{fragment_key}', type_code='{type_code}'")
+    
+    # Get fragment template
+    fragment = get_knowledge_fragment_template(fragment_key)
+    if not fragment:
+        logger.warning(f"[publish_db] Cannot process special knowledge: fragment template not found for '{fragment_key}'")
+        return None
+    
+    template_text = fragment['template_text']
+    sort_order = fragment['sort_order']
+    
+    # Get value_text (markdown content) from entry
+    value_text = entry.get('value_text', '')
+    if not value_text:
+        logger.warning(f"[publish_db] Entry has empty value_text, using empty string")
+        value_text = ''
+    
+    # Determine placeholder based on fragment_key
+    if fragment_key == 'business_info':
+        placeholder = '{{business_info}}'
+    elif fragment_key == 'other_locations':
+        placeholder = '{{locations}}'
+    else:
+        logger.error(f"[publish_db] Unknown fragment_key: '{fragment_key}'")
+        return None
+    
+    # Replace placeholder with value_text
+    resolved_text = template_text.replace(placeholder, value_text)
+    logger.info(f"[publish_db] Replaced {placeholder} in template, result length: {len(resolved_text)} chars")
+    
+    # Save to tenant_ai_prompts using upsert_ai_prompt
+    try:
+        prompt_id = upsert_ai_prompt(
+            tenant_id=tenant_id,
+            location_id=location_id,
+            name=name,
+            type_code=type_code,
+            title=title,
+            body_template=resolved_text,
+            sort_order=sort_order
+        )
+        logger.info(f"[publish_db] ✓ Saved special knowledge to tenant_ai_prompts: prompt_id={prompt_id}, type_code='{type_code}'")
+        return prompt_id
+    except Exception as e:
+        logger.error(f"[publish_db] Failed to save special knowledge to tenant_ai_prompts: {str(e)}")
+        return None
 
 
 def collect_speako_greetings(tenant_id: str, location_id: str) -> List[Dict[str, Any]]:
