@@ -1123,7 +1123,8 @@ def publish_personality(tenant_id: str, location_id: str, publish_job_id: str) -
         collect_personality_params,
         get_prompt_fragments,
         upsert_ai_prompt,
-        mark_personality_params_published
+        mark_personality_params_published,
+        process_context_prompts
     )
     
     # Step 1: Collect personality params
@@ -1334,6 +1335,19 @@ def publish_personality(tenant_id: str, location_id: str, publish_job_id: str) -
             raise RuntimeError(f"Failed to PATCH temperature to ElevenLabs: {str(e)}") from e
     else:
         logger.info("[PublishPersonality] No temperature value provided, skipping")
+    
+    # Step 8.7: Process context-based prompts (role, knowledge_scope, important_behavior, out_of_scope)
+    logger.info("[PublishPersonality] Processing context-based prompts...")
+    
+    context_prompt_ids = process_context_prompts(
+        tenant_id=tenant_id,
+        location_id=location_id
+    )
+    
+    if context_prompt_ids:
+        logger.info(f"[PublishPersonality] ✓ Created {len(context_prompt_ids)} context-based prompts: {context_prompt_ids}")
+    else:
+        logger.warning("[PublishPersonality] ⚠️ No context-based prompts were created")
     
     # Step 9: Mark traits/tone/style as published (always) + custom_instruction (if processed) + temperature (if updated)
     param_ids_to_mark = [

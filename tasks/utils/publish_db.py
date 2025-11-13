@@ -1339,6 +1339,254 @@ def mark_personality_params_published(tenant_id: str, location_id: str, param_id
             pass
 
 
+def collect_context_data_for_prompts(tenant_id: str, location_id: str) -> Dict[str, Optional[str]]:
+    """
+    Collect all context data needed for prompt variable replacement.
+    
+    Single optimized query fetching:
+    - business_name (from tenants)
+    - location_name (from locations)
+    - location_desc (from locations_info)
+    - agent_name (from tenant_integration_params)
+    
+    Args:
+        tenant_id: Tenant identifier
+        location_id: Location identifier
+    
+    Returns:
+        Dict with keys: business_name, location_name, location_desc, agent_name
+        Values may be None if not found
+    """
+    logger.info(f"[publish_db] Collecting context data for prompts: tenant_id={tenant_id}, location_id={location_id}")
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT 
+                        t.name as business_name,
+                        l.name as location_name,
+                        li.short_description as location_desc,
+                        tip.value_text as agent_name
+                    FROM tenants t
+                    INNER JOIN locations l ON l.tenant_id = t.tenant_id
+                    LEFT JOIN locations_info li ON li.tenant_id = l.tenant_id AND li.location_id = l.location_id
+                    LEFT JOIN tenant_integration_params tip ON 
+                        tip.tenant_id = t.tenant_id AND 
+                        tip.location_id = l.location_id AND
+                        tip.param_code = 'agent_name' AND
+                        tip.provider = 'elevenlabs' AND
+                        tip.service = 'agents' AND
+                        tip.status IN ('configured', 'published')
+                    WHERE t.tenant_id = %s AND l.location_id = %s
+                    """,
+                    (tenant_id, location_id)
+                )
+                row = cur.fetchone()
+                
+                if not row:
+                    logger.error(f"[publish_db] No context data found for tenant_id={tenant_id}, location_id={location_id}")
+                    raise ValueError(f"Context data not found for tenant_id={tenant_id}, location_id={location_id}")
+                
+                result = dict(row)
+                logger.info(
+                    f"[publish_db] Collected context data: "
+                    f"business_name='{result.get('business_name')}', "
+                    f"location_name='{result.get('location_name')}', "
+                    f"location_desc={'present' if result.get('location_desc') else 'missing'}, "
+                    f"agent_name={'present' if result.get('agent_name') else 'missing'}"
+                )
+                return result
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def get_context_prompt_fragments() -> Dict[str, Dict[str, Any]]:
+    """
+    Fetch all context-based prompt fragments in one query.
+    
+    Returns:
+        Dict mapping fragment_key to {'template_text': '...', 'sort_order': 10}
+        Keys: 'role', 'knowledge_scope', 'important_behavior', 'out_of_scope'
+        Returns empty dict if none found
+    """
+    logger.info("[publish_db] Fetching context prompt fragments")
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT fragment_key, template_text, sort_order
+                    FROM ai_prompt_fragment
+                    WHERE fragment_key IN ('role', 'knowledge_scope', 'important_behavior', 'out_of_scope')
+                    """,
+                    ()
+                )
+                rows = cur.fetchall()
+                
+                result = {}
+                for row in rows:
+                    fragment_key = row['fragment_key']
+                    result[fragment_key] = {
+                        'template_text': row['template_text'],
+                        'sort_order': row['sort_order']
+                    }
+                
+                logger.info(f"[publish_db] Found {len(result)} context prompt fragments: {list(result.keys())}")
+                return result
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def replace_context_variables(
+    template_text: str, 
+    context_data: Dict[str, Optional[str]], 
+    required_vars: List[str]
+) -> str:
+    """
+    Replace template variables with actual values from context_data.
+    
+    Args:
+        template_text: Template with {{variable}} placeholders
+        context_data: Dict with variable values
+        required_vars: List of variable names to replace
+    
+    Returns:
+        Resolved text with all variables replaced
+    """
+    resolved = template_text
+    
+    for var in required_vars:
+        placeholder = '{{' + var + '}}'
+        value = context_data.get(var)
+        
+        # Handle None or empty values
+        if not value:
+            logger.warning(f"[publish_db] Variable '{var}' is empty or None, using empty string")
+            value = ''
+        
+        resolved = resolved.replace(placeholder, value)
+    
+    return resolved
+
+
+def process_context_prompts(tenant_id: str, location_id: str) -> List[int]:
+    """
+    Process all context-based prompts (role, knowledge_scope, important_behavior, out_of_scope).
+    
+    Orchestrates:
+    1. Collect context data from database
+    2. Fetch fragment templates
+    3. Replace variables in templates
+    4. Save to tenant_ai_prompts
+    
+    Args:
+        tenant_id: Tenant identifier
+        location_id: Location identifier
+    
+    Returns:
+        List of created prompt_ids
+    """
+    logger.info(f"[publish_db] Processing context prompts: tenant_id={tenant_id}, location_id={location_id}")
+    
+    # Step 1: Collect context data
+    try:
+        context_data = collect_context_data_for_prompts(tenant_id, location_id)
+    except Exception as e:
+        logger.error(f"[publish_db] Failed to collect context data: {str(e)}")
+        return []
+    
+    # Step 2: Get all fragment templates
+    fragments = get_context_prompt_fragments()
+    
+    if not fragments:
+        logger.warning("[publish_db] No context prompt fragments found in ai_prompt_fragment table")
+        return []
+    
+    # Step 3: Define fragment configurations
+    fragment_configs = {
+        'role': {
+            'vars': ['agent_name', 'business_name', 'location_name', 'location_desc'],
+            'type_code': 'role',
+            'name': 'Role',
+            'title': 'Role'
+        },
+        'knowledge_scope': {
+            'vars': ['location_name'],
+            'type_code': 'knowledge_scope',
+            'name': 'Knowledge Scope',
+            'title': 'Knowledge Scope'
+        },
+        'important_behavior': {
+            'vars': ['business_name', 'location_name'],
+            'type_code': 'important_behavior',
+            'name': 'Important Behavior',
+            'title': 'Important Behavior'
+        },
+        'out_of_scope': {
+            'vars': ['business_name', 'location_name'],
+            'type_code': 'out_of_scope',
+            'name': 'Out Of Scope',
+            'title': 'Out Of Scope'
+        }
+    }
+    
+    # Step 4: Process each fragment
+    created_prompt_ids = []
+    
+    for fragment_key, config in fragment_configs.items():
+        if fragment_key not in fragments:
+            logger.warning(f"[publish_db] Fragment '{fragment_key}' not found, skipping")
+            continue
+        
+        fragment = fragments[fragment_key]
+        template_text = fragment['template_text']
+        sort_order = fragment['sort_order']
+        
+        logger.info(f"[publish_db] Processing fragment '{fragment_key}': template length={len(template_text)}, sort_order={sort_order}")
+        
+        # Replace variables
+        resolved_text = replace_context_variables(
+            template_text=template_text,
+            context_data=context_data,
+            required_vars=config['vars']
+        )
+        
+        logger.info(f"[publish_db] Resolved '{fragment_key}': result length={len(resolved_text)} chars")
+        
+        # Save to tenant_ai_prompts
+        try:
+            prompt_id = upsert_ai_prompt(
+                tenant_id=tenant_id,
+                location_id=location_id,
+                name=config['name'],
+                type_code=config['type_code'],
+                title=config['title'],
+                body_template=resolved_text,
+                sort_order=sort_order
+            )
+            
+            if prompt_id:
+                created_prompt_ids.append(prompt_id)
+                logger.info(f"[publish_db] ✓ Created prompt for '{fragment_key}': prompt_id={prompt_id}")
+            else:
+                logger.warning(f"[publish_db] ⚠️ Failed to create prompt for '{fragment_key}'")
+                
+        except Exception as e:
+            logger.error(f"[publish_db] Error creating prompt for '{fragment_key}': {str(e)}")
+    
+    logger.info(f"[publish_db] Processed {len(created_prompt_ids)} context prompts: {created_prompt_ids}")
+    return created_prompt_ids
+
+
 def collect_tool_params(tenant_id: str, location_id: str) -> List[Dict[str, Any]]:
     """
     Collect tool parameters from tenant_integration_params with tool_ids from ai_tool_types.
