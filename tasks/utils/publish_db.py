@@ -1811,3 +1811,192 @@ def get_tool_service_prompts(tool_ids: List[str]) -> List[Dict[str, Any]]:
             conn.close()
         except Exception:
             pass
+
+
+def compose_prompts_by_sort_order(tenant_id: str, location_id: str) -> str:
+    """
+    Compose all active AI prompts ordered by sort_order.
+    
+    Fetches all active prompts with sort_order > 0 and concatenates their
+    body_template fields with double newlines as separators.
+    
+    Args:
+        tenant_id: Tenant identifier
+        location_id: Location identifier
+    
+    Returns:
+        Composed prompt text with all prompts joined by \n\n
+        Returns empty string if no prompts found
+    """
+    logger.info(f"[publish_db] Composing prompts by sort_order: tenant_id={tenant_id}, location_id={location_id}")
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT body_template
+                    FROM tenant_ai_prompts
+                    WHERE tenant_id = %s
+                      AND location_id = %s
+                      AND sort_order > 0
+                      AND is_active = true
+                    ORDER BY sort_order ASC
+                    """,
+                    (tenant_id, location_id)
+                )
+                rows = cur.fetchall()
+                
+                if not rows:
+                    logger.warning(f"[publish_db] No active prompts found with sort_order > 0")
+                    return ""
+                
+                # Extract body_template from each row and join with double newline
+                prompts = [row['body_template'] for row in rows]
+                composed_text = '\n\n'.join(prompts)
+                
+                logger.info(f"[publish_db] Found {len(prompts)} active prompts with sort_order > 0")
+                logger.info(f"[publish_db] Composed prompt text: {len(composed_text)} characters")
+                
+                return composed_text
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def compose_and_publish_system_prompt(tenant_id: str, location_id: str) -> Dict[str, Any]:
+    """
+    Compose all prompts and publish to ElevenLabs as system prompt.
+    
+    This function orchestrates three steps:
+    1. Compose all active prompts (sort_order > 0) into a single text
+    2. Update ElevenLabs agent with the composed prompt
+    3. Save the composed prompt to tenant_ai_prompts as 'system_prompt'
+    
+    All steps must succeed - if ElevenLabs API fails, no database write occurs.
+    
+    Args:
+        tenant_id: Tenant identifier
+        location_id: Location identifier
+    
+    Returns:
+        Dict with keys:
+        - success: bool
+        - composed_text: str (the full composed prompt)
+        - character_count: int (length of composed text)
+        - prompt_count: int (number of prompts composed)
+        - elevenlabs_agent_id: str
+        - elevenlabs_status_code: int (HTTP status from API)
+        - system_prompt_id: int (prompt_id of saved record)
+    
+    Raises:
+        ValueError: If agent not found or no prompts to compose
+        requests.HTTPError: If ElevenLabs API call fails
+        RuntimeError: If ELEVENLABS_API_KEY not set
+    """
+    import requests
+    import json
+    from .elevenlabs_client import _get_headers, ELEVENLABS_BASE_URL
+    
+    logger.info("=" * 80)
+    logger.info(f"[SystemPrompt] COMPOSING AND PUBLISHING SYSTEM PROMPT")
+    logger.info(f"[SystemPrompt]   Tenant ID: {tenant_id}")
+    logger.info(f"[SystemPrompt]   Location ID: {location_id}")
+    logger.info("=" * 80)
+    
+    # Step 1: Get Agent ID
+    logger.info(f"[SystemPrompt] Step 1: Fetching ElevenLabs agent ID...")
+    agent_id, location_name, location_timezone = get_elevenlabs_agent_id(tenant_id, location_id)
+    logger.info(f"[SystemPrompt] ✓ Found agent ID: {agent_id}")
+    logger.info(f"[SystemPrompt] ✓ Location: name='{location_name}', timezone='{location_timezone}'")
+    
+    # Step 2: Compose System Prompt
+    logger.info(f"[SystemPrompt] Step 2: Composing prompts from tenant_ai_prompts...")
+    composed_text = compose_prompts_by_sort_order(tenant_id, location_id)
+    
+    if not composed_text:
+        error_msg = f"No active prompts found to compose for tenant_id={tenant_id}, location_id={location_id}"
+        logger.error(f"[SystemPrompt] ❌ {error_msg}")
+        raise ValueError(error_msg)
+    
+    prompt_count = composed_text.count('\n\n') + 1  # Approximate count
+    character_count = len(composed_text)
+    
+    logger.info(f"[SystemPrompt] ✓ Composed {prompt_count} prompts: {character_count} characters")
+    
+    # Step 3: Update ElevenLabs API
+    logger.info(f"[SystemPrompt] Step 3: Updating ElevenLabs agent via API...")
+    
+    url = f"{ELEVENLABS_BASE_URL}/agents/{agent_id}"
+    headers = _get_headers()
+    headers['Content-Type'] = 'application/json'
+    
+    payload = {
+        "conversation_config": {
+            "agent": {
+                "prompt": {
+                    "prompt": composed_text
+                }
+            }
+        }
+    }
+    
+    logger.info("=" * 80)
+    logger.info(f"[SystemPrompt] 📤 STARTING API CALL: PATCH {url}")
+    logger.info(f"[SystemPrompt] Request Payload:")
+    logger.info(json.dumps(payload, indent=2))
+    logger.info("=" * 80)
+    
+    try:
+        response = requests.patch(
+            url,
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
+        
+        response.raise_for_status()
+        
+        logger.info("=" * 80)
+        logger.info(f"[SystemPrompt] 📥 API RESPONSE:")
+        logger.info(f"[SystemPrompt]   Status Code: {response.status_code}")
+        logger.info(f"[SystemPrompt]   Response Body: {response.text}")
+        logger.info("=" * 80)
+        logger.info(f"[SystemPrompt] ✓ ElevenLabs API call succeeded: {response.status_code} OK")
+        
+    except requests.HTTPError as e:
+        error_msg = f"ElevenLabs API error (HTTP {response.status_code}): {response.text}"
+        logger.error("=" * 80)
+        logger.error(f"[SystemPrompt] ❌ API CALL FAILED: {error_msg}")
+        logger.error("=" * 80)
+        raise requests.HTTPError(error_msg, response=response) from e
+    
+    # Step 4: Save System Prompt Record (only if API succeeded)
+    logger.info(f"[SystemPrompt] Step 4: Saving system_prompt to tenant_ai_prompts...")
+    
+    system_prompt_id = upsert_ai_prompt(
+        tenant_id=tenant_id,
+        location_id=location_id,
+        type_code='system_prompt',
+        name='System Prompt',
+        title='System Prompt',
+        body_template=composed_text,
+        sort_order=0
+    )
+    
+    logger.info(f"[SystemPrompt] ✓ Saved system_prompt to tenant_ai_prompts: prompt_id={system_prompt_id}")
+    logger.info("=" * 80)
+    logger.info(f"[SystemPrompt] ✅ SYSTEM PROMPT PUBLISHED SUCCESSFULLY")
+    logger.info("=" * 80)
+    
+    return {
+        'success': True,
+        'composed_text': composed_text,
+        'character_count': character_count,
+        'prompt_count': prompt_count,
+        'elevenlabs_agent_id': agent_id,
+        'elevenlabs_status_code': response.status_code,
+        'system_prompt_id': system_prompt_id
+    }
