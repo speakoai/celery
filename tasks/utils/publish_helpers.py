@@ -183,7 +183,6 @@ def publish_knowledge(
         )
     
     # Mark as processing and set started_at timestamp
-    from datetime import datetime
     update_publish_job_status(
         tenant_id=tenant_id,
         publish_job_id=publish_job_id,
@@ -338,7 +337,6 @@ def publish_knowledge(
         )
         logger.info(f"[PublishKnowledge] ✅ Created ElevenLabs knowledge: id={new_knowledge_id}, name={new_knowledge_name}")
     except Exception as e:
-        from datetime import datetime
         update_publish_job_status(
             tenant_id=tenant_id,
             publish_job_id=publish_job_id,
@@ -377,7 +375,6 @@ def publish_knowledge(
             )
         
         # Re-raise to fail the workflow (this shouldn't happen with newly created knowledge)
-        from datetime import datetime
         update_publish_job_status(
             tenant_id=tenant_id,
             publish_job_id=publish_job_id,
@@ -387,7 +384,6 @@ def publish_knowledge(
         )
         raise RuntimeError(f"Failed to update agent configuration: {str(e)}") from e
     except Exception as e:
-        from datetime import datetime
         update_publish_job_status(
             tenant_id=tenant_id,
             publish_job_id=publish_job_id,
@@ -451,7 +447,6 @@ def publish_knowledge(
     )
     
     # Step 12: Mark publish job as completed
-    from datetime import datetime
     
     # Prepare response JSON for database
     response_data = {
@@ -1153,7 +1148,6 @@ def publish_personality(tenant_id: str, location_id: str, publish_job_id: str) -
         
         # Update publish job with context prompts info
         from .publish_db import update_publish_job_status
-        from datetime import datetime
         
         response_data = {
             'prompt_created': False,
