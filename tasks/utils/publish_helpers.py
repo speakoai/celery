@@ -1131,16 +1131,54 @@ def publish_personality(tenant_id: str, location_id: str, publish_job_id: str) -
     logger.info("[PublishPersonality] Collecting personality parameters...")
     params = collect_personality_params(tenant_id, location_id)
     
+    logger.info(f"[PublishPersonality] Found {len(params)} personality params")
+    
+    # Step 1.5: Process context-based prompts (role, knowledge_scope, important_behavior, out_of_scope)
+    # These are independent of personality params and should always be created
+    logger.info("[PublishPersonality] Processing context-based prompts...")
+    
+    context_prompt_ids = process_context_prompts(
+        tenant_id=tenant_id,
+        location_id=location_id
+    )
+    
+    if context_prompt_ids:
+        logger.info(f"[PublishPersonality] ✓ Created {len(context_prompt_ids)} context-based prompts: {context_prompt_ids}")
+    else:
+        logger.warning("[PublishPersonality] ⚠️ No context-based prompts were created")
+    
+    # Step 1.6: Check if personality params exist
     if not params:
         logger.warning("[PublishPersonality] No personality parameters found")
+        
+        # Update publish job with context prompts info
+        from .publish_db import update_publish_job_status
+        from datetime import datetime
+        
+        response_data = {
+            'prompt_created': False,
+            'context_prompts_created': len(context_prompt_ids),
+            'context_prompt_ids': context_prompt_ids,
+            'message': 'Only context prompts created (no personality params configured)'
+        }
+        
+        update_publish_job_status(
+            tenant_id=tenant_id,
+            publish_job_id=publish_job_id,
+            status='succeeded',
+            finished_at=datetime.utcnow(),
+            http_status_code=200,
+            response_json=response_data
+        )
+        
         return {
             'prompt_created': False,
             'prompt_id': None,
+            'context_prompts_created': len(context_prompt_ids),
+            'context_prompt_ids': context_prompt_ids,
             'params_updated': 0,
             'processed_param_ids': []
         }
-    
-    logger.info(f"[PublishPersonality] Found {len(params)} personality params")
     
     # Step 2: Build param_map for easy lookup - extract from value_json or value_text
     param_map = {}
@@ -1335,19 +1373,6 @@ def publish_personality(tenant_id: str, location_id: str, publish_job_id: str) -
             raise RuntimeError(f"Failed to PATCH temperature to ElevenLabs: {str(e)}") from e
     else:
         logger.info("[PublishPersonality] No temperature value provided, skipping")
-    
-    # Step 8.7: Process context-based prompts (role, knowledge_scope, important_behavior, out_of_scope)
-    logger.info("[PublishPersonality] Processing context-based prompts...")
-    
-    context_prompt_ids = process_context_prompts(
-        tenant_id=tenant_id,
-        location_id=location_id
-    )
-    
-    if context_prompt_ids:
-        logger.info(f"[PublishPersonality] ✓ Created {len(context_prompt_ids)} context-based prompts: {context_prompt_ids}")
-    else:
-        logger.warning("[PublishPersonality] ⚠️ No context-based prompts were created")
     
     # Step 9: Mark traits/tone/style as published (always) + custom_instruction (if processed) + temperature (if updated)
     param_ids_to_mark = [
