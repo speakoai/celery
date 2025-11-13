@@ -1371,7 +1371,7 @@ def collect_context_data_for_prompts(tenant_id: str, location_id: str) -> Dict[s
                         tip.value_text as agent_name
                     FROM tenants t
                     INNER JOIN locations l ON l.tenant_id = t.tenant_id
-                    LEFT JOIN locations_info li ON li.tenant_id = l.tenant_id AND li.location_id = l.location_id
+                    LEFT JOIN location_info li ON li.tenant_id = l.tenant_id AND li.location_id = l.location_id
                     LEFT JOIN tenant_integration_params tip ON 
                         tip.tenant_id = t.tenant_id AND 
                         tip.location_id = l.location_id AND
