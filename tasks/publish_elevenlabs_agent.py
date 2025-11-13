@@ -297,7 +297,7 @@ def publish_elevenlabs_agent(
         return result
         
     except Exception as e:
-        error_msg = f"Failed to publish ElevenLabs agent: {str(e)}"
+        error_msg = f"Failed to publish AI Voice Service agent: {str(e)}"
         logger.error(
             f"[publish_elevenlabs_agent] Error - "
             f"tenant_id={tenant_id}, location_id={location_id}, "

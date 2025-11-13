@@ -366,7 +366,7 @@ def publish_knowledge(
             finished_at=datetime.utcnow(),
             error_message=str(e)
         )
-        raise RuntimeError(f"Failed to upload knowledge to ElevenLabs: {str(e)}") from e
+        raise RuntimeError(f"Failed to upload knowledge to AI Voice Service: {str(e)}") from e
     
     # Step 5: Build knowledge item with proper structure (ONLY new knowledge)
     new_knowledge_item = {
@@ -404,7 +404,7 @@ def publish_knowledge(
             finished_at=datetime.utcnow(),
             error_message=str(e)
         )
-        raise RuntimeError(f"Failed to update agent configuration: {str(e)}") from e
+        raise RuntimeError(f"Failed to update AI Voice Service configuration: {str(e)}") from e
     except Exception as e:
         update_publish_job_status(
             tenant_id=tenant_id,
@@ -413,7 +413,7 @@ def publish_knowledge(
             finished_at=datetime.utcnow(),
             error_message=str(e)
         )
-        raise RuntimeError(f"Failed to update agent configuration: {str(e)}") from e
+        raise RuntimeError(f"Failed to update AI Voice Service configuration: {str(e)}") from e
     
     # Step 7: Fetch ALL old knowledge IDs BEFORE saving new one
     old_knowledge_ids = get_existing_elevenlabs_knowledge_ids(tenant_id, location_id)
@@ -1051,7 +1051,7 @@ def publish_voice_dict(
         )
         
         # Re-raise exception - params will NOT be marked as published
-        raise RuntimeError(f"Failed to update ElevenLabs agent: {str(e)}") from e
+        raise RuntimeError(f"Failed to update AI Voice Service agent: {str(e)}") from e
     
     # Step 8: Mark parameters as published (only reached if PATCH succeeded)
     logger.info("[PublishVoiceDict] Marking params as published...")
@@ -1355,7 +1355,7 @@ def publish_personality(tenant_id: str, location_id: str, publish_job_id: str) -
         agent_id, _, _ = get_elevenlabs_agent_id(tenant_id, location_id)
         if not agent_id:
             logger.error("[PublishPersonality] Cannot process temperature: ElevenLabs agent_id not found")
-            raise ValueError(f"ElevenLabs agent_id not found for tenant_id={tenant_id}, location_id={location_id}")
+            raise ValueError(f"AI Voice Service agent ID not found for tenant_id={tenant_id}, location_id={location_id}")
         
         # Convert Decimal to float
         temperature_value = float(temperature_param['value_numeric'])
@@ -1386,7 +1386,7 @@ def publish_personality(tenant_id: str, location_id: str, publish_job_id: str) -
                 finished_at=datetime.utcnow(),
                 error_message=f"Failed to PATCH temperature: {str(e)}"
             )
-            raise RuntimeError(f"Failed to PATCH temperature to ElevenLabs: {str(e)}") from e
+            raise RuntimeError(f"Failed to PATCH temperature to AI Voice Service: {str(e)}") from e
     else:
         logger.info("[PublishPersonality] No temperature value provided, skipping")
     
@@ -1623,9 +1623,9 @@ def publish_tools(tenant_id: str, location_id: str, publish_job_id: str) -> Dict
             publish_job_id=publish_job_id,
             status='failed',
             finished_at=datetime.utcnow(),
-            error_message=f"Failed to PATCH ElevenLabs: {str(e)}"
+            error_message=f"Failed to PATCH AI Voice Service: {str(e)}"
         )
-        raise RuntimeError(f"Failed to PATCH tool_ids to ElevenLabs: {str(e)}") from e
+        raise RuntimeError(f"Failed to PATCH tool_ids to AI Voice Service: {str(e)}") from e
     
     # Step 7.5: Compose and insert tools prompt
     prompt_created = False

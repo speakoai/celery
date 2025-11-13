@@ -20,7 +20,7 @@ ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 def _get_headers() -> Dict[str, str]:
     """Get headers for ElevenLabs API requests."""
     if not ELEVENLABS_API_KEY:
-        error_msg = "ELEVENLABS_API_KEY environment variable is NOT SET - Cannot make API calls"
+        error_msg = "AI Voice Service API key not configured - Cannot make API calls"
         logger.error(f"[ElevenLabs] ❌ {error_msg}")
         raise RuntimeError(error_msg)
     
@@ -96,11 +96,11 @@ def upload_knowledge_file(file_url: str, name: str) -> tuple[str, str]:
         
         response.raise_for_status()
     except requests.HTTPError as e:
-        error_msg = f"ElevenLabs API error (HTTP {response.status_code}): {response.text}"
+        error_msg = f"AI Voice Service API error (HTTP {response.status_code}): {response.text}"
         logger.error(f"[ElevenLabs] ❌ API CALL FAILED: {error_msg}")
         raise requests.HTTPError(error_msg, response=response) from e
     except requests.RequestException as e:
-        error_msg = f"Failed to upload to ElevenLabs: {str(e)}"
+        error_msg = f"Failed to upload to AI Voice Service: {str(e)}"
         logger.error(f"[ElevenLabs] ❌ REQUEST FAILED: {error_msg}")
         raise
     
@@ -108,7 +108,7 @@ def upload_knowledge_file(file_url: str, name: str) -> tuple[str, str]:
     try:
         result = response.json()
     except Exception as e:
-        error_msg = f"Failed to parse ElevenLabs response: {response.text}"
+        error_msg = f"Failed to parse AI Voice Service response: {response.text}"
         logger.error(f"[ElevenLabs] {error_msg}")
         raise ValueError(error_msg) from e
     
@@ -116,7 +116,7 @@ def upload_knowledge_file(file_url: str, name: str) -> tuple[str, str]:
     knowledge_name = result.get('name')
     
     if not knowledge_id:
-        error_msg = f"No 'id' in ElevenLabs response: {result}"
+        error_msg = f"No 'id' in AI Voice Service response: {result}"
         logger.error(f"[ElevenLabs] {error_msg}")
         raise ValueError(error_msg)
     
@@ -221,17 +221,17 @@ def get_agent_config(agent_id: str) -> Dict[str, Any]:
         return config
         
     except requests.HTTPError as e:
-        error_msg = f"Failed to fetch agent {agent_id}: HTTP {e.response.status_code} - {e.response.text}"
+        error_msg = f"Failed to fetch AI Voice Service agent {agent_id}: HTTP {e.response.status_code} - {e.response.text}"
         logger.error(f"[ElevenLabs] ❌ {error_msg}")
         raise requests.HTTPError(error_msg, response=e.response) from e
         
     except requests.RequestException as e:
-        error_msg = f"Failed to fetch agent {agent_id}: {str(e)}"
+        error_msg = f"Failed to fetch AI Voice Service agent {agent_id}: {str(e)}"
         logger.error(f"[ElevenLabs] ❌ {error_msg}")
         raise
         
     except Exception as e:
-        error_msg = f"Failed to parse agent config for {agent_id}: {str(e)}"
+        error_msg = f"Failed to parse AI Voice Service agent config for {agent_id}: {str(e)}"
         logger.error(f"[ElevenLabs] ❌ {error_msg}")
         raise ValueError(error_msg) from e
 
@@ -361,17 +361,17 @@ def update_agent_knowledge(agent_id: str, knowledge_items: list) -> Dict[str, An
         return updated_config
         
     except requests.HTTPError as e:
-        error_msg = f"Failed to update agent {agent_id}: HTTP {e.response.status_code} - {e.response.text}"
+        error_msg = f"Failed to update AI Voice Service agent {agent_id}: HTTP {e.response.status_code} - {e.response.text}"
         logger.error(f"[ElevenLabs] ❌ API CALL FAILED: {error_msg}")
         raise requests.HTTPError(error_msg, response=e.response) from e
         
     except requests.RequestException as e:
-        error_msg = f"Failed to update agent {agent_id}: {str(e)}"
+        error_msg = f"Failed to update AI Voice Service agent {agent_id}: {str(e)}"
         logger.error(f"[ElevenLabs] ❌ REQUEST FAILED: {error_msg}")
         raise
         
     except Exception as e:
-        error_msg = f"Failed to parse update response for agent {agent_id}: {str(e)}"
+        error_msg = f"Failed to parse AI Voice Service update response for agent {agent_id}: {str(e)}"
         logger.error(f"[ElevenLabs] ❌ PARSE ERROR: {error_msg}")
         raise ValueError(error_msg) from e
 
@@ -453,17 +453,17 @@ def patch_elevenlabs_agent(agent_id: str, conversation_config: Dict[str, Any]) -
         return response.status_code, response_json
         
     except requests.HTTPError as e:
-        error_msg = f"Failed to PATCH agent {agent_id}: HTTP {e.response.status_code} - {e.response.text}"
+        error_msg = f"Failed to PATCH AI Voice Service agent {agent_id}: HTTP {e.response.status_code} - {e.response.text}"
         logger.error(f"[ElevenLabs] ❌ API CALL FAILED: {error_msg}")
         raise requests.HTTPError(error_msg, response=e.response) from e
         
     except requests.RequestException as e:
-        error_msg = f"Failed to PATCH agent {agent_id}: {str(e)}"
+        error_msg = f"Failed to PATCH AI Voice Service agent {agent_id}: {str(e)}"
         logger.error(f"[ElevenLabs] ❌ REQUEST FAILED: {error_msg}")
         raise
         
     except Exception as e:
-        error_msg = f"Failed to parse PATCH response for agent {agent_id}: {str(e)}"
+        error_msg = f"Failed to parse AI Voice Service PATCH response for agent {agent_id}: {str(e)}"
         logger.error(f"[ElevenLabs] ❌ PARSE ERROR: {error_msg}")
         raise ValueError(error_msg) from e
 
@@ -550,17 +550,17 @@ def create_pronunciation_dictionary(rules: list, name: str) -> tuple[str, str]:
         return dictionary_id, version_id
         
     except requests.HTTPError as e:
-        error_msg = f"Failed to create dictionary: HTTP {e.response.status_code} - {e.response.text}"
+        error_msg = f"Failed to create pronunciation dictionary: HTTP {e.response.status_code} - {e.response.text}"
         logger.error(f"[ElevenLabs] ❌ API CALL FAILED: {error_msg}")
         raise requests.HTTPError(error_msg, response=e.response) from e
         
     except requests.RequestException as e:
-        error_msg = f"Failed to create dictionary: {str(e)}"
+        error_msg = f"Failed to create pronunciation dictionary: {str(e)}"
         logger.error(f"[ElevenLabs] ❌ REQUEST FAILED: {error_msg}")
         raise
         
     except Exception as e:
-        error_msg = f"Failed to parse dictionary creation response: {str(e)}"
+        error_msg = f"Failed to parse pronunciation dictionary creation response: {str(e)}"
         logger.error(f"[ElevenLabs] ❌ PARSE ERROR: {error_msg}")
         raise ValueError(error_msg) from e
 
@@ -646,16 +646,16 @@ def update_pronunciation_dictionary(dictionary_id: str, rules: list) -> tuple[st
         return returned_dict_id, latest_version_id
         
     except requests.HTTPError as e:
-        error_msg = f"Failed to update dictionary {dictionary_id}: HTTP {e.response.status_code} - {e.response.text}"
+        error_msg = f"Failed to update pronunciation dictionary {dictionary_id}: HTTP {e.response.status_code} - {e.response.text}"
         logger.error(f"[ElevenLabs] ❌ API CALL FAILED: {error_msg}")
         raise requests.HTTPError(error_msg, response=e.response) from e
         
     except requests.RequestException as e:
-        error_msg = f"Failed to update dictionary {dictionary_id}: {str(e)}"
+        error_msg = f"Failed to update pronunciation dictionary {dictionary_id}: {str(e)}"
         logger.error(f"[ElevenLabs] ❌ REQUEST FAILED: {error_msg}")
         raise
         
     except Exception as e:
-        error_msg = f"Failed to parse dictionary update response: {str(e)}"
+        error_msg = f"Failed to parse pronunciation dictionary update response: {str(e)}"
         logger.error(f"[ElevenLabs] ❌ PARSE ERROR: {error_msg}")
         raise ValueError(error_msg) from e
