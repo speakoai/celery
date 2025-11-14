@@ -1376,8 +1376,8 @@ def collect_context_data_for_prompts(tenant_id: str, location_id: str) -> Dict[s
                         tip.tenant_id = t.tenant_id AND 
                         tip.location_id = l.location_id AND
                         tip.param_code = 'agent_name' AND
-                        tip.provider = 'elevenlabs' AND
-                        tip.service = 'agents' AND
+                        tip.provider = 'speako' AND
+                        tip.service = 'greetings' AND
                         tip.status IN ('configured', 'published')
                     WHERE t.tenant_id = %s AND l.location_id = %s
                     """,
