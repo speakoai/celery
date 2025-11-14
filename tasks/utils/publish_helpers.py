@@ -271,54 +271,54 @@ def publish_knowledge(
         logger.info("[PublishKnowledge] No regular knowledge entries to upload to ElevenLabs")
         logger.info("[PublishKnowledge] Only special knowledge processed to tenant_ai_prompts")
         
-    # Mark special knowledge as published
-    if special_knowledge_param_ids:
-        mark_speako_knowledge_published(
+        # Mark special knowledge as published
+        if special_knowledge_param_ids:
+            mark_speako_knowledge_published(
+                tenant_id=tenant_id,
+                location_id=location_id,
+                param_ids=special_knowledge_param_ids
+            )
+            logger.info(f"[PublishKnowledge] ✓ Marked {len(special_knowledge_param_ids)} special knowledge entries as published")
+        
+        # Step 2.6: Compose and publish system prompt
+        logger.info("=" * 80)
+        logger.info("[PublishKnowledge] Step 2.6: Composing and publishing system prompt...")
+        logger.info("=" * 80)
+        
+        from .publish_db import compose_and_publish_system_prompt
+        
+        system_prompt_result = compose_and_publish_system_prompt(
             tenant_id=tenant_id,
-            location_id=location_id,
-            param_ids=special_knowledge_param_ids
+            location_id=location_id
         )
-        logger.info(f"[PublishKnowledge] ✓ Marked {len(special_knowledge_param_ids)} special knowledge entries as published")
-    
-    # Step 2.6: Compose and publish system prompt
-    logger.info("=" * 80)
-    logger.info("[PublishKnowledge] Step 2.6: Composing and publishing system prompt...")
-    logger.info("=" * 80)
-    
-    from .publish_db import compose_and_publish_system_prompt
-    
-    system_prompt_result = compose_and_publish_system_prompt(
-        tenant_id=tenant_id,
-        location_id=location_id
-    )
-    
-    logger.info(f"[PublishKnowledge] ✓ System prompt published successfully")
-    logger.info(f"[PublishKnowledge]   - Prompt count: {system_prompt_result['prompt_count']}")
-    logger.info(f"[PublishKnowledge]   - Character count: {system_prompt_result['character_count']}")
-    logger.info(f"[PublishKnowledge]   - System prompt ID: {system_prompt_result['system_prompt_id']}")
-    logger.info("=" * 80)
-    
-    # Update publish job as completed
-    update_publish_job_status(
-        tenant_id=tenant_id,
-        publish_job_id=publish_job_id,
-        status='succeeded',
-        finished_at=datetime.utcnow(),
-        response_json={
-            'message': 'Only special knowledge processed',
+        
+        logger.info(f"[PublishKnowledge] ✓ System prompt published successfully")
+        logger.info(f"[PublishKnowledge]   - Prompt count: {system_prompt_result['prompt_count']}")
+        logger.info(f"[PublishKnowledge]   - Character count: {system_prompt_result['character_count']}")
+        logger.info(f"[PublishKnowledge]   - System prompt ID: {system_prompt_result['system_prompt_id']}")
+        logger.info("=" * 80)
+        
+        # Update publish job as completed
+        update_publish_job_status(
+            tenant_id=tenant_id,
+            publish_job_id=publish_job_id,
+            status='succeeded',
+            finished_at=datetime.utcnow(),
+            response_json={
+                'message': 'Only special knowledge processed',
+                'special_knowledge_count': len(special_knowledge_param_ids),
+                'system_prompt_published': True,
+                'system_prompt_id': system_prompt_result['system_prompt_id']
+            }
+        )
+        
+        return {
+            'elevenlabs_agent_id': elevenlabs_agent_id,
             'special_knowledge_count': len(special_knowledge_param_ids),
+            'message': 'Only special knowledge processed to tenant_ai_prompts',
             'system_prompt_published': True,
             'system_prompt_id': system_prompt_result['system_prompt_id']
         }
-    )
-    
-    return {
-        'elevenlabs_agent_id': elevenlabs_agent_id,
-        'special_knowledge_count': len(special_knowledge_param_ids),
-        'message': 'Only special knowledge processed to tenant_ai_prompts',
-        'system_prompt_published': True,
-        'system_prompt_id': system_prompt_result['system_prompt_id']
-    }
     
     logger.info(f"[PublishKnowledge] Processing {len(other_knowledge_entries)} regular knowledge entries for ElevenLabs")
     
@@ -453,7 +453,25 @@ def publish_knowledge(
     )
     logger.info(f"[PublishKnowledge] ✓ Saved new knowledge ID to database: {new_knowledge_id}")
     
-    # Step 11: Mark all knowledge documents as published (special + regular)
+    # Step 11: Compose and publish system prompt (BEFORE marking as published)
+    logger.info("=" * 80)
+    logger.info("[PublishKnowledge] Step 11: Composing and publishing system prompt...")
+    logger.info("=" * 80)
+    
+    from .publish_db import compose_and_publish_system_prompt
+    
+    system_prompt_result = compose_and_publish_system_prompt(
+        tenant_id=tenant_id,
+        location_id=location_id
+    )
+    
+    logger.info(f"[PublishKnowledge] ✓ System prompt published successfully")
+    logger.info(f"[PublishKnowledge]   - Prompt count: {system_prompt_result['prompt_count']}")
+    logger.info(f"[PublishKnowledge]   - Character count: {system_prompt_result['character_count']}")
+    logger.info(f"[PublishKnowledge]   - System prompt ID: {system_prompt_result['system_prompt_id']}")
+    logger.info("=" * 80)
+    
+    # Step 12: Mark all knowledge documents as published (special + regular)
     # Combine special knowledge param_ids + regular knowledge param_ids
     regular_knowledge_param_ids = [doc['param_id'] for doc in other_knowledge_entries]
     all_param_ids = special_knowledge_param_ids + regular_knowledge_param_ids
@@ -468,7 +486,7 @@ def publish_knowledge(
         param_ids=all_param_ids
     )
     
-    # Step 12: Mark publish job as completed
+    # Step 13: Mark publish job as completed
     
     # Prepare response JSON for database
     response_data = {
@@ -477,7 +495,9 @@ def publish_knowledge(
         'deleted_old_knowledge': deleted_old_knowledge,
         'special_knowledge_count': len(special_knowledge_param_ids),
         'regular_knowledge_count': len(regular_knowledge_param_ids),
-        'total_knowledge_count': len(all_param_ids)
+        'total_knowledge_count': len(all_param_ids),
+        'system_prompt_published': True,
+        'system_prompt_id': system_prompt_result['system_prompt_id']
     }
     
     update_publish_job_status(
@@ -498,7 +518,9 @@ def publish_knowledge(
         'r2_url': r2_url,
         'special_knowledge_count': len(special_knowledge_param_ids),
         'regular_knowledge_count': len(regular_knowledge_param_ids),
-        'total_knowledge_count': len(all_param_ids)
+        'total_knowledge_count': len(all_param_ids),
+        'system_prompt_published': True,
+        'system_prompt_id': system_prompt_result['system_prompt_id']
     }
     
     logger.info(
