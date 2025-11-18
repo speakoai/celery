@@ -51,10 +51,10 @@ def fetch_active_tenants():
             cur.execute("""
                 SELECT 
                     tenant_id,
-                    company_name,
+                    name,
                     created_at
                 FROM tenants
-                WHERE is_active = true
+                WHERE status = 'active'
                 ORDER BY tenant_id
             """)
             
