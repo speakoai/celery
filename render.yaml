@@ -173,3 +173,26 @@ services:
       - key: R2_PUBLIC_BASE_URL
         sync: false
 
+  - type: cron
+    name: generate-dashboard-metrics
+    region: virginia
+    env: python
+    schedule: "0 3 * * *" # Daily at 3 AM UTC (after conversations sync)
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "PYTHONPATH=. python dispatch/generate_dashboard_metrics_dispatch.py"
+    envVars:
+      - key: CELERY_BROKER_URL
+        fromService:
+          name: celery-redis
+          type: redis
+          property: connectionString
+      - key: DATABASE_URL
+        fromDatabase:
+          name: speako-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: speako-cache
+          property: connectionString
+
