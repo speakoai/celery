@@ -138,3 +138,38 @@ services:
           name: speako-db
           property: connectionString
 
+  - type: cron
+    name: sync-elevenlabs-conversations
+    region: virginia
+    env: python
+    schedule: "0 2 * * *" # Daily at 2 AM UTC
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "PYTHONPATH=. python dispatch/sync_elevenlabs_conversations_dispatch.py"
+    envVars:
+      - key: CELERY_BROKER_URL
+        fromService:
+          name: celery-redis
+          type: redis
+          property: connectionString
+      - key: DATABASE_URL
+        fromDatabase:
+          name: speako-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: speako-cache
+          property: connectionString
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: R2_ENDPOINT_URL
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false
+      - key: R2_PUBLIC_BASE_URL
+        sync: false
+
