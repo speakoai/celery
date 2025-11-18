@@ -114,18 +114,19 @@ def collect_summary_metrics(tenant_id, location_ids):
                     "growth_pct": growth
                 }
         
-        # Query 2: Customers (total current + total 30 days ago)
+        # Query 2: Customers (total active customers per location)
+        # Note: We count total active customers now vs 30 days ago
+        # by checking when they were created relative to the time window
         customers_data = {}
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT 
                     location_id,
-                    COUNT(DISTINCT customer_id) FILTER (WHERE TRUE) as current_total,
-                    COUNT(DISTINCT customer_id) FILTER (WHERE start_time < NOW() - INTERVAL '30 days') as previous_total
-                FROM bookings
+                    COUNT(*) FILTER (WHERE is_active = true) as current_total,
+                    COUNT(*) FILTER (WHERE is_active = true AND created_at < NOW() - INTERVAL '30 days') as previous_total
+                FROM customers
                 WHERE tenant_id = %s 
                   AND location_id = ANY(%s)
-                  AND customer_id IS NOT NULL
                 GROUP BY location_id
             """, (tenant_id, location_ids))
             
