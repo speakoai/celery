@@ -92,13 +92,13 @@ def collect_summary_metrics(tenant_id, location_ids):
             cur.execute("""
                 SELECT 
                     location_id,
-                    COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '30 days') as current_count,
-                    COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '60 days' 
-                                     AND created_at < NOW() - INTERVAL '30 days') as previous_count
+                    COUNT(*) FILTER (WHERE start_time >= NOW() - INTERVAL '30 days') as current_count,
+                    COUNT(*) FILTER (WHERE start_time >= NOW() - INTERVAL '60 days' 
+                                     AND start_time < NOW() - INTERVAL '30 days') as previous_count
                 FROM bookings
                 WHERE tenant_id = %s 
                   AND location_id = ANY(%s)
-                  AND created_at >= NOW() - INTERVAL '60 days'
+                  AND start_time >= NOW() - INTERVAL '60 days'
                   AND status = 'confirmed'
                 GROUP BY location_id
             """, (tenant_id, location_ids))
@@ -121,7 +121,7 @@ def collect_summary_metrics(tenant_id, location_ids):
                 SELECT 
                     location_id,
                     COUNT(DISTINCT customer_id) FILTER (WHERE TRUE) as current_total,
-                    COUNT(DISTINCT customer_id) FILTER (WHERE created_at < NOW() - INTERVAL '30 days') as previous_total
+                    COUNT(DISTINCT customer_id) FILTER (WHERE start_time < NOW() - INTERVAL '30 days') as previous_total
                 FROM bookings
                 WHERE tenant_id = %s 
                   AND location_id = ANY(%s)
