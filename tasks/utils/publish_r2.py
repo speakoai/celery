@@ -136,3 +136,78 @@ def upload_knowledge_to_r2(
     )
     
     return (r2_key, public_url)
+
+
+def upload_audio_to_r2(
+    tenant_id: str,
+    location_id: str,
+    conversation_id: str,
+    audio_bytes: bytes,
+    content_type: str = 'audio/mpeg'
+) -> Tuple[str, str]:
+    """
+    Upload conversation audio file to Cloudflare R2 storage.
+    
+    Args:
+        tenant_id: Tenant identifier
+        location_id: Location identifier
+        conversation_id: ElevenLabs conversation ID
+        audio_bytes: Raw audio file bytes
+        content_type: MIME type of audio file (default: 'audio/mpeg')
+    
+    Returns:
+        Tuple of (r2_key, public_url)
+        - r2_key: Full path/key in the R2 bucket
+        - public_url: Public URL to access the audio file
+    
+    Upload path structure: {tenant_id}/{location_id}/conversations/{conversation_id}.{ext}
+    """
+    logger.info(
+        f"[publish_r2] Uploading audio to R2: tenant_id={tenant_id}, location_id={location_id}, "
+        f"conversation_id={conversation_id}, audio_size={len(audio_bytes)} bytes, type={content_type}"
+    )
+    
+    r2_client = _get_r2_client()
+    
+    # Determine file extension from content type
+    extension_map = {
+        'audio/mpeg': 'mp3',
+        'audio/mp3': 'mp3',
+        'audio/wav': 'wav',
+        'audio/x-wav': 'wav',
+        'audio/wave': 'wav',
+        'audio/webm': 'webm',
+        'audio/ogg': 'ogg',
+    }
+    extension = extension_map.get(content_type, 'mp3')  # Default to mp3
+    
+    # Construct R2 key (path in bucket)
+    r2_key = f"{tenant_id}/{location_id}/conversations/{conversation_id}.{extension}"
+    
+    # Prepare metadata
+    metadata = {
+        'tenant_id': str(tenant_id),
+        'location_id': str(location_id),
+        'conversation_id': conversation_id,
+        'upload_timestamp': datetime.utcnow().isoformat() + 'Z',
+        'content_type': content_type,
+        'group': 'conversation_audio'
+    }
+    
+    # Upload to R2
+    r2_client.put_object(
+        Bucket=R2_BUCKET_NAME,
+        Key=r2_key,
+        Body=audio_bytes,
+        ContentType=content_type,
+        Metadata=metadata
+    )
+    
+    # Construct public URL
+    public_url = f"{R2_PUBLIC_BASE_URL}/{r2_key}"
+    
+    logger.info(
+        f"[publish_r2] Successfully uploaded audio to R2: key={r2_key}, url={public_url}"
+    )
+    
+    return (r2_key, public_url)

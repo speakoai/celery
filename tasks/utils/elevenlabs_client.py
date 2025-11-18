@@ -659,3 +659,179 @@ def update_pronunciation_dictionary(dictionary_id: str, rules: list) -> tuple[st
         error_msg = f"Failed to parse pronunciation dictionary update response: {str(e)}"
         logger.error(f"[ElevenLabs] ❌ PARSE ERROR: {error_msg}")
         raise ValueError(error_msg) from e
+
+
+def list_conversations(agent_id: str) -> list:
+    """
+    List all conversations for a specific ElevenLabs agent.
+    
+    Args:
+        agent_id: ElevenLabs agent ID
+        
+    Returns:
+        List of conversation dictionaries with summary info
+        
+    Raises:
+        requests.HTTPError: If API call fails
+        ValueError: If response cannot be parsed
+    """
+    logger.info(f"[ElevenLabs] 📋 Listing conversations for agent: {agent_id}")
+    
+    try:
+        url = f"{ELEVENLABS_BASE_URL}/conversations"
+        headers = _get_headers()
+        params = {'agent_id': agent_id}
+        
+        response = requests.get(
+            url,
+            headers=headers,
+            params=params,
+            timeout=30
+        )
+        
+        response.raise_for_status()
+        
+        result = response.json()
+        
+        # API may return {'conversations': [...]} or just [...]
+        if isinstance(result, dict) and 'conversations' in result:
+            conversations = result['conversations']
+        elif isinstance(result, list):
+            conversations = result
+        else:
+            logger.warning(f"[ElevenLabs] Unexpected response format: {result}")
+            conversations = []
+        
+        logger.info(f"[ElevenLabs] ✅ Found {len(conversations)} conversations for agent {agent_id}")
+        
+        return conversations
+        
+    except requests.HTTPError as e:
+        error_msg = f"Failed to list conversations for agent {agent_id}: HTTP {e.response.status_code} - {e.response.text}"
+        logger.error(f"[ElevenLabs] ❌ {error_msg}")
+        raise requests.HTTPError(error_msg, response=e.response) from e
+        
+    except requests.RequestException as e:
+        error_msg = f"Failed to list conversations for agent {agent_id}: {str(e)}"
+        logger.error(f"[ElevenLabs] ❌ {error_msg}")
+        raise
+        
+    except Exception as e:
+        error_msg = f"Failed to parse conversations list response: {str(e)}"
+        logger.error(f"[ElevenLabs] ❌ {error_msg}")
+        raise ValueError(error_msg) from e
+
+
+def get_conversation_details(conversation_id: str) -> Dict[str, Any]:
+    """
+    Get full details of a specific conversation including transcript.
+    
+    Args:
+        conversation_id: ElevenLabs conversation ID
+        
+    Returns:
+        Full conversation details as a dictionary
+        
+    Raises:
+        requests.HTTPError: If API call fails
+        ValueError: If response cannot be parsed
+    """
+    logger.info(f"[ElevenLabs] 📄 Fetching conversation details: {conversation_id}")
+    
+    try:
+        url = f"{ELEVENLABS_BASE_URL}/conversations/{conversation_id}"
+        headers = _get_headers()
+        
+        response = requests.get(
+            url,
+            headers=headers,
+            timeout=30
+        )
+        
+        response.raise_for_status()
+        
+        details = response.json()
+        
+        logger.info(f"[ElevenLabs] ✅ Retrieved conversation details for {conversation_id}")
+        
+        return details
+        
+    except requests.HTTPError as e:
+        error_msg = f"Failed to get conversation {conversation_id}: HTTP {e.response.status_code} - {e.response.text}"
+        logger.error(f"[ElevenLabs] ❌ {error_msg}")
+        raise requests.HTTPError(error_msg, response=e.response) from e
+        
+    except requests.RequestException as e:
+        error_msg = f"Failed to get conversation {conversation_id}: {str(e)}"
+        logger.error(f"[ElevenLabs] ❌ {error_msg}")
+        raise
+        
+    except Exception as e:
+        error_msg = f"Failed to parse conversation details response: {str(e)}"
+        logger.error(f"[ElevenLabs] ❌ {error_msg}")
+        raise ValueError(error_msg) from e
+
+
+def get_conversation_audio(conversation_id: str) -> tuple[bytes, str]:
+    """
+    Download audio file for a conversation.
+    
+    Args:
+        conversation_id: ElevenLabs conversation ID
+        
+    Returns:
+        Tuple of (audio_bytes, content_type)
+        - audio_bytes: Raw audio file bytes
+        - content_type: MIME type from Content-Type header (e.g., 'audio/mpeg')
+        
+    Raises:
+        requests.HTTPError: If API call fails
+        RuntimeError: If download fails or returns no content
+    """
+    logger.info(f"[ElevenLabs] 🎵 Downloading audio for conversation: {conversation_id}")
+    
+    try:
+        url = f"{ELEVENLABS_BASE_URL}/conversations/{conversation_id}/audio"
+        headers = _get_headers()
+        
+        response = requests.get(
+            url,
+            headers=headers,
+            timeout=60,  # Audio files may be large
+            stream=True
+        )
+        
+        response.raise_for_status()
+        
+        # Get content type for file extension detection
+        content_type = response.headers.get('Content-Type', 'audio/mpeg')
+        
+        # Read audio bytes
+        audio_bytes = response.content
+        
+        if not audio_bytes:
+            error_msg = f"No audio content returned for conversation {conversation_id}"
+            logger.error(f"[ElevenLabs] ❌ {error_msg}")
+            raise RuntimeError(error_msg)
+        
+        logger.info(
+            f"[ElevenLabs] ✅ Downloaded audio for {conversation_id}: "
+            f"{len(audio_bytes)} bytes, type={content_type}"
+        )
+        
+        return audio_bytes, content_type
+        
+    except requests.HTTPError as e:
+        error_msg = f"Failed to download audio for conversation {conversation_id}: HTTP {e.response.status_code} - {e.response.text}"
+        logger.error(f"[ElevenLabs] ❌ {error_msg}")
+        raise requests.HTTPError(error_msg, response=e.response) from e
+        
+    except requests.RequestException as e:
+        error_msg = f"Failed to download audio for conversation {conversation_id}: {str(e)}"
+        logger.error(f"[ElevenLabs] ❌ {error_msg}")
+        raise
+        
+    except Exception as e:
+        error_msg = f"Failed to process audio download for conversation {conversation_id}: {str(e)}"
+        logger.error(f"[ElevenLabs] ❌ {error_msg}")
+        raise RuntimeError(error_msg) from e
