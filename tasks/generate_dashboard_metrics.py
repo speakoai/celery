@@ -114,32 +114,24 @@ def collect_summary_metrics(tenant_id, location_ids):
                     "growth_pct": growth
                 }
         
-        # Query 2: Customers (total active customers per location)
-        # Note: We count total active customers now vs 30 days ago
-        # by checking when they were created relative to the time window
-        customers_data = {}
+        # Query 2: Customers (tenant-level active customer count)
+        total_customers = 0
+        customers_growth_pct = 0.0
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT 
-                    location_id,
                     COUNT(*) FILTER (WHERE is_active = true) as current_total,
                     COUNT(*) FILTER (WHERE is_active = true AND created_at < NOW() - INTERVAL '30 days') as previous_total
                 FROM customers
-                WHERE tenant_id = %s 
-                  AND location_id = ANY(%s)
-                GROUP BY location_id
-            """, (tenant_id, location_ids))
+                WHERE tenant_id = %s
+            """, (tenant_id,))
             
-            for row in cur.fetchall():
-                loc_id = row[0]
-                current = row[1] or 0
-                previous = row[2] or 0
-                growth = calculate_growth_pct(current, previous)
-                
-                customers_data[loc_id] = {
-                    "current": current,
-                    "growth_pct": growth
-                }
+            row = cur.fetchone()
+            if row:
+                current = row[0] or 0
+                previous = row[1] or 0
+                total_customers = current
+                customers_growth_pct = calculate_growth_pct(current, previous)
         
         # Query 3: Calls (current + previous 30 days with avg duration)
         calls_data = {}
@@ -181,7 +173,6 @@ def collect_summary_metrics(tenant_id, location_ids):
         # Aggregate by location
         for loc_id in location_ids:
             bookings = bookings_data.get(loc_id, {"current": 0, "growth_pct": 0.0})
-            customers = customers_data.get(loc_id, {"current": 0, "growth_pct": 0.0})
             calls = calls_data.get(loc_id, {
                 "current_count": 0,
                 "calls_growth_pct": 0.0,
@@ -193,8 +184,6 @@ def collect_summary_metrics(tenant_id, location_ids):
                 "location_name": location_names.get(loc_id, f"Location {loc_id}"),
                 "bookings_last_30_days": bookings["current"],
                 "bookings_growth_pct": bookings["growth_pct"],
-                "customers_total": customers["current"],
-                "customers_growth_pct": customers["growth_pct"],
                 "calls_last_30_days": calls["current_count"],
                 "calls_growth_pct": calls["calls_growth_pct"],
                 "avg_call_duration_seconds": calls["current_avg_duration"],
@@ -205,9 +194,8 @@ def collect_summary_metrics(tenant_id, location_ids):
         summary["all_locations"]["bookings_last_30_days"] = sum(
             loc["bookings_last_30_days"] for loc in summary["by_location"].values()
         )
-        summary["all_locations"]["customers_total"] = sum(
-            loc["customers_total"] for loc in summary["by_location"].values()
-        )
+        summary["all_locations"]["customers_total"] = total_customers
+        summary["all_locations"]["customers_growth_pct"] = customers_growth_pct
         summary["all_locations"]["calls_last_30_days"] = sum(
             loc["calls_last_30_days"] for loc in summary["by_location"].values()
         )
@@ -241,14 +229,7 @@ def collect_summary_metrics(tenant_id, location_ids):
                 # No growth, previous = current
                 all_bookings_prev_sum += b["current"]
             
-            # Customers
-            c = customers_data.get(loc_id, {"current": 0, "growth_pct": 0.0})
-            if c["growth_pct"] != 0 and c["growth_pct"] != -100:
-                all_customers_prev_sum += int(c["current"] / (1 + c["growth_pct"] / 100))
-            elif c["growth_pct"] == -100:
-                all_customers_prev_sum += max(1, c["current"])
-            else:
-                all_customers_prev_sum += c["current"]
+
             
             # Calls
             ca = calls_data.get(loc_id, {"current_count": 0, "calls_growth_pct": 0.0})
