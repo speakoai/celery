@@ -13,10 +13,10 @@ import psycopg2
 import os
 from dotenv import load_dotenv
 
-from tasks.sync_elevenlabs_conversations import sync_conversations_for_location
-
 # Load environment variables
 load_dotenv()
+
+from tasks.sync_elevenlabs_conversations import sync_conversations_for_location
 
 
 def get_db_connection():
