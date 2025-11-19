@@ -36,6 +36,10 @@ REDIS_URL = os.getenv("REDIS_URL")
 SYNC_REDIS_KEY_PREFIX = "elevenlabs_sync:last_sync"
 SYNC_REDIS_TTL = 15552000  # 180 days in seconds
 
+# ElevenLabs billing plan configuration
+ELEVENLABS_PLAN_COST = float(os.getenv("ELEVENLABS_PLAN_COST", "330"))  # USD
+ELEVENLABS_PLAN_CREDITS = float(os.getenv("ELEVENLABS_PLAN_CREDITS", "200000"))  # Credits
+
 
 def get_redis_client():
     """Get Redis client for sync tracking."""
@@ -475,6 +479,10 @@ def insert_billing_record(
         # Calculated field - llm_cost is the same as llm_price_usd (already in USD)
         llm_cost = llm_price_usd
         
+        # Calculate estimated total call cost based on subscription plan
+        credit_rate = ELEVENLABS_PLAN_COST / ELEVENLABS_PLAN_CREDITS if ELEVENLABS_PLAN_CREDITS > 0 else 0
+        estimated_total_call_cost = (total_credits or 0) * credit_rate
+        
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO billing_location_conversations (
@@ -492,9 +500,10 @@ def insert_billing_record(
                     currency_code,
                     llm_usage,
                     raw_billing_metadata,
+                    estimated_total_call_cost,
                     updated_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                 ON CONFLICT (provider_conversation_id)
                 DO UPDATE SET
                     location_conversation_id = EXCLUDED.location_conversation_id,
@@ -509,6 +518,7 @@ def insert_billing_record(
                     currency_code = EXCLUDED.currency_code,
                     llm_usage = EXCLUDED.llm_usage,
                     raw_billing_metadata = EXCLUDED.raw_billing_metadata,
+                    estimated_total_call_cost = EXCLUDED.estimated_total_call_cost,
                     updated_at = CURRENT_TIMESTAMP
             """, (
                 location_conversation_id,
@@ -524,13 +534,15 @@ def insert_billing_record(
                 llm_cost,
                 currency_code,
                 llm_usage_json,
-                raw_billing_metadata
+                raw_billing_metadata,
+                estimated_total_call_cost
             ))
         
         logger.info(
             f"[ConvSync] Upserted billing record for conversation {conversation_id}: "
             f"duration={call_duration_secs}s, total_credits={total_credits}, "
-            f"llm_credits={llm_credits}, call_credits={call_credits}"
+            f"llm_credits={llm_credits}, call_credits={call_credits}, "
+            f"estimated_cost=${estimated_total_call_cost:.4f}"
         )
         
         return True
