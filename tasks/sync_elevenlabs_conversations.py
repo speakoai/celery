@@ -483,6 +483,13 @@ def insert_billing_record(
         credit_rate = ELEVENLABS_PLAN_COST / ELEVENLABS_PLAN_CREDITS if ELEVENLABS_PLAN_CREDITS > 0 else 0
         estimated_total_call_cost = (total_credits or 0) * credit_rate
         
+        # Calculate estimated cost per minute (handle zero duration)
+        if call_duration_secs and call_duration_secs > 0:
+            duration_minutes = call_duration_secs / 60.0
+            estimated_cost_per_minute = estimated_total_call_cost / duration_minutes
+        else:
+            estimated_cost_per_minute = None
+        
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO billing_location_conversations (
@@ -501,9 +508,10 @@ def insert_billing_record(
                     llm_usage,
                     raw_billing_metadata,
                     estimated_total_call_cost,
+                    estimated_cost_per_minute,
                     updated_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                 ON CONFLICT (provider_conversation_id)
                 DO UPDATE SET
                     location_conversation_id = EXCLUDED.location_conversation_id,
@@ -519,6 +527,7 @@ def insert_billing_record(
                     llm_usage = EXCLUDED.llm_usage,
                     raw_billing_metadata = EXCLUDED.raw_billing_metadata,
                     estimated_total_call_cost = EXCLUDED.estimated_total_call_cost,
+                    estimated_cost_per_minute = EXCLUDED.estimated_cost_per_minute,
                     updated_at = CURRENT_TIMESTAMP
             """, (
                 location_conversation_id,
@@ -535,14 +544,16 @@ def insert_billing_record(
                 currency_code,
                 llm_usage_json,
                 raw_billing_metadata,
-                estimated_total_call_cost
+                estimated_total_call_cost,
+                estimated_cost_per_minute
             ))
         
+        cost_per_min_str = f"${estimated_cost_per_minute:.4f}/min" if estimated_cost_per_minute else "N/A"
         logger.info(
             f"[ConvSync] Upserted billing record for conversation {conversation_id}: "
             f"duration={call_duration_secs}s, total_credits={total_credits}, "
             f"llm_credits={llm_credits}, call_credits={call_credits}, "
-            f"estimated_cost=${estimated_total_call_cost:.4f}"
+            f"estimated_cost=${estimated_total_call_cost:.4f}, cost_per_min={cost_per_min_str}"
         )
         
         return True
