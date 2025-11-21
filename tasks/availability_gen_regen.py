@@ -4,6 +4,7 @@ load_dotenv()
 from tasks.celery_app import app
 from celery.utils.log import get_task_logger
 from tasks.utils.availability_helpers import reconstruct_staff_availability, reconstruct_venue_availability
+from tasks.utils.task_db import mark_task_running, mark_task_failed, mark_task_succeeded
 
 import os
 import psycopg2
@@ -55,8 +56,8 @@ def fetch_sample_data():
         logger.error(f"[PRODUCTION] Database error: {e}")
         return None
 
-@app.task
-def gen_availability(tenant_id, location_id, location_tz, affected_date=None):
+@app.task(bind=True)
+def gen_availability(self, tenant_id, location_id, location_tz, affected_date=None, task_id=None):
     logger.info(f"[LOCAL TEST] Generating availability for tenant={tenant_id}, location={location_id}")
 
     db_url = os.getenv("DATABASE_URL")
@@ -73,6 +74,16 @@ def gen_availability(tenant_id, location_id, location_tz, affected_date=None):
 
         valkey_client = redis.Redis.from_url(redis_url, decode_responses=True)
         logger.info("[DEBUG] Connected to Redis")
+
+        # Mark task as running in DB (best-effort)
+        if task_id:
+            try:
+                mark_task_running(task_id=str(task_id), celery_task_id=str(self.request.id),
+                                  message='Availability generation started',
+                                  details={'tenant_id': tenant_id, 'location_id': location_id, 'is_regen': affected_date is not None},
+                                  actor='celery')
+            except Exception as db_e:
+                logger.warning(f"mark_task_running failed: {db_e}")
 
         cur = pg_conn.cursor()
         db_start = time.time()
@@ -92,6 +103,13 @@ def gen_availability(tenant_id, location_id, location_tz, affected_date=None):
             day_offset = (affected_dt - current_start).days
             if day_offset < 0:
                 logger.info(f"[SKIP] Affected date {affected_date} is in the past for tenant={tenant_id}, location={location_id}")
+                if task_id:
+                    try:
+                        mark_task_succeeded(task_id=str(task_id), celery_task_id=str(self.request.id),
+                                            details={'tenant_id': tenant_id, 'location_id': location_id, 'status': 'skipped', 'reason': 'date_in_past'},
+                                            actor='celery', progress=100)
+                    except Exception as db_e:
+                        logger.warning(f"mark_task_succeeded (skipped) failed: {db_e}")
                 return {"status": "skipped"}
             chunk_index = day_offset // chunk_size
             chunk_start_offset = chunk_index * chunk_size
@@ -272,17 +290,34 @@ def gen_availability(tenant_id, location_id, location_tz, affected_date=None):
         logger.info(f"[INFO] DB fetch duration: {db_end - db_start:.2f}s")
         logger.info(f"[DEBUG] JSON generated and cached for tenant_id={tenant_id}, location_id={location_id}")
 
+        # Mark task as succeeded before returning
+        if task_id:
+            try:
+                mark_task_succeeded(task_id=str(task_id), celery_task_id=str(self.request.id),
+                                    details={'tenant_id': tenant_id, 'location_id': location_id, 'days_generated': days_range, 'duration_seconds': db_end - db_start},
+                                    actor='celery', progress=100)
+            except Exception as db_e:
+                logger.warning(f"mark_task_succeeded failed: {db_e}")
+
         return {"status": "success"}
 
     except Exception as e:
         import traceback
         logger.error(f"[LOCAL TEST] Exception occurred: {e}")
         traceback.print_exc()
+        if task_id:
+            try:
+                mark_task_failed(task_id=str(task_id), celery_task_id=str(self.request.id),
+                                 error_code='error', error_message=str(e),
+                                 details={'tenant_id': tenant_id, 'location_id': location_id, 'error_type': type(e).__name__},
+                                 actor='celery')
+            except Exception as db_e:
+                logger.warning(f"mark_task_failed failed: {db_e}")
         return None
 
 
-@app.task
-def gen_availability_venue(tenant_id, location_id, location_tz, affected_date=None):
+@app.task(bind=True)
+def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_date=None, task_id=None):
     logger.info(f"[LOCAL TEST] Generating availability for tenant={tenant_id}, location={location_id}")
 
     db_url = os.getenv("DATABASE_URL")
@@ -290,6 +325,13 @@ def gen_availability_venue(tenant_id, location_id, location_tz, affected_date=No
 
     if not db_url or not redis_url:
         logger.error("Missing DATABASE_URL or REDIS_URL in .env")
+        if task_id:
+            try:
+                mark_task_failed(task_id=str(task_id), celery_task_id=str(self.request.id),
+                                 error_code='config_error', error_message='Missing DATABASE_URL or REDIS_URL',
+                                 details={'tenant_id': tenant_id, 'location_id': location_id}, actor='celery')
+            except Exception as db_e:
+                logger.warning(f"mark_task_failed (config_error) failed: {db_e}")
         return
 
     try:
@@ -297,6 +339,16 @@ def gen_availability_venue(tenant_id, location_id, location_tz, affected_date=No
         logger.info("✅ Connected to PostgreSQL")
         valkey_client = redis.Redis.from_url(redis_url, decode_responses=True)
         logger.info("[DEBUG] Connected to Redis")
+
+        # Mark task as running in DB (best-effort)
+        if task_id:
+            try:
+                mark_task_running(task_id=str(task_id), celery_task_id=str(self.request.id),
+                                  message='Venue availability generation started',
+                                  details={'tenant_id': tenant_id, 'location_id': location_id, 'is_regen': affected_date is not None},
+                                  actor='celery')
+            except Exception as db_e:
+                logger.warning(f"mark_task_running failed: {db_e}")
 
         cur = pg_conn.cursor()
         chunk_size = 3
@@ -315,6 +367,13 @@ def gen_availability_venue(tenant_id, location_id, location_tz, affected_date=No
             day_offset = (affected_dt - current_start).days
             if day_offset < 0:
                 logger.info(f"[SKIP] Affected date {affected_date} is in the past for tenant={tenant_id}, location={location_id}")
+                if task_id:
+                    try:
+                        mark_task_succeeded(task_id=str(task_id), celery_task_id=str(self.request.id),
+                                            details={'tenant_id': tenant_id, 'location_id': location_id, 'status': 'skipped', 'reason': 'date_in_past'},
+                                            actor='celery', progress=100)
+                    except Exception as db_e:
+                        logger.warning(f"mark_task_succeeded (skipped) failed: {db_e}")
                 return {"status": "skipped"}
             chunk_index = day_offset // chunk_size
             chunk_start_offset = chunk_index * chunk_size
@@ -522,10 +581,28 @@ def gen_availability_venue(tenant_id, location_id, location_tz, affected_date=No
 
         cur.close()
         logger.info(f"[DEBUG] All chunks cached successfully for tenant={tenant_id}, location={location_id}")
+
+        # Mark task as succeeded before returning
+        if task_id:
+            try:
+                mark_task_succeeded(task_id=str(task_id), celery_task_id=str(self.request.id),
+                                    details={'tenant_id': tenant_id, 'location_id': location_id, 'days_generated': days_range},
+                                    actor='celery', progress=100)
+            except Exception as db_e:
+                logger.warning(f"mark_task_succeeded failed: {db_e}")
+
         return {"status": "success"}
 
     except Exception as e:
         import traceback
         logger.error(f"[LOCAL TEST] Exception occurred: {e}")
         traceback.print_exc()
+        if task_id:
+            try:
+                mark_task_failed(task_id=str(task_id), celery_task_id=str(self.request.id),
+                                 error_code='error', error_message=str(e),
+                                 details={'tenant_id': tenant_id, 'location_id': location_id, 'error_type': type(e).__name__},
+                                 actor='celery')
+            except Exception as db_e:
+                logger.warning(f"mark_task_failed failed: {db_e}")
         return None

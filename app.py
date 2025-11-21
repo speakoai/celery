@@ -343,6 +343,7 @@ def api_generate_availability():
         location_tz = data['location_tz']
         business_type = data['business_type']
         affected_date = data.get('affected_date')  # Optional for regeneration
+        speako_task_id = data.get('speako_task_id')  # Optional for task tracking
         
         # Validate business_type
         if business_type not in ['rest', 'service']:
@@ -354,13 +355,13 @@ def api_generate_availability():
         
         # Route to appropriate task based on business_type
         if business_type == 'rest':
-            task = gen_availability_venue.delay(tenant_id, location_id, location_tz, affected_date)
+            task = gen_availability_venue.delay(tenant_id, location_id, location_tz, affected_date, task_id=speako_task_id)
             task_type = 'venue'
         else:
-            task = gen_availability.delay(tenant_id, location_id, location_tz, affected_date)
+            task = gen_availability.delay(tenant_id, location_id, location_tz, affected_date, task_id=speako_task_id)
             task_type = 'staff'
         
-        return jsonify({
+        response_data = {
             'task_id': task.id,
             'status': 'pending',
             'message': f'{task_type.title()} availability generation task started',
@@ -369,7 +370,13 @@ def api_generate_availability():
             'business_type': business_type,
             'task_type': task_type,
             'is_regeneration': affected_date is not None
-        }), 202
+        }
+        
+        # Include speako_task_id in response if provided
+        if speako_task_id:
+            response_data['speako_task_id'] = speako_task_id
+        
+        return jsonify(response_data), 202
         
     except Exception as e:
         return jsonify({
@@ -410,18 +417,25 @@ def api_generate_venue_availability():
         location_id = data['location_id']
         location_tz = data['location_tz']
         affected_date = data.get('affected_date')  # Optional for regeneration
+        speako_task_id = data.get('speako_task_id')  # Optional for task tracking
         
         # Trigger the celery task
-        task = gen_availability_venue.delay(tenant_id, location_id, location_tz, affected_date)
+        task = gen_availability_venue.delay(tenant_id, location_id, location_tz, affected_date, task_id=speako_task_id)
         
-        return jsonify({
+        response_data = {
             'task_id': task.id,
             'status': 'pending',
             'message': 'Venue availability generation task started',
             'tenant_id': tenant_id,
             'location_id': location_id,
             'is_regeneration': affected_date is not None
-        }), 202
+        }
+        
+        # Include speako_task_id in response if provided
+        if speako_task_id:
+            response_data['speako_task_id'] = speako_task_id
+        
+        return jsonify(response_data), 202
         
     except Exception as e:
         return jsonify({
