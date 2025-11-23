@@ -285,6 +285,26 @@ def gen_availability(self, tenant_id, location_id, location_tz, affected_date=No
             valkey_client.set(cache_key, json.dumps(response))
             logger.info(f"🗝️ [CACHE WRITE] Writing cache key: {cache_key}")
 
+        # Update availability_change_log to mark changes as published
+        try:
+            cur.execute("""
+                UPDATE availability_change_log
+                SET is_published = TRUE, published_at = CURRENT_TIMESTAMP
+                WHERE tenant_id = %s AND location_id = %s AND is_published = FALSE
+                RETURNING change_id, entity_type, entity_id, action
+            """, (tenant_id, location_id))
+            published_changes = cur.fetchall()
+            pg_conn.commit()
+            if published_changes:
+                logger.info(f"[PUBLISH] Marked {len(published_changes)} availability changes as published for tenant={tenant_id}, location={location_id}")
+                for change_id, entity_type, entity_id, action in published_changes:
+                    logger.debug(f"[PUBLISH] change_id={change_id}, {entity_type}={entity_id}, action={action}")
+            else:
+                logger.info(f"[PUBLISH] No unpublished changes found for tenant={tenant_id}, location={location_id}")
+        except Exception as publish_e:
+            logger.warning(f"[PUBLISH] Failed to update availability_change_log: {publish_e}")
+            # Don't fail the task if publish update fails
+
         cur.close()
         db_end = time.time()
         logger.info(f"[INFO] DB fetch duration: {db_end - db_start:.2f}s")
@@ -578,6 +598,26 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
 
             valkey_client.set(cache_key, json.dumps(response))
             logger.info(f"🗝️ [CACHE WRITE] Writing cache key: {cache_key}")
+
+        # Update availability_change_log to mark changes as published
+        try:
+            cur.execute("""
+                UPDATE availability_change_log
+                SET is_published = TRUE, published_at = CURRENT_TIMESTAMP
+                WHERE tenant_id = %s AND location_id = %s AND is_published = FALSE
+                RETURNING change_id, entity_type, entity_id, action
+            """, (tenant_id, location_id))
+            published_changes = cur.fetchall()
+            pg_conn.commit()
+            if published_changes:
+                logger.info(f"[PUBLISH] Marked {len(published_changes)} availability changes as published for tenant={tenant_id}, location={location_id}")
+                for change_id, entity_type, entity_id, action in published_changes:
+                    logger.debug(f"[PUBLISH] change_id={change_id}, {entity_type}={entity_id}, action={action}")
+            else:
+                logger.info(f"[PUBLISH] No unpublished changes found for tenant={tenant_id}, location={location_id}")
+        except Exception as publish_e:
+            logger.warning(f"[PUBLISH] Failed to update availability_change_log: {publish_e}")
+            # Don't fail the task if publish update fails
 
         cur.close()
         logger.info(f"[DEBUG] All chunks cached successfully for tenant={tenant_id}, location={location_id}")
