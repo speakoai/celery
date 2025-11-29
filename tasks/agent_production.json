@@ -1,0 +1,48 @@
+{
+  "conversation_config": {
+    "asr": {
+      "quality": "high",
+      "provider": "elevenlabs",
+      "user_input_audio_format": "ulaw_8000"
+    },
+    "tts": {
+      "voice_id": "cjVigY5qzO86Huf0OWal",
+      "agent_output_audio_format": "ulaw_8000"
+    },
+    "agent": {
+      "first_message": "Welcome to Happy Sushi Schofields! What can I do for you today?",
+      "language": "en",
+      "prompt": {
+        "prompt": "You are the customer service agent for Happy Sushi",
+        "llm": "gpt-4o",
+        "temperature": 0.6,
+        "built_in_tools": {
+          "end_call": {
+            "name": "end_call",
+            "description": "end customer calls when conversation is over",
+            "params": {
+              "system_tool_type": "end_call"
+            }
+          }
+        },
+        "knowledge_base": [
+          {
+            "name": "happy-sushi-menu | Notion",
+            "id": "ppK9RiKERIRXSgka56xf",
+            "type": "url"
+          }
+        ],
+        "rag": {
+          "enabled": true,
+          "embedding_model": "e5_mistral_7b_instruct"
+        },
+        "timezone": "Australia/Sydney"
+      }
+    }
+  },
+  "name": "Happy Sushi",
+  "tags": [
+    "restaurants",
+    "Australia/Sydney"
+  ]
+}

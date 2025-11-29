@@ -54,3 +54,4 @@ import tasks.sync_speako_data
 import tasks.publish_elevenlabs_agent
 import tasks.sync_elevenlabs_conversations
 import tasks.generate_dashboard_metrics
+import tasks.create_ai_agent

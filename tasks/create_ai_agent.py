@@ -7,6 +7,7 @@ import os
 import requests
 import json
 from datetime import datetime
+import psycopg2
 
 """
 ElevenLabs Conversational AI Agent Management Tasks
@@ -37,17 +38,18 @@ API Documentation:
 logger = get_task_logger(__name__)
 
 @app.task
-def create_conversation_ai_agent(json_filename="agent.json"):
+def create_conversation_ai_agent(location_id, location_name, location_timezone):
     """
     Create a conversational AI agent using configuration from a JSON file
     
     This function loads an agent configuration from a JSON file and creates
     a new conversational AI agent using the ElevenLabs API. The JSON file
-    should contain the complete agent configuration.
+    is used as a template and specific fields are modified based on parameters.
     
     Args:
-        json_filename (str): Name of the JSON configuration file (default: "agent.json")
-                           The file should be located in the same directory as this script.
+        location_id (str): Unique identifier for the location
+        location_name (str): Name of the location
+        location_timezone (str): Timezone for the location (e.g., 'Australia/Sydney')
     
     Returns:
         dict: Response containing:
@@ -60,13 +62,11 @@ def create_conversation_ai_agent(json_filename="agent.json"):
             - details (str): Error details (if failed)
     
     Example:
-        # Using default agent.json file
-        result = create_conversation_ai_agent.delay()
-        
-        # Using custom JSON file
-        result = create_conversation_ai_agent.delay("custom_agent.json")
+        # Using default agent_production.json file
+        result = create_conversation_ai_agent.delay("loc_123", "Happy Sushi", "Australia/Sydney")
     """
-    logger.info(f"Creating AI agent from JSON file: {json_filename}")
+    json_filename = "agent_production.json"
+    logger.info(f"Creating AI agent for location: {location_name} (ID: {location_id}, TZ: {location_timezone}) from JSON file: {json_filename}")
     
     # ElevenLabs API configuration
     ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
@@ -94,6 +94,20 @@ def create_conversation_ai_agent(json_filename="agent.json"):
             agent_data = json.load(file)
         
         logger.info(f"Successfully loaded JSON file: {json_filename}")
+        
+        # Modify agent configuration with provided parameters
+        agent_data["name"] = location_name
+        
+        # Update first_message
+        if "conversation_config" in agent_data and "agent" in agent_data["conversation_config"]:
+            agent_data["conversation_config"]["agent"]["first_message"] = f"Welcome to {location_name}! What can I do for you today?"
+            
+            # Update prompt and timezone
+            if "prompt" in agent_data["conversation_config"]["agent"]:
+                agent_data["conversation_config"]["agent"]["prompt"]["prompt"] = f"You are the customer service agent for {location_name}"
+                agent_data["conversation_config"]["agent"]["prompt"]["timezone"] = location_timezone
+        
+        logger.info(f"Customized agent configuration with location_name: {location_name}, timezone: {location_timezone}")
         
     except json.JSONDecodeError as e:
         logger.error(f"Invalid JSON in file {json_filename}: {str(e)}")
@@ -148,20 +162,81 @@ def create_conversation_ai_agent(json_filename="agent.json"):
             
             logger.info(f"Successfully created AI agent: {agent_name} with ID: {agent_id}")
             
+            # Update database with agent_id
+            db_update_status = "not_attempted"
+            db_update_message = None
+            
+            if agent_id:
+                try:
+                    db_url = os.getenv("DATABASE_URL")
+                    if not db_url:
+                        logger.error("DATABASE_URL not set, cannot update database")
+                        db_update_status = "failed"
+                        db_update_message = "DATABASE_URL not configured"
+                    else:
+                        conn = psycopg2.connect(db_url)
+                        cur = conn.cursor()
+                        
+                        # Update locations table with elevenlabs_agent_id
+                        update_query = """
+                            UPDATE locations 
+                            SET elevenlabs_agent_id = %s, 
+                                updated_at = CURRENT_TIMESTAMP 
+                            WHERE location_id = %s
+                        """
+                        cur.execute(update_query, (agent_id, location_id))
+                        rows_affected = cur.rowcount
+                        
+                        conn.commit()
+                        cur.close()
+                        conn.close()
+                        
+                        if rows_affected > 0:
+                            logger.info(f"Successfully updated database: location_id={location_id}, agent_id={agent_id}")
+                            db_update_status = "success"
+                            db_update_message = f"Updated {rows_affected} row(s)"
+                        else:
+                            logger.warning(f"No rows updated for location_id={location_id}. Location may not exist.")
+                            db_update_status = "no_rows_affected"
+                            db_update_message = "Location not found in database"
+                            
+                except psycopg2.Error as db_err:
+                    logger.error(f"Database error while updating agent_id: {db_err}")
+                    db_update_status = "failed"
+                    db_update_message = str(db_err)
+                except Exception as db_err:
+                    logger.error(f"Unexpected error while updating database: {db_err}")
+                    db_update_status = "failed"
+                    db_update_message = str(db_err)
+            else:
+                logger.warning("No agent_id returned from ElevenLabs API, skipping database update")
+                db_update_status = "skipped"
+                db_update_message = "No agent_id in API response"
+            
             return {
                 "status": "success",
                 "agent_id": agent_id,
                 "name": agent_name,
                 "created_at": datetime.now().isoformat(),
                 "full_response": result,
-                "source_file": json_filename
+                "source_file": json_filename,
+                "database_update": {
+                    "status": db_update_status,
+                    "message": db_update_message,
+                    "location_id": location_id
+                }
             }
         else:
             logger.error(f"Failed to create AI agent. Status: {response.status_code}, Response: {response.text}")
             return {
                 "status": "error",
                 "message": f"ElevenLabs API error: {response.status_code}",
-                "details": response.text
+                "details": response.text,
+                "database_update": {
+                    "status": "skipped",
+                    "message": "Agent creation failed, no database update performed",
+                    "location_id": location_id
+                }
             }
             
     except requests.exceptions.RequestException as e:
