@@ -25,13 +25,6 @@
             }
           }
         },
-        "knowledge_base": [
-          {
-            "name": "happy-sushi-menu | Notion",
-            "id": "ppK9RiKERIRXSgka56xf",
-            "type": "url"
-          }
-        ],
         "rag": {
           "enabled": true,
           "embedding_model": "e5_mistral_7b_instruct"
