@@ -421,7 +421,7 @@ def incremental_trends_update(tenant_id, location_ids, location_names, cached_tr
                 SELECT 
                     b.location_id,
                     COUNT(*) FILTER (WHERE b.source = 'voice-ai') as ai_count,
-                    COUNT(*) FILTER (WHERE b.source IN ('web', 'dashboard')) as web_count
+                    COUNT(*) FILTER (WHERE b.source IN ('web', 'dashboard', 'onboarding')) as web_count
                 FROM bookings b
                 JOIN locations l ON b.location_id = l.location_id AND b.tenant_id = l.tenant_id
                 WHERE b.tenant_id = %s
@@ -479,7 +479,7 @@ def incremental_trends_update(tenant_id, location_ids, location_names, cached_tr
                             SELECT 
                                 DATE(b.start_time AT TIME ZONE COALESCE(l.timezone, 'UTC')) as booking_date,
                                 COUNT(*) FILTER (WHERE b.source = 'voice-ai') as ai_count,
-                                COUNT(*) FILTER (WHERE b.source IN ('web', 'dashboard')) as web_count
+                                COUNT(*) FILTER (WHERE b.source IN ('web', 'dashboard', 'onboarding')) as web_count
                             FROM bookings b
                             JOIN locations l ON b.location_id = l.location_id AND b.tenant_id = l.tenant_id
                             WHERE b.tenant_id = %s
@@ -590,7 +590,7 @@ def full_trends_query(tenant_id, location_ids, location_names):
                     b.location_id,
                     DATE(b.start_time AT TIME ZONE COALESCE(l.timezone, 'UTC')) as booking_date,
                     COUNT(*) FILTER (WHERE b.source = 'voice-ai') as ai_count,
-                    COUNT(*) FILTER (WHERE b.source IN ('web', 'dashboard')) as web_count
+                    COUNT(*) FILTER (WHERE b.source IN ('web', 'dashboard', 'onboarding')) as web_count
                 FROM bookings b
                 JOIN locations l ON b.location_id = l.location_id AND b.tenant_id = l.tenant_id
                 WHERE b.tenant_id = %s
