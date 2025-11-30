@@ -1994,7 +1994,19 @@ def sync_speako_data(self, *,
                 num_categories = len(raw_data.get('categories', []))
                 num_services = len(raw_data.get('services', []))
                 num_locations = len(raw_data.get('locations', []))
+                location_services = raw_data.get('location_services', {})
+                
+                # DEBUG: Log detailed service distribution
                 logger.info(f"✅ [sync_speako_data] Retrieved service menu data: {num_locations} locations, {num_categories} categories, {num_services} services")
+                logger.info(f"🔍 [DEBUG] Categories found: {[c['name'] for c in raw_data.get('categories', [])]}")
+                logger.info(f"🔍 [DEBUG] Services found: {[s['name'] for s in raw_data.get('services', [])]}")
+                logger.info(f"🔍 [DEBUG] Location-Service mapping: {dict((loc_id, len(svc_ids)) for loc_id, svc_ids in location_services.items())}")
+                logger.info(f"🔍 [DEBUG] Primary location_id={location_id}, has {len(location_services.get(int(location_id), []))} services assigned")
+                
+                # DEBUG: Check if services have category_tag_ids
+                for svc in raw_data.get('services', [])[:5]:  # Log first 5 services
+                    logger.info(f"🔍 [DEBUG] Service '{svc['name']}'(id={svc['service_id']}): category_tag_ids={svc.get('category_tag_ids', [])}, is_active={svc.get('is_active')}")
+                    
             except Exception as query_e:
                 logger.error(f"❌ [sync_speako_data] Database query failed: {query_e}")
                 raise
@@ -2009,7 +2021,12 @@ def sync_speako_data(self, *,
                 other_locs = json_output['data'].get('other_locations', [])
                 other_loc_count = len(other_locs)
                 
+                # DEBUG: Log what categories ended up in the output
                 logger.info(f"✅ [sync_speako_data] Formatted service_menu: primary_location has {primary_services} services, {other_loc_count} other locations, {len(json.dumps(json_output))} bytes JSON, {len(markdown_output)} bytes Markdown")
+                logger.info(f"🔍 [DEBUG] Primary location '{primary_loc.get('location_name')}' categories in output: {[cat.get('name') for cat in primary_loc.get('categories', [])]}")
+                for cat in primary_loc.get('categories', []):
+                    logger.info(f"🔍 [DEBUG] Category '{cat.get('name')}' has {len(cat.get('items', []))} items")
+                
             except Exception as format_e:
                 logger.error(f"❌ [sync_speako_data] Data formatting failed: {format_e}")
                 raise
