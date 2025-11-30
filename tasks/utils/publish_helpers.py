@@ -465,10 +465,15 @@ def publish_knowledge(
         location_id=location_id
     )
     
-    logger.info(f"[PublishKnowledge] ✓ System prompt published successfully")
-    logger.info(f"[PublishKnowledge]   - Prompt count: {system_prompt_result['prompt_count']}")
-    logger.info(f"[PublishKnowledge]   - Character count: {system_prompt_result['character_count']}")
-    logger.info(f"[PublishKnowledge]   - System prompt ID: {system_prompt_result['system_prompt_id']}")
+    if system_prompt_result.get('skipped'):
+        logger.warning(f"[PublishKnowledge] ⚠️ System prompt skipped: {system_prompt_result['reason']}")
+        logger.info(f"[PublishKnowledge] Knowledge published successfully without system prompt")
+        logger.info(f"[PublishKnowledge] System prompt will be created when greetings/personality are published")
+    else:
+        logger.info(f"[PublishKnowledge] ✓ System prompt published successfully")
+        logger.info(f"[PublishKnowledge]   - Prompt count: {system_prompt_result['prompt_count']}")
+        logger.info(f"[PublishKnowledge]   - Character count: {system_prompt_result['character_count']}")
+        logger.info(f"[PublishKnowledge]   - System prompt ID: {system_prompt_result['system_prompt_id']}")
     logger.info("=" * 80)
     
     # Step 12: Mark all knowledge documents as published (special + regular)
@@ -496,8 +501,9 @@ def publish_knowledge(
         'special_knowledge_count': len(special_knowledge_param_ids),
         'regular_knowledge_count': len(regular_knowledge_param_ids),
         'total_knowledge_count': len(all_param_ids),
-        'system_prompt_published': True,
-        'system_prompt_id': system_prompt_result['system_prompt_id']
+        'system_prompt_published': not system_prompt_result.get('skipped', False),
+        'system_prompt_skipped': system_prompt_result.get('skipped', False),
+        'system_prompt_id': system_prompt_result.get('system_prompt_id')
     }
     
     update_publish_job_status(

@@ -1917,9 +1917,19 @@ def compose_and_publish_system_prompt(tenant_id: str, location_id: str) -> Dict[
     composed_text = compose_prompts_by_sort_order(tenant_id, location_id)
     
     if not composed_text:
-        error_msg = f"No active prompts found to compose for tenant_id={tenant_id}, location_id={location_id}"
-        logger.error(f"[SystemPrompt] ❌ {error_msg}")
-        raise ValueError(error_msg)
+        logger.warning(f"[SystemPrompt] ⚠️ No active prompts found to compose for tenant_id={tenant_id}, location_id={location_id}")
+        logger.warning(f"[SystemPrompt] Skipping system prompt publication - will be created when greetings/personality are published")
+        return {
+            'success': True,
+            'skipped': True,
+            'reason': 'No active prompts with sort_order > 0 found',
+            'composed_text': '',
+            'character_count': 0,
+            'prompt_count': 0,
+            'elevenlabs_agent_id': None,
+            'elevenlabs_status_code': None,
+            'system_prompt_id': None
+        }
     
     prompt_count = composed_text.count('\n\n') + 1  # Approximate count
     character_count = len(composed_text)
@@ -1993,6 +2003,7 @@ def compose_and_publish_system_prompt(tenant_id: str, location_id: str) -> Dict[
     
     return {
         'success': True,
+        'skipped': False,
         'composed_text': composed_text,
         'character_count': character_count,
         'prompt_count': prompt_count,
