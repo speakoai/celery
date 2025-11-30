@@ -73,11 +73,12 @@ def collect_summary_metrics(tenant_id, location_ids):
             "by_location": {}
         }
         
-        # Get location names
+        # Get location names and timezones
         location_names = {}
+        location_timezones = {}
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT location_id, name
+                SELECT location_id, name, timezone
                 FROM locations
                 WHERE tenant_id = %s
                   AND location_id = ANY(%s)
@@ -85,6 +86,7 @@ def collect_summary_metrics(tenant_id, location_ids):
             
             for row in cur.fetchall():
                 location_names[row[0]] = row[1]
+                location_timezones[row[0]] = row[2] or 'UTC'
         
         # Query 1: Bookings (current + previous 30 days)
         bookings_data = {}
@@ -413,19 +415,20 @@ def incremental_trends_update(tenant_id, location_ids, location_names, cached_tr
     conn = get_db_connection()
     
     try:
-        # Query only yesterday's data
+        # Query only yesterday's data (using location timezone for date extraction)
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT 
-                    location_id,
-                    COUNT(*) FILTER (WHERE source = 'voice-ai') as ai_count,
-                    COUNT(*) FILTER (WHERE source IN ('web', 'dashboard')) as web_count
-                FROM bookings
-                WHERE tenant_id = %s
-                  AND location_id = ANY(%s)
-                  AND DATE(start_time) = %s
-                  AND status = 'confirmed'
-                GROUP BY location_id
+                    b.location_id,
+                    COUNT(*) FILTER (WHERE b.source = 'voice-ai') as ai_count,
+                    COUNT(*) FILTER (WHERE b.source IN ('web', 'dashboard')) as web_count
+                FROM bookings b
+                JOIN locations l ON b.location_id = l.location_id AND b.tenant_id = l.tenant_id
+                WHERE b.tenant_id = %s
+                  AND b.location_id = ANY(%s)
+                  AND DATE(b.start_time AT TIME ZONE COALESCE(l.timezone, 'UTC')) = %s
+                  AND b.status = 'confirmed'
+                GROUP BY b.location_id
             """, (tenant_id, location_ids, yesterday))
             
             yesterday_data = {}
@@ -474,15 +477,16 @@ def incremental_trends_update(tenant_id, location_ids, location_names, cached_tr
                     with conn_backfill.cursor() as cur:
                         cur.execute("""
                             SELECT 
-                                DATE(start_time) as booking_date,
-                                COUNT(*) FILTER (WHERE source = 'voice-ai') as ai_count,
-                                COUNT(*) FILTER (WHERE source IN ('web', 'dashboard')) as web_count
-                            FROM bookings
-                            WHERE tenant_id = %s
-                              AND location_id = %s
-                              AND start_time >= CURRENT_DATE - INTERVAL '89 days'
-                              AND status = 'confirmed'
-                            GROUP BY DATE(start_time)
+                                DATE(b.start_time AT TIME ZONE COALESCE(l.timezone, 'UTC')) as booking_date,
+                                COUNT(*) FILTER (WHERE b.source = 'voice-ai') as ai_count,
+                                COUNT(*) FILTER (WHERE b.source IN ('web', 'dashboard')) as web_count
+                            FROM bookings b
+                            JOIN locations l ON b.location_id = l.location_id AND b.tenant_id = l.tenant_id
+                            WHERE b.tenant_id = %s
+                              AND b.location_id = %s
+                              AND b.start_time >= CURRENT_DATE - INTERVAL '89 days'
+                              AND b.status = 'confirmed'
+                            GROUP BY DATE(b.start_time AT TIME ZONE COALESCE(l.timezone, 'UTC'))
                         """, (tenant_id, loc_id))
                         
                         # Build 90-day arrays
@@ -579,20 +583,21 @@ def full_trends_query(tenant_id, location_ids, location_names):
                 "bookings_web": [0] * 90
             }
         
-        # Query: Get 90 days of booking data by source
+        # Query: Get 90 days of booking data by source (using location timezone for date extraction)
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT 
-                    location_id,
-                    DATE(start_time) as booking_date,
-                    COUNT(*) FILTER (WHERE source = 'voice-ai') as ai_count,
-                    COUNT(*) FILTER (WHERE source IN ('web', 'dashboard')) as web_count
-                FROM bookings
-                WHERE tenant_id = %s
-                  AND location_id = ANY(%s)
-                  AND start_time >= CURRENT_DATE - INTERVAL '89 days'
-                  AND status = 'confirmed'
-                GROUP BY location_id, DATE(start_time)
+                    b.location_id,
+                    DATE(b.start_time AT TIME ZONE COALESCE(l.timezone, 'UTC')) as booking_date,
+                    COUNT(*) FILTER (WHERE b.source = 'voice-ai') as ai_count,
+                    COUNT(*) FILTER (WHERE b.source IN ('web', 'dashboard')) as web_count
+                FROM bookings b
+                JOIN locations l ON b.location_id = l.location_id AND b.tenant_id = l.tenant_id
+                WHERE b.tenant_id = %s
+                  AND b.location_id = ANY(%s)
+                  AND b.start_time >= CURRENT_DATE - INTERVAL '89 days'
+                  AND b.status = 'confirmed'
+                GROUP BY b.location_id, DATE(b.start_time AT TIME ZONE COALESCE(l.timezone, 'UTC'))
                 ORDER BY booking_date
             """, (tenant_id, location_ids))
             
