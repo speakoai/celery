@@ -14,13 +14,14 @@
     </noscript>
     <![endif]-->
     <style>
-        /* Reset styles for email clients */
         body, table, td, p, a, li, blockquote {
             -webkit-text-size-adjust: 100%;
             -ms-text-size-adjust: 100%;
         }
         table, td {
             border-collapse: collapse;
+            mso-table-lspace: 0pt;
+            mso-table-rspace: 0pt;
         }
         img {
             border: 0;
@@ -29,478 +30,361 @@
             -ms-interpolation-mode: bicubic;
         }
         
-        /* Main styles */
         body {
             margin: 0;
             padding: 0;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f8f9fa;
-            color: #333333;
-            line-height: 1.6;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background-color: #f5f5f5;
+            color: #0e0e10;
+            line-height: 1.5;
+        }
+        
+        .email-wrapper {
+            padding: 40px 20px;
+            background-color: #f5f5f5;
         }
         
         .email-container {
             max-width: 600px;
             margin: 0 auto;
             background-color: #ffffff;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-            border-radius: 8px;
-            overflow: hidden;
         }
         
-        .header {
-            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
-            color: white;
-            padding: 30px 20px;
+        /* Logo Section - Business Logo */
+        .business-logo-section {
+            padding: 32px 40px 24px 40px;
             text-align: center;
         }
         
-        .header.modification {
-            background: linear-gradient(135deg, #ffc107 0%, #fd7e14 100%);
+        .business-logo-section img {
+            max-height: 60px;
+            max-width: 200px;
+            width: auto;
+            height: auto;
         }
         
-        .header.cancellation {
-            background: linear-gradient(135deg, #dc3545 0%, #e83e8c 100%);
-        }
-        
-        .header h1 {
-            margin: 0;
-            font-size: 28px;
-            font-weight: 600;
-            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+        .divider {
+            height: 4px;
+            background: linear-gradient(90deg, #b284d6 0%, #c9a0dc 100%);
+            margin: 0 40px;
         }
         
         .content {
-            padding: 40px 30px;
+            padding: 32px 40px 40px 40px;
         }
         
         .greeting {
-            font-size: 20px;
-            font-weight: 600;
-            color: #2c3e50;
-            margin-bottom: 20px;
-        }
-        
-        .message {
-            font-size: 16px;
-            color: #495057;
-            margin-bottom: 30px;
-            line-height: 1.7;
-        }
-        
-        .booking-details {
-            background-color: #f8f9fa;
-            border-radius: 12px;
-            padding: 25px;
-            margin: 25px 0;
-            border-left: 5px solid #28a745;
-        }
-        
-        .booking-details.modification {
-            border-left-color: #ffc107;
-        }
-        
-        .booking-details.cancellation {
-            border-left-color: #dc3545;
-        }
-        
-        .booking-details h2 {
+            font-size: 15px;
+            color: #0e0e10;
             margin: 0 0 20px 0;
-            font-size: 20px;
-            color: #2c3e50;
-            font-weight: 600;
         }
         
-        .detail-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+        .main-text {
+            font-size: 15px;
+            color: #0e0e10;
+            margin: 0 0 20px 0;
+            line-height: 1.6;
+        }
+        
+        .booking-info {
+            background-color: #f9f9f9;
+            border-left: 3px solid #b284d6;
+            padding: 20px 24px;
+            margin: 24px 0;
+        }
+        
+        .info-row {
             margin-bottom: 12px;
-            padding: 8px 0;
-            border-bottom: 1px solid #e9ecef;
         }
         
-        .detail-row:last-child {
-            border-bottom: none;
+        .info-row:last-child {
             margin-bottom: 0;
         }
         
-        .detail-label {
+        .info-label {
+            font-size: 12px;
             font-weight: 600;
-            color: #6c757d;
-            font-size: 15px;
-            min-width: 140px;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            margin: 0 0 2px 0;
         }
         
-        .detail-value {
-            font-weight: 500;
-            color: #212529;
+        .info-value {
             font-size: 15px;
-            text-align: right;
-            flex: 1;
+            font-weight: 600;
+            color: #0e0e10;
+            margin: 0;
         }
         
         .highlight {
-            background-color: #e3f2fd;
-            padding: 3px 8px;
+            color: #b284d6;
+        }
+        
+        .location-section {
+            margin: 24px 0;
+            padding: 20px 0;
+            border-top: 1px solid #e5e5e5;
+            border-bottom: 1px solid #e5e5e5;
+        }
+        
+        .location-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            margin: 0 0 12px 0;
+        }
+        
+        .location-item {
+            font-size: 14px;
+            color: #0e0e10;
+            margin: 0 0 8px 0;
+        }
+        
+        .location-item:last-child {
+            margin-bottom: 0;
+        }
+        
+        .cta-section {
+            margin: 28px 0;
+        }
+        
+        .cta-button {
+            display: inline-block;
+            background-color: #b284d6;
+            color: #ffffff !important;
+            text-decoration: none;
+            padding: 12px 24px;
             border-radius: 4px;
-            font-weight: 600;
-            color: #0277bd;
-        }
-        
-        .datetime-section {
-            background-color: #e8f5e8;
-            border-radius: 8px;
-            padding: 20px;
-            margin: 20px 0;
-            text-align: center;
-        }
-        
-        .datetime-section h3 {
-            margin: 0 0 15px 0;
-            color: #2e7d32;
-            font-size: 18px;
+            font-size: 14px;
             font-weight: 600;
         }
         
-        .datetime-info {
-            font-size: 16px;
-            font-weight: 500;
-            color: #1b5e20;
+        .cta-button:hover {
+            background-color: #9b6bc3;
+            text-decoration: none;
         }
         
-        .party-info {
-            background-color: #fff3cd;
-            border: 1px solid #ffeaa7;
-            border-radius: 8px;
-            padding: 15px;
-            margin: 15px 0;
-            text-align: center;
+        .original-booking {
+            background-color: #f9f9f9;
+            padding: 16px 20px;
+            margin: 24px 0;
+            border-radius: 4px;
         }
         
-        .party-info .party-count {
-            font-size: 24px;
+        .original-title {
+            font-size: 12px;
             font-weight: 600;
-            color: #856404;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            margin: 0 0 12px 0;
+        }
+        
+        .original-text {
+            font-size: 14px;
+            color: #6b7280;
+            margin: 0 0 4px 0;
+        }
+        
+        .signature {
+            margin-top: 32px;
+        }
+        
+        .signature p {
+            font-size: 15px;
+            color: #0e0e10;
             margin: 0;
         }
         
-        .party-info .party-label {
-            font-size: 14px;
-            color: #856404;
-            margin: 5px 0 0 0;
+        .signature .brand {
+            font-weight: 600;
         }
         
         .footer {
-            background-color: #f8f9fa;
-            padding: 25px 30px;
-            text-align: center;
-            border-top: 1px solid #e9ecef;
+            padding: 24px 40px;
+            background-color: #f9f9f9;
+            border-top: 1px solid #e5e5e5;
         }
         
         .footer p {
+            font-size: 12px;
+            color: #6b7280;
             margin: 0;
-            font-size: 14px;
-            color: #6c757d;
-            line-height: 1.5;
+            text-align: center;
         }
         
-        .company-name {
+        .footer .powered-by {
+            margin-top: 8px;
+        }
+        
+        .footer .powered-by a {
+            color: #b284d6;
             font-weight: 600;
-            color: #28a745;
         }
         
-        /* Logo and Banner styles */
-        .logo-section {
-            text-align: center;
-            padding: 20px 30px 10px 30px;
-            background-color: #ffffff;
+        a {
+            color: #b284d6;
+            text-decoration: none;
         }
         
-        .logo-section img {
-            max-width: 200px;
-            max-height: 100px;
-            height: auto;
-            width: auto;
-            border: none;
-            outline: none;
-            display: block;
-            margin: 0 auto;
+        a:hover {
+            text-decoration: underline;
         }
         
-        .banner-section {
-            text-align: center;
-            background-color: #ffffff;
-            overflow: hidden;
-        }
-        
-        .banner-section img {
-            width: 100%;
-            max-height: 150px;
-            object-fit: cover;
-            border: none;
-            outline: none;
-            display: block;
-        }
-        
-        /* Mobile responsiveness */
         @media only screen and (max-width: 600px) {
-            .email-container {
-                width: 100% !important;
-                margin: 0 !important;
-                border-radius: 0 !important;
+            .email-wrapper {
+                padding: 20px 12px;
+            }
+            
+            .business-logo-section {
+                padding: 24px 24px 20px 24px;
+            }
+            
+            .divider {
+                margin: 0 24px;
             }
             
             .content {
-                padding: 25px 20px !important;
+                padding: 24px;
             }
             
-            .header {
-                padding: 25px 20px !important;
+            .booking-info {
+                padding: 16px 20px;
             }
             
-            .header h1 {
-                font-size: 24px !important;
-            }
-            
-            .booking-details {
-                padding: 20px 15px !important;
-            }
-            
-            .detail-row {
-                flex-direction: column;
-                align-items: flex-start;
-            }
-            
-            .detail-label {
-                margin-bottom: 5px;
-                min-width: auto;
-            }
-            
-            .detail-value {
-                text-align: left;
-            }
-            
-            .logo-section {
-                padding: 15px 20px 10px 20px !important;
-            }
-            
-            .logo-section img {
-                max-width: 150px !important;
-                max-height: 75px !important;
-            }
-            
-            .banner-section img {
-                max-height: 100px !important;
+            .footer {
+                padding: 20px 24px;
             }
         }
     </style>
 </head>
 <body>
-    <div class="email-container">
-        <!-- Logo Section -->
-        {{#logo_section}}
-        <div class="logo-section">
-            <img src="{{logo_url}}" alt="{{location_name}} Logo">
-        </div>
-        {{/logo_section}}
-        
-        <!-- Banner Section -->
-        {{#banner_section}}
-        <div class="banner-section">
-            <img src="{{banner_url}}" alt="{{location_name}} Banner">
-        </div>
-        {{/banner_section}}
-        
-        <!-- Header Section -->
-        <div class="header{{#is_modification}} modification{{/is_modification}}{{#is_cancellation}} cancellation{{/is_cancellation}}">
-            <h1>{{email_title}}</h1>
-        </div>
-        
-        <!-- Content Section -->
-        <div class="content">
-            <div class="greeting">
-                Dear {{customer_name}},
+    <div class="email-wrapper">
+        <div class="email-container">
+            <!-- Business Logo -->
+            {{#logo_section}}
+            <div class="business-logo-section">
+                <img src="{{logo_url}}" alt="{{location_name}}">
             </div>
+            {{/logo_section}}
             
-            <div class="message">
-                {{email_message}}
-            </div>
+            <!-- Purple Divider -->
+            <div class="divider"></div>
             
-            <!-- Date and Time Section -->
-            <div class="datetime-section">
-                <h3>📅 When</h3>
-                <div class="datetime-info">
-                    <strong>{{booking_date}}</strong> at <strong>{{start_time}}</strong>
-                </div>
-            </div>
-            
-            <!-- Booking Details -->
-            <div class="booking-details{{#is_modification}} modification{{/is_modification}}{{#is_cancellation}} cancellation{{/is_cancellation}}">
-                <h2>Your Booking Details</h2>
+            <!-- Content -->
+            <div class="content">
+                <p class="greeting">Hi {{customer_name}},</p>
                 
-                <div class="detail-row">
-                    <span class="detail-label">Location:</span>
-                    <span class="detail-value"><strong>{{location_name}}</strong></span>
-                </div>
+                <p class="main-text">{{email_message}}</p>
                 
-                <div class="detail-row">
-                    <span class="detail-label">Booking Ref.:</span>
-                    <span class="detail-value highlight">{{booking_ref}}</span>
-                </div>
-                
-                <div class="detail-row">
-                    <span class="detail-label">Date:</span>
-                    <span class="detail-value">{{booking_date}}</span>
-                </div>
-                
-                <div class="detail-row">
-                    <span class="detail-label">Time:</span>
-                    <span class="detail-value">{{start_time}}</span>
-                </div>
-                
-                {{#party_section}}
-                <div class="detail-row">
-                    <span class="detail-label">Party Size:</span>
-                    <span class="detail-value">{{party_num}} people</span>
-                </div>
-                {{/party_section}}
-                
-                {{#venue_section}}
-                <div class="detail-row">
-                    <span class="detail-label">Table/Area:</span>
-                    <span class="detail-value">{{zone_names}}</span>
-                </div>
-                {{/venue_section}}
-                
-                {{#staff_section}}
-                <div class="detail-row">
-                    <span class="detail-label">Staff Member:</span>
-                    <span class="detail-value">{{staff_name}}</span>
-                </div>
-                
-                <div class="detail-row">
-                    <span class="detail-label">Service:</span>
-                    <span class="detail-value">{{service_name}}</span>
-                </div>
-                {{/staff_section}}
-            </div>
-            
-            {{#party_section}}
-            <!-- Party Information -->
-            <div class="party-info">
-                <p class="party-count">{{party_num}}</p>
-                <p class="party-label">People in your party</p>
-            </div>
-            {{/party_section}}
-            
-            <!-- Location Information Section -->
-            {{#location_info_section}}
-            <div class="booking-details{{#is_modification}} modification{{/is_modification}}{{#is_cancellation}} cancellation{{/is_cancellation}}">
-                <h3 style="margin: 0 0 15px 0; color: #2c3e50; font-size: 18px; font-weight: 600;">📍 Location Information</h3>
-                <div class="location-details" style="line-height: 1.8;">
-                    {{#location_phone}}
-                    <div class="location-item" style="margin-bottom: 8px;">
-                        <span style="font-weight: 600; color: #495057; display: inline-block; min-width: 80px;">Tel:</span>
-                        <span style="color: #212529;"><a href="tel:{{location_phone}}">{{location_phone}}</a></span>
+                <!-- Booking Details -->
+                <div class="booking-info">
+                    <div class="info-row">
+                        <p class="info-label">Location</p>
+                        <p class="info-value">{{location_name}}</p>
                     </div>
-                    {{/location_phone}}
+                    
+                    <div class="info-row">
+                        <p class="info-label">Reference</p>
+                        <p class="info-value highlight">{{booking_ref}}</p>
+                    </div>
+                    
+                    <div class="info-row">
+                        <p class="info-label">Date & Time</p>
+                        <p class="info-value">{{booking_date}} at {{start_time}}</p>
+                    </div>
+                    
+                    {{#party_section}}
+                    <div class="info-row">
+                        <p class="info-label">Party Size</p>
+                        <p class="info-value">{{party_num}} people</p>
+                    </div>
+                    {{/party_section}}
+                    
+                    {{#venue_section}}
+                    <div class="info-row">
+                        <p class="info-label">Table / Area</p>
+                        <p class="info-value">{{zone_names}}</p>
+                    </div>
+                    {{/venue_section}}
+                    
+                    {{#staff_section}}
+                    <div class="info-row">
+                        <p class="info-label">Staff</p>
+                        <p class="info-value">{{staff_name}}</p>
+                    </div>
+                    <div class="info-row">
+                        <p class="info-label">Service</p>
+                        <p class="info-value">{{service_name}}</p>
+                    </div>
+                    {{/staff_section}}
+                </div>
+                
+                <!-- Location Information -->
+                {{#location_info_section}}
+                <div class="location-section">
+                    <p class="location-title">Location Information</p>
+                    
                     {{#location_address}}
-                    <div class="location-item" style="margin-bottom: 8px;">
-                        <span style="font-weight: 600; color: #495057; display: inline-block; min-width: 80px;">
-                            Address:
-                        </span>
-                        <span style="color: #212529;">
-                            {{location_address}}
-                        </span>
-                        <a href="https://www.google.com/maps/dir/?api=1&destination={{location_address}}" target="_blank">
-                            Get Directions
-                        </a>
-                    </div>
+                    <p class="location-item">📍 {{location_address}}</p>
                     {{/location_address}}
+                    
+                    {{#location_phone}}
+                    <p class="location-item">📞 <a href="tel:{{location_phone}}">{{location_phone}}</a></p>
+                    {{/location_phone}}
+                    
                     {{#location_website}}
-                    <div class="location-item" style="margin-bottom: 8px;">
-                        <span style="font-weight: 600; color: #495057; display: inline-block; min-width: 80px;">Website:</span>
-                        <span style="color: #212529;"><a href="{{location_website}}">{{location_website}}</a></span>
-                    </div>
+                    <p class="location-item">🌐 <a href="{{location_website}}">{{location_website}}</a></p>
                     {{/location_website}}
+                    
+                    {{#location_address}}
+                    <p class="location-item" style="margin-top: 12px;">
+                        <a href="https://www.google.com/maps/dir/?api=1&destination={{location_address}}" target="_blank">Get Directions →</a>
+                    </p>
+                    {{/location_address}}
+                </div>
+                {{/location_info_section}}
+                
+                <!-- Manage Booking Button -->
+                {{#manage_booking_section}}
+                <div class="cta-section">
+                    <a href="{{manage_booking_url}}" class="cta-button">Manage Booking</a>
+                </div>
+                {{/manage_booking_section}}
+                
+                <!-- Original Booking (for modifications) -->
+                {{#original_booking_section}}
+                <div class="original-booking">
+                    <p class="original-title">Previous Booking Details</p>
+                    <p class="original-text">Date: {{original_booking_date}} at {{original_start_time}}</p>
+                    {{#party_section}}
+                    <p class="original-text">Party: {{original_party_num}} people</p>
+                    {{/party_section}}
+                    {{#venue_section}}
+                    <p class="original-text">Table: {{original_zone_names}}</p>
+                    {{/venue_section}}
+                    {{#staff_section}}
+                    <p class="original-text">Staff: {{original_staff_name}}</p>
+                    <p class="original-text">Service: {{original_service_name}}</p>
+                    {{/staff_section}}
+                </div>
+                {{/original_booking_section}}
+                
+                <!-- Signature -->
+                <div class="signature">
+                    <p>Thanks,</p>
+                    <p class="brand">{{location_name}}</p>
                 </div>
             </div>
-            {{/location_info_section}}
             
-            <!-- Manage Booking Section -->
-            {{#manage_booking_section}}
-            <div class="manage-booking-section" style="text-align: center; margin: 30px 0; padding: 0;">
-                <a href="{{manage_booking_url}}" 
-                   style="display: inline-block; 
-                          background: linear-gradient(135deg, {{button_color_start}} 0%, {{button_color_end}} 100%); 
-                          color: #ffffff !important; 
-                          text-decoration: none; 
-                          padding: 14px 28px; 
-                          border-radius: 8px; 
-                          font-size: 16px; 
-                          font-weight: 600; 
-                          font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                          border: none; 
-                          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-                          transition: all 0.3s ease;
-                          text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
-                          letter-spacing: 0.5px;">
-                    Manage Booking
-                </a>
+            <!-- Footer -->
+            <div class="footer">
+                <p>Questions? Contact us at {{#location_phone}}<a href="tel:{{location_phone}}">{{location_phone}}</a>{{/location_phone}}</p>
+                <p class="powered-by">Powered by <a href="https://speako.ai">Speako AI</a></p>
             </div>
-            {{/manage_booking_section}}
-            
-            <!-- Original Booking Details (for modifications) -->
-            {{#original_booking_section}}
-            <div class="booking-details" style="background-color: #f8f9fa; border-left: 3px solid #dee2e6; margin-top: 25px; opacity: 0.85;">
-                <h2 style="font-size: 16px; color: #6c757d; margin-bottom: 15px;">📋 Original Booking Details</h2>
-                
-                <div class="detail-row">
-                    <span class="detail-label" style="color: #6c757d; font-size: 14px;">Date:</span>
-                    <span class="detail-value" style="color: #6c757d; font-size: 14px;">{{original_booking_date}}</span>
-                </div>
-                
-                <div class="detail-row">
-                    <span class="detail-label" style="color: #6c757d; font-size: 14px;">Time:</span>
-                    <span class="detail-value" style="color: #6c757d; font-size: 14px;">{{original_start_time}}</span>
-                </div>
-                
-                {{#party_section}}
-                <div class="detail-row">
-                    <span class="detail-label" style="color: #6c757d; font-size: 14px;">Party Size:</span>
-                    <span class="detail-value" style="color: #6c757d; font-size: 14px;">{{original_party_num}} people</span>
-                </div>
-                {{/party_section}}
-                
-                {{#venue_section}}
-                <div class="detail-row">
-                    <span class="detail-label" style="color: #6c757d; font-size: 14px;">Table/Area:</span>
-                    <span class="detail-value" style="color: #6c757d; font-size: 14px;">{{original_zone_names}}</span>
-                </div>
-                {{/venue_section}}
-                
-                {{#staff_section}}
-                <div class="detail-row">
-                    <span class="detail-label" style="color: #6c757d; font-size: 14px;">Staff Member:</span>
-                    <span class="detail-value" style="color: #6c757d; font-size: 14px;">{{original_staff_name}}</span>
-                </div>
-                
-                <div class="detail-row">
-                    <span class="detail-label" style="color: #6c757d; font-size: 14px;">Service:</span>
-                    <span class="detail-value" style="color: #6c757d; font-size: 14px;">{{original_service_name}}</span>
-                </div>
-                {{/staff_section}}
-            </div>
-            {{/original_booking_section}}
-        </div>
-        
-        <!-- Footer Section -->
-        <div class="footer">
-            <p>
-                Thank you for choosing us!<br>
-                <span class="company-name">Speako AI Booking System</span>
-            </p>
         </div>
     </div>
 </body>

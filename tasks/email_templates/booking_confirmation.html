@@ -14,13 +14,14 @@
     </noscript>
     <![endif]-->
     <style>
-        /* Reset styles for email clients */
         body, table, td, p, a, li, blockquote {
             -webkit-text-size-adjust: 100%;
             -ms-text-size-adjust: 100%;
         }
         table, td {
             border-collapse: collapse;
+            mso-table-lspace: 0pt;
+            mso-table-rspace: 0pt;
         }
         img {
             border: 0;
@@ -29,441 +30,241 @@
             -ms-interpolation-mode: bicubic;
         }
         
-        /* Main styles */
         body {
             margin: 0;
             padding: 0;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f4f4f4;
-            color: #333333;
-            line-height: 1.6;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background-color: #f5f5f5;
+            color: #0e0e10;
+            line-height: 1.5;
+        }
+        
+        .email-wrapper {
+            padding: 40px 20px;
+            background-color: #f5f5f5;
         }
         
         .email-container {
             max-width: 600px;
             margin: 0 auto;
             background-color: #ffffff;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
         }
         
-        .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            padding: 30px 20px;
+        .logo-section {
+            padding: 32px 40px 24px 40px;
             text-align: center;
-            color: white;
-        }
-        
-        .header.modification {
-            background: linear-gradient(135deg, #d4a574 0%, #b8860b 100%);
-            border-top: 5px solid #8b6914;
-            box-shadow: 0 4px 15px rgba(212, 165, 116, 0.3);
-        }
-        
-        .header.modification h1 {
-            color: #2d1810;
-            text-shadow: 1px 1px 2px rgba(139, 105, 20, 0.3);
-        }
-        
-        .header.modification .logo-text {
-            color: #2d1810;
-            text-shadow: 1px 1px 2px rgba(139, 105, 20, 0.3);
-        }
-        
-        .header.cancellation {
-            background: linear-gradient(135deg, #f8d7da 0%, #dc3545 100%);
-            border-top: 5px solid #a71e2a;
-            box-shadow: 0 4px 15px rgba(220, 53, 69, 0.3);
-        }
-        
-        .header.cancellation h1 {
-            color: #721c24;
-            text-shadow: 1px 1px 2px rgba(167, 30, 42, 0.3);
-        }
-        
-        .header.cancellation .logo-text {
-            color: #721c24;
-            text-shadow: 1px 1px 2px rgba(167, 30, 42, 0.3);
-        }
-        
-        .header h1 {
-            margin: 0;
-            font-size: 28px;
-            font-weight: 300;
-            letter-spacing: 1px;
-        }
-        
-        .logo {
-            margin-bottom: 15px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 15px;
         }
         
         .logo-img {
-            height: 40px;
+            height: 56px;
             width: auto;
-            border-radius: 6px;
         }
         
-        .logo-text {
-            font-size: 32px;
-            font-weight: bold;
-            color: white;
-            text-decoration: none;
-            letter-spacing: 2px;
+        .divider {
+            height: 4px;
+            background: linear-gradient(90deg, #b284d6 0%, #c9a0dc 100%);
+            margin: 0 40px;
         }
         
         .content {
-            padding: 25px 20px;
+            padding: 32px 40px 40px 40px;
         }
         
-        .message {
-            font-size: 16px;
-            color: #555555;
-            margin-bottom: 20px;
+        .title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #b284d6;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin: 0 0 24px 0;
+        }
+        
+        .main-text {
+            font-size: 15px;
+            color: #0e0e10;
+            margin: 0 0 20px 0;
             line-height: 1.6;
         }
         
-        .booking-ref {
-            background-color: #667eea;
-            color: white;
-            padding: 12px 24px;
-            border-radius: 30px;
-            font-weight: bold;
-            letter-spacing: 1px;
-            display: block;
-            margin: 0 auto 25px auto;
-            font-size: 18px;
-            text-align: center;
-            width: fit-content;
+        .booking-info {
+            background-color: #f9f9f9;
+            border-left: 3px solid #b284d6;
+            padding: 20px 24px;
+            margin: 24px 0;
         }
         
-        .booking-card {
-            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-            border-radius: 16px;
-            padding: 30px 25px;
-            margin: 20px 0;
-            text-align: center;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+        .info-row {
+            margin-bottom: 12px;
         }
         
-        .location-name {
-            font-size: 24px;
-            font-weight: 700;
-            color: #2c3e50;
-            margin-bottom: 20px;
-            letter-spacing: 0.5px;
+        .info-row:last-child {
+            margin-bottom: 0;
         }
         
-        .customer-name {
-            font-size: 20px;
+        .info-label {
+            font-size: 12px;
             font-weight: 600;
-            color: #495057;
-            margin-bottom: 20px;
-            padding: 12px 20px;
-            background-color: white;
-            border-radius: 12px;
-            display: inline-block;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            margin: 0 0 2px 0;
         }
         
-        .datetime-section {
-            margin: 25px 0;
-        }
-        
-        .booking-date {
-            font-size: 28px;
-            font-weight: 700;
-            color: #667eea;
-            margin-bottom: 8px;
-            letter-spacing: 1px;
-        }
-        
-        .booking-time {
-            font-size: 24px;
+        .info-value {
+            font-size: 15px;
             font-weight: 600;
-            color: #495057;
-            margin-bottom: 8px;
+            color: #0e0e10;
+            margin: 0;
         }
         
-        .party-size {
-            font-size: 24px;
-            font-weight: 700;
-            color: #2563eb;
-            background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
-            border: 2px solid #3b82f6;
-            border-radius: 12px;
-            padding: 12px 20px;
-            margin: 20px auto;
-            display: inline-block;
-            letter-spacing: 0.5px;
-            box-shadow: 0 3px 12px rgba(59, 130, 246, 0.15);
-        }
-        
-        .contact-info {
-            background-color: white;
-            border-radius: 12px;
-            padding: 15px 20px;
-            margin: 20px 0;
-            display: inline-block;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-        }
-        
-        .phone-number {
-            font-size: 18px;
-            font-weight: 600;
-            color: #495057;
-            letter-spacing: 0.5px;
-        }
-        
-        .phone-link {
-            color: #2563eb;
-            text-decoration: none;
-            border-bottom: 2px solid transparent;
-            transition: all 0.3s ease;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            font-weight: 600;
-        }
-        
-        .phone-link:hover {
-            color: #1d4ed8;
-            border-bottom-color: #3b82f6;
-        }
-        
-        .phone-clickable {
-            background: linear-gradient(135deg, #e0f2fe 0%, #f0f9ff 100%);
-            border: 1px solid #3b82f6;
-            border-radius: 8px;
-            padding: 8px 12px;
-            margin: 5px 0;
-            cursor: pointer;
-        }
-        
-        .venue-card, .staff-card {
-            background: linear-gradient(135deg, #e8f5e8 0%, #f1f8e9 100%);
-            border-radius: 12px;
-            padding: 20px;
-            margin: 15px 0;
-            text-align: center;
-            border-left: 4px solid #28a745;
-        }
-        
-        .venue-card h4, .staff-card h4 {
-            color: #155724;
-            margin: 0 0 15px 0;
-            font-size: 18px;
-            font-weight: 600;
-        }
-        
-        .venue-name, .staff-name {
-            font-size: 20px;
-            font-weight: 700;
-            color: #155724;
-            margin-bottom: 8px;
-        }
-        
-        .venue-id, .staff-details {
-            font-size: 14px;
-            color: #6c757d;
-            font-weight: 500;
-        }
-        
-        .service-name {
-            font-size: 16px;
-            font-weight: 600;
-            color: #495057;
-            margin: 8px 0;
-        }
-        
-        .footer {
-            background-color: #2c3e50;
-            color: #ecf0f1;
-            padding: 30px;
-            text-align: center;
-            font-size: 14px;
-        }
-        
-        .footer-message {
-            margin-bottom: 20px;
-            font-style: italic;
+        .highlight {
+            color: #b284d6;
         }
         
         .signature {
-            border-top: 1px solid #34495e;
-            padding-top: 20px;
-            margin-top: 20px;
+            margin-top: 32px;
+            padding-top: 24px;
+            border-top: 1px solid #e5e5e5;
         }
         
-        .signature strong {
-            color: #3498db;
-            font-size: 16px;
+        .signature p {
+            font-size: 15px;
+            color: #0e0e10;
+            margin: 0;
         }
         
-        /* Responsive design */
+        .signature .brand {
+            font-weight: 600;
+        }
+        
+        .footer {
+            padding: 24px 40px;
+            background-color: #f9f9f9;
+            border-top: 1px solid #e5e5e5;
+        }
+        
+        .footer p {
+            font-size: 12px;
+            color: #6b7280;
+            margin: 0;
+            text-align: center;
+        }
+        
+        a {
+            color: #b284d6;
+            text-decoration: none;
+        }
+        
+        a:hover {
+            text-decoration: underline;
+        }
+        
         @media only screen and (max-width: 600px) {
-            .email-container {
-                width: 100% !important;
-                margin: 0 !important;
+            .email-wrapper {
+                padding: 20px 12px;
+            }
+            
+            .logo-section {
+                padding: 24px 24px 20px 24px;
+            }
+            
+            .divider {
+                margin: 0 24px;
             }
             
             .content {
-                padding: 20px 15px !important;
+                padding: 24px;
             }
             
-            .header {
-                padding: 20px 15px !important;
+            .booking-info {
+                padding: 16px 20px;
             }
             
-            .header h1 {
-                font-size: 22px !important;
-            }
-            
-            .logo-text {
-                font-size: 26px !important;
-            }
-            
-            .logo-img {
-                height: 32px !important;
-            }
-            
-            .booking-card {
-                padding: 25px 20px !important;
-                margin: 15px 0 !important;
-            }
-            
-            .location-name {
-                font-size: 22px !important;
-                margin-bottom: 15px !important;
-            }
-            
-            .customer-name {
-                font-size: 18px !important;
-                margin-bottom: 20px !important;
-                padding: 10px 15px !important;
-            }
-            
-            .booking-date {
-                font-size: 26px !important;
-                margin-bottom: 6px !important;
-            }
-            
-            .booking-time {
-                font-size: 22px !important;
-                margin-bottom: 6px !important;
-            }
-            
-            .party-size {
-                font-size: 20px !important;
-                margin: 15px auto !important;
-                padding: 10px 16px !important;
-            }
-            
-            .phone-number {
-                font-size: 16px !important;
-            }
-            
-            .venue-card, .staff-card {
-                padding: 15px !important;
-                margin: 10px 0 !important;
-            }
-            
-            .venue-name, .staff-name {
-                font-size: 18px !important;
-            }
-            
-            .service-name {
-                font-size: 15px !important;
+            .footer {
+                padding: 20px 24px;
             }
         }
     </style>
 </head>
 <body>
-    <div class="email-container">
-        <!-- Header -->
-        <div class="header{{#is_modification}} modification{{/is_modification}}{{#is_cancellation}} cancellation{{/is_cancellation}}">
-            <div class="logo">
-                <table style="margin: 0 auto; border-collapse: collapse;">
-                    <tr>
-                        <td style="vertical-align: middle; padding-right: 15px;">
-                            <img src="https://assets.speako.ai/booking_uploads/1757055045_91a371bc_cookidoo.png" alt="Speako AI Logo" class="logo-img">
-                        </td>
-                        <td style="vertical-align: middle;">
-                            <a href="#" class="logo-text">SPEAKO AI</a>
-                        </td>
-                    </tr>
-                </table>
-            </div>
-            <h1>{{email_title}}</h1>
-        </div>
-        
-        <!-- Main Content -->
-        <div class="content">
-            <!-- Main Booking Card -->
-            <div class="booking-card">
-                <div class="location-name">{{location_name}}</div>
-                
-                <div class="customer-name">{{customer_name}}</div>
-                
-                <div class="booking-ref">{{booking_ref}}</div>
-                
-                <div class="datetime-section">
-                    <div class="booking-date">{{booking_date}}</div>
-                    <div class="booking-time">{{start_time}} - {{end_time}}</div>
-                    {{#party_section}}
-                    <div class="party-size">👥 {{party_num}} People</div>
-                    {{/party_section}}
-                </div>
-                
-                <div class="contact-info">
-                    <div class="phone-number">
-                        <div class="phone-clickable">
-                            <a href="tel:{{customer_phone}}" class="phone-link">📞 {{customer_phone}}</a>
-                            <br>
-                            <small style="color: #6b7280; font-size: 12px;">Tap to call (or copy number)</small>
-                        </div>
-                    </div>
-                </div>
+    <div class="email-wrapper">
+        <div class="email-container">
+            <!-- Logo -->
+            <div class="logo-section">
+                <img src="https://speako-web-dev.onrender.com/_next/image?url=%2Flanding%2Flogo.webp&w=256&q=75" alt="Speako" class="logo-img">
             </div>
             
-            <!-- Venue Information (for restaurants) -->
-            {{#venue_section}}
-            <div class="venue-card">
-                <h4>🍽️ Table Assignment</h4>
-                <div class="venue-name">{{venue_unit_name}}</div>
-                <div class="venue-id">Table ID: {{venue_unit_id}}</div>
-            </div>
-            {{/venue_section}}
+            <!-- Purple Divider -->
+            <div class="divider"></div>
             
-            <!-- Staff Information (for services) -->
-            {{#staff_section}}
-            <div class="staff-card">
-                <h4>👨‍💼 Service Details</h4>
-                <div class="staff-name">{{staff_name}}</div>
-                <div class="service-name">{{service_name}}</div>
-                <div class="staff-details">Staff ID: {{staff_id}} | Service ID: {{service_id}}</div>
-            </div>
-            {{/staff_section}}
-            
-            <!-- Original Booking Information (for modifications) -->
-            <div style="margin: 20px 0; text-align: center;">
-                {{email_message_mod}}
-            </div>
-        </div>
-        
-        <!-- Footer -->
-        <div class="footer">
-            <p class="footer-message">{{closing_message}}</p>
-            
-            <div class="signature">
-                <p><strong>Speako AI Booking System</strong></p>
+            <!-- Content -->
+            <div class="content">
+                <p class="title">{{email_title}}</p>
                 
-                <p style="margin-top: 20px; font-size: 12px; color: #95a5a6;">
-                    This is an automated message from Speako AI. 
-                    Please do not reply to this email.
+                <p class="main-text">
+                    A new booking has been {{#is_modification}}modified{{/is_modification}}{{#is_cancellation}}cancelled{{/is_cancellation}}{{^is_modification}}{{^is_cancellation}}confirmed{{/is_cancellation}}{{/is_modification}} at <strong>{{location_name}}</strong>.
                 </p>
+                
+                <!-- Booking Details -->
+                <div class="booking-info">
+                    <div class="info-row">
+                        <p class="info-label">Customer</p>
+                        <p class="info-value">{{customer_name}}</p>
+                    </div>
+                    
+                    <div class="info-row">
+                        <p class="info-label">Reference</p>
+                        <p class="info-value highlight">{{booking_ref}}</p>
+                    </div>
+                    
+                    <div class="info-row">
+                        <p class="info-label">Date & Time</p>
+                        <p class="info-value">{{booking_date}} at {{start_time}} – {{end_time}}</p>
+                    </div>
+                    
+                    {{#party_section}}
+                    <div class="info-row">
+                        <p class="info-label">Party Size</p>
+                        <p class="info-value">{{party_num}} people</p>
+                    </div>
+                    {{/party_section}}
+                    
+                    <div class="info-row">
+                        <p class="info-label">Phone</p>
+                        <p class="info-value"><a href="tel:{{customer_phone}}">{{customer_phone}}</a></p>
+                    </div>
+                    
+                    {{#venue_section}}
+                    <div class="info-row">
+                        <p class="info-label">Table</p>
+                        <p class="info-value">{{venue_unit_name}}</p>
+                    </div>
+                    {{/venue_section}}
+                    
+                    {{#staff_section}}
+                    <div class="info-row">
+                        <p class="info-label">Staff</p>
+                        <p class="info-value">{{staff_name}}</p>
+                    </div>
+                    <div class="info-row">
+                        <p class="info-label">Service</p>
+                        <p class="info-value">{{service_name}}</p>
+                    </div>
+                    {{/staff_section}}
+                </div>
+                
+                {{email_message_mod}}
+                
+                <!-- Signature -->
+                <div class="signature">
+                    <p>{{closing_message}}</p>
+                    <p class="brand">Speako AI</p>
+                </div>
+            </div>
+            
+            <!-- Footer -->
+            <div class="footer">
+                <p>This is an automated message. Please do not reply to this email.</p>
             </div>
         </div>
     </div>
