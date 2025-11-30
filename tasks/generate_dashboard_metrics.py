@@ -73,12 +73,11 @@ def collect_summary_metrics(tenant_id, location_ids):
             "by_location": {}
         }
         
-        # Get location names and timezones
+        # Get location names
         location_names = {}
-        location_timezones = {}
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT location_id, name, timezone
+                SELECT location_id, name
                 FROM locations
                 WHERE tenant_id = %s
                   AND location_id = ANY(%s)
@@ -86,7 +85,6 @@ def collect_summary_metrics(tenant_id, location_ids):
             
             for row in cur.fetchall():
                 location_names[row[0]] = row[1]
-                location_timezones[row[0]] = row[2] or 'UTC'
         
         # Query 1: Bookings (current + previous 30 days)
         bookings_data = {}
@@ -423,10 +421,9 @@ def incremental_trends_update(tenant_id, location_ids, location_names, cached_tr
                     COUNT(*) FILTER (WHERE b.source = 'voice-ai') as ai_count,
                     COUNT(*) FILTER (WHERE b.source IN ('web', 'dashboard', 'onboarding')) as web_count
                 FROM bookings b
-                JOIN locations l ON b.location_id = l.location_id AND b.tenant_id = l.tenant_id
                 WHERE b.tenant_id = %s
                   AND b.location_id = ANY(%s)
-                  AND DATE(b.start_time AT TIME ZONE COALESCE(l.timezone, 'UTC')) = %s
+                  AND DATE(b.start_time) = %s
                   AND b.status = 'confirmed'
                 GROUP BY b.location_id
             """, (tenant_id, location_ids, yesterday))
@@ -477,16 +474,15 @@ def incremental_trends_update(tenant_id, location_ids, location_names, cached_tr
                     with conn_backfill.cursor() as cur:
                         cur.execute("""
                             SELECT 
-                                DATE(b.start_time AT TIME ZONE COALESCE(l.timezone, 'UTC')) as booking_date,
+                                DATE(b.start_time) as booking_date,
                                 COUNT(*) FILTER (WHERE b.source = 'voice-ai') as ai_count,
                                 COUNT(*) FILTER (WHERE b.source IN ('web', 'dashboard', 'onboarding')) as web_count
                             FROM bookings b
-                            JOIN locations l ON b.location_id = l.location_id AND b.tenant_id = l.tenant_id
                             WHERE b.tenant_id = %s
                               AND b.location_id = %s
                               AND b.start_time >= CURRENT_DATE - INTERVAL '89 days'
                               AND b.status = 'confirmed'
-                            GROUP BY DATE(b.start_time AT TIME ZONE COALESCE(l.timezone, 'UTC'))
+                            GROUP BY DATE(b.start_time)
                         """, (tenant_id, loc_id))
                         
                         # Build 90-day arrays
@@ -588,16 +584,15 @@ def full_trends_query(tenant_id, location_ids, location_names):
             cur.execute("""
                 SELECT 
                     b.location_id,
-                    DATE(b.start_time AT TIME ZONE COALESCE(l.timezone, 'UTC')) as booking_date,
+                    DATE(b.start_time) as booking_date,
                     COUNT(*) FILTER (WHERE b.source = 'voice-ai') as ai_count,
                     COUNT(*) FILTER (WHERE b.source IN ('web', 'dashboard', 'onboarding')) as web_count
                 FROM bookings b
-                JOIN locations l ON b.location_id = l.location_id AND b.tenant_id = l.tenant_id
                 WHERE b.tenant_id = %s
                   AND b.location_id = ANY(%s)
                   AND b.start_time >= CURRENT_DATE - INTERVAL '89 days'
                   AND b.status = 'confirmed'
-                GROUP BY b.location_id, DATE(b.start_time AT TIME ZONE COALESCE(l.timezone, 'UTC'))
+                GROUP BY b.location_id, DATE(b.start_time)
                 ORDER BY booking_date
             """, (tenant_id, location_ids))
             
@@ -859,7 +854,7 @@ def generate_dashboard_metrics_for_tenant(self, tenant_id):
         
         logger.info(f"[Tenant {tenant_id}] Found {len(location_ids)} active locations: {location_ids}")
         
-        # Get location names (needed for multiple sections)
+        # Get location names
         location_names = {}
         conn = get_db_connection()
         try:
