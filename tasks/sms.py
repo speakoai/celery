@@ -1578,12 +1578,12 @@ def send_email_confirmation_customer_new(booking_id: int) -> str:
         # Get zone information for restaurant bookings
         zone_names = []
         if location_type == "rest" and zone_tag_ids:
-            # Query venue_tag table to get zone names
+            # Query location_tag table to get zone names
             zone_ids_tuple = tuple(zone_tag_ids)
             if zone_ids_tuple:
                 cur.execute("""
                     SELECT name 
-                    FROM venue_tag 
+                    FROM location_tag 
                     WHERE tenant_id = %s AND tag_id = ANY(%s)
                     ORDER BY name
                 """, (tenant_id, zone_tag_ids))
@@ -1883,12 +1883,12 @@ def send_email_confirmation_customer_mod(booking_id: int, original_booking_id: i
         # Get zone information for restaurant bookings
         zone_names = []
         if location_type == "rest" and zone_tag_ids:
-            # Query venue_tag table to get zone names
+            # Query location_tag table to get zone names
             zone_ids_tuple = tuple(zone_tag_ids)
             if zone_ids_tuple:
                 cur.execute("""
                     SELECT name 
-                    FROM venue_tag 
+                    FROM location_tag 
                     WHERE tenant_id = %s AND tag_id = ANY(%s)
                     ORDER BY name
                 """, (tenant_id, zone_tag_ids))
@@ -1995,7 +1995,7 @@ def send_email_confirmation_customer_mod(booking_id: int, original_booking_id: i
                     # Get zone names
                     cur.execute("""
                         SELECT name 
-                        FROM venue_tag 
+                        FROM location_tag 
                         WHERE tenant_id = %s AND tag_id = ANY(%s)
                         ORDER BY name
                     """, (tenant_id, orig_zone_tag_ids))
@@ -2293,12 +2293,12 @@ def send_email_confirmation_customer_can(booking_id: int) -> str:
         # Get zone information for restaurant bookings
         zone_names = []
         if location_type == "rest" and zone_tag_ids:
-            # Query venue_tag table to get zone names
+            # Query location_tag table to get zone names
             zone_ids_tuple = tuple(zone_tag_ids)
             if zone_ids_tuple:
                 cur.execute("""
                     SELECT name 
-                    FROM venue_tag 
+                    FROM location_tag 
                     WHERE tenant_id = %s AND tag_id = ANY(%s)
                     ORDER BY name
                 """, (tenant_id, zone_tag_ids))
