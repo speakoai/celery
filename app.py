@@ -2006,8 +2006,6 @@ def elevenlabs_post_conversation_webhook():
                 if not call_seconds or call_seconds <= 0:
                     print(f"[Billing] Skipping billing: no valid call_duration_secs for conversation {conversation_id}")
                 else:
-                    call_secs = call_seconds
-                    
                     # Check if this conversation was already billed (idempotency)
                     with conn.cursor() as cur:
                         cur.execute("""
@@ -2090,10 +2088,20 @@ def elevenlabs_post_conversation_webhook():
                                 """, (tenant_id, location_conversation_id, -package_use))
                                 
                                 print(f"[Billing] Inserted package usage: -{package_use}s")
-                        
-                        # Warn about unbilled time (but don't fail)
-                        if leftover > 0:
-                            print(f"[Billing] WARNING: {leftover}s of call time not covered by balance (no overage handler in this webhook)")
+                            
+                            # Insert overage debt if leftover exists
+                            if leftover > 0:
+                                cur.execute("""
+                                    INSERT INTO billing_minute_ledger (
+                                        tenant_id,
+                                        location_conversation_id,
+                                        source,
+                                        usage_bucket,
+                                        seconds_delta
+                                    ) VALUES (%s, %s, 'call_usage_overage', NULL, %s)
+                                """, (tenant_id, location_conversation_id, -leftover))
+                                
+                                print(f"[Billing] Inserted overage usage: -{leftover}s")
                         
                         print(f"✅ Billing processed successfully")
                 
