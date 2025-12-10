@@ -1,6 +1,8 @@
 import os
 import secrets
 import hmac
+import base64
+import psycopg2
 from functools import wraps
 from flask import Flask, flash, render_template, redirect, request, jsonify
 from tasks.demo_task import add
@@ -24,6 +26,10 @@ from werkzeug.utils import secure_filename
 from datetime import datetime
 import hashlib
 import time
+# Imports for webhook processing
+from tasks.utils.elevenlabs_client import get_conversation_details
+from tasks.utils.publish_r2 import upload_audio_to_r2
+from zoneinfo import ZoneInfo
 # OpenAI SDK (optional)
 try:
     from openai import OpenAI
@@ -72,6 +78,17 @@ r2_client = boto3.client(
     aws_access_key_id=R2_ACCESS_KEY_ID,
     aws_secret_access_key=R2_SECRET_ACCESS_KEY,
 ) if all([R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT_URL, R2_BUCKET_NAME]) else None
+
+# Database configuration for webhooks
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+# Webhook configuration
+WEBHOOK_MAX_AUDIO_SIZE = 100 * 1024 * 1024  # 100MB in bytes
+
+
+def get_db_connection():
+    """Get PostgreSQL database connection for webhook processing."""
+    return psycopg2.connect(DATABASE_URL)
 
 
 def allowed_knowledge_file(filename: str) -> bool:
@@ -1625,14 +1642,11 @@ def elevenlabs_post_conversation_webhook():
     ElevenLabs Post-Conversation Webhook Endpoint
     
     This endpoint receives webhook notifications from ElevenLabs after a conversation ends.
+    Processes audio upload and inserts conversation data into database.
     
     HMAC Authentication:
     - ElevenLabs signs the webhook payload with a secret key using HMAC-SHA256
     - The signature is sent in the 'elevenlabs-signature' header
-    - We verify the signature by:
-      1. Getting the raw request body (bytes)
-      2. Computing HMAC-SHA256 hash using our secret key
-      3. Comparing our computed signature with the received signature
     
     Setup:
     - Set ELEVENLABS_WEBHOOK_SECRET environment variable with the secret from ElevenLabs dashboard
@@ -1647,68 +1661,480 @@ def elevenlabs_post_conversation_webhook():
     # Get the webhook secret from environment variable
     webhook_secret = os.getenv('ELEVENLABS_WEBHOOK_SECRET', '')
     
-    # Log everything for debugging
+    # Log webhook received
     print("=" * 80)
     print("ELEVENLABS POST-CONVERSATION WEBHOOK RECEIVED")
     print("=" * 80)
     print(f"Timestamp: {datetime.utcnow().isoformat()}Z")
-    print(f"\nHeaders:")
-    for header, value in request.headers.items():
-        print(f"  {header}: {value}")
-    
-    print(f"\nRaw Payload (bytes length): {len(payload_bytes)}")
-    print(f"Raw Payload (first 500 chars): {payload_bytes[:500]}")
-    
-    # Try to parse JSON payload
-    try:
-        payload_json = request.get_json(force=True)
-        print(f"\nParsed JSON Payload:")
-        print(json.dumps(payload_json, indent=2))
-    except Exception as e:
-        print(f"\nFailed to parse JSON: {e}")
-        payload_json = None
+    print(f"Payload size: {len(payload_bytes)} bytes")
     
     # HMAC Verification
-    print(f"\n--- HMAC Verification ---")
-    print(f"Received Signature: {received_signature}")
-    print(f"Webhook Secret Set: {bool(webhook_secret)}")
-    
     if webhook_secret and received_signature:
-        # Compute HMAC signature
         computed_signature = hmac.new(
             key=webhook_secret.encode('utf-8'),
             msg=payload_bytes,
             digestmod=hashlib.sha256
         ).hexdigest()
         
-        print(f"Computed Signature: {computed_signature}")
-        
-        # Compare signatures (constant-time comparison to prevent timing attacks)
         signature_valid = hmac.compare_digest(computed_signature, received_signature)
-        print(f"Signature Valid: {signature_valid}")
         
         if not signature_valid:
-            print(f"\n⚠️  HMAC SIGNATURE MISMATCH - Request may not be authentic!")
+            print(f"⚠️  HMAC SIGNATURE MISMATCH - Request rejected")
             print("=" * 80)
             return jsonify({
                 'error': 'Invalid signature',
                 'message': 'HMAC verification failed'
             }), 401
+        
+        print("✅ HMAC signature verified")
     else:
         if not webhook_secret:
-            print(f"⚠️  WARNING: ELEVENLABS_WEBHOOK_SECRET not set - cannot verify signature")
+            print(f"⚠️  WARNING: ELEVENLABS_WEBHOOK_SECRET not set")
         if not received_signature:
             print(f"⚠️  WARNING: No signature received in headers")
     
-    print(f"\n✅ Webhook processed successfully")
-    print("=" * 80)
-    print("\n")
+    # Parse JSON payload
+    try:
+        payload_json = request.get_json(force=True)
+    except Exception as e:
+        print(f"❌ Failed to parse JSON: {e}")
+        print("=" * 80)
+        return jsonify({
+            'error': 'Invalid JSON',
+            'message': str(e)
+        }), 400
     
-    # Return success response
-    return jsonify({
-        'success': True,
-        'message': 'Webhook received and logged',
-        'received_at': datetime.utcnow().isoformat() + 'Z'
-    }), 200
-
-
+    # Extract webhook data
+    webhook_type = payload_json.get('type')
+    event_timestamp = payload_json.get('event_timestamp')
+    data = payload_json.get('data', {})
+    
+    agent_id = data.get('agent_id')
+    conversation_id = data.get('conversation_id')
+    full_audio_base64 = data.get('full_audio')
+    
+    print(f"Webhook type: {webhook_type}")
+    print(f"Agent ID: {agent_id}")
+    print(f"Conversation ID: {conversation_id}")
+    print(f"Has audio: {bool(full_audio_base64)}")
+    
+    # Validate required fields
+    if not agent_id or not conversation_id:
+        print(f"❌ Missing required fields: agent_id={agent_id}, conversation_id={conversation_id}")
+        print("=" * 80)
+        return jsonify({
+            'error': 'Missing required fields',
+            'message': 'agent_id and conversation_id are required'
+        }), 400
+    
+    # Process webhook
+    try:
+        conn = get_db_connection()
+        
+        try:
+            # Step 1: Lookup location information
+            print(f"\n[Step 1] Looking up location for agent_id: {agent_id}")
+            
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT tenant_id, location_id, name, timezone
+                    FROM locations
+                    WHERE elevenlabs_agent_id = %s
+                    AND is_active = true
+                    LIMIT 1
+                """, (agent_id,))
+                
+                location_row = cur.fetchone()
+            
+            if not location_row:
+                print(f"⚠️  No location found for agent_id: {agent_id}")
+                print(f"⚠️  ORPHANED CONVERSATION: {conversation_id}")
+                print(f"⚠️  This conversation cannot be inserted without location mapping")
+                print("=" * 80)
+                
+                # Return 200 to prevent retries, but log critical error
+                return jsonify({
+                    'success': True,
+                    'message': 'Webhook received but no location mapping found',
+                    'warning': 'Orphaned conversation - needs manual intervention',
+                    'conversation_id': conversation_id,
+                    'agent_id': agent_id
+                }), 200
+            
+            tenant_id, location_id, location_name, timezone_str = location_row
+            print(f"✅ Found location: tenant_id={tenant_id}, location_id={location_id}, name={location_name}")
+            
+            # Step 2: Check for duplicate conversation (idempotency)
+            print(f"\n[Step 2] Checking for duplicate conversation")
+            
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT location_conversation_id, audio_r2_path
+                    FROM location_conversations
+                    WHERE eleven_conversation_id = %s
+                """, (conversation_id,))
+                
+                existing_row = cur.fetchone()
+            
+            if existing_row:
+                existing_id, existing_audio = existing_row
+                print(f"✅ Conversation already exists: location_conversation_id={existing_id}")
+                
+                if existing_audio:
+                    print(f"✅ Audio already uploaded: {existing_audio}")
+                    print("=" * 80)
+                    return jsonify({
+                        'success': True,
+                        'message': 'Conversation already processed',
+                        'conversation_id': conversation_id,
+                        'location_conversation_id': existing_id
+                    }), 200
+                else:
+                    print(f"⚠️  Audio missing, will attempt to upload")
+            
+            # Step 3: Fetch full conversation details from ElevenLabs API
+            print(f"\n[Step 3] Fetching full conversation details from ElevenLabs API")
+            
+            details = None
+            try:
+                details = get_conversation_details(conversation_id)
+                print(f"✅ Retrieved full conversation details from API")
+            except Exception as e:
+                print(f"⚠️  Failed to fetch conversation details from API: {e}")
+                print(f"⚠️  Will use minimal webhook data only")
+            
+            # Step 4: Decode and validate audio
+            audio_bytes = None
+            audio_r2_path = None
+            
+            if full_audio_base64:
+                print(f"\n[Step 4] Decoding base64 audio")
+                
+                try:
+                    audio_bytes = base64.b64decode(full_audio_base64)
+                    audio_size = len(audio_bytes)
+                    print(f"✅ Decoded audio: {audio_size} bytes ({audio_size / 1024 / 1024:.2f} MB)")
+                    
+                    # Validate size
+                    if audio_size > WEBHOOK_MAX_AUDIO_SIZE:
+                        print(f"⚠️  Audio size exceeds limit: {audio_size} > {WEBHOOK_MAX_AUDIO_SIZE}")
+                        audio_bytes = None
+                    
+                except Exception as e:
+                    print(f"⚠️  Failed to decode audio: {e}")
+                    audio_bytes = None
+            else:
+                print(f"\n[Step 4] No audio data in webhook")
+            
+            # Step 5: Upload audio to R2
+            if audio_bytes:
+                print(f"\n[Step 5] Uploading audio to R2")
+                
+                try:
+                    r2_key, public_url = upload_audio_to_r2(
+                        str(tenant_id),
+                        str(location_id),
+                        conversation_id,
+                        audio_bytes,
+                        content_type='audio/mpeg'
+                    )
+                    
+                    audio_r2_path = r2_key
+                    print(f"✅ Audio uploaded to R2: {public_url}")
+                    
+                except Exception as e:
+                    print(f"⚠️  Failed to upload audio to R2: {e}")
+                    audio_r2_path = None
+            else:
+                print(f"\n[Step 5] Skipping audio upload (no valid audio data)")
+            
+            # Step 6: If conversation exists, just update audio path
+            if existing_row:
+                if audio_r2_path:
+                    print(f"\n[Step 6] Updating audio path for existing conversation")
+                    
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            UPDATE location_conversations
+                            SET audio_r2_path = %s, updated_at = CURRENT_TIMESTAMP
+                            WHERE location_conversation_id = %s
+                        """, (audio_r2_path, existing_id))
+                    
+                    conn.commit()
+                    print(f"✅ Updated audio path")
+                
+                print("=" * 80)
+                return jsonify({
+                    'success': True,
+                    'message': 'Conversation updated with audio',
+                    'conversation_id': conversation_id,
+                    'location_conversation_id': existing_id
+                }), 200
+            
+            # Step 7: Insert new conversation record
+            print(f"\n[Step 6] Inserting conversation into database")
+            
+            # Helper function to convert timestamp to location timezone
+            def convert_timestamp(unix_ts):
+                if unix_ts is None:
+                    return None
+                try:
+                    utc_dt = datetime.fromtimestamp(unix_ts, tz=ZoneInfo('UTC'))
+                    local_dt = utc_dt.astimezone(ZoneInfo(timezone_str))
+                    return local_dt.replace(tzinfo=None)
+                except Exception:
+                    return None
+            
+            # Extract fields from API details or use webhook fallbacks
+            if details:
+                metadata = details.get('metadata', {})
+                transcript = details.get('transcript', [])
+                
+                agent_name = details.get('agent_name') or location_name
+                call_start_time = convert_timestamp(metadata.get('start_time_unix_secs'))
+                call_accepted_time = convert_timestamp(metadata.get('end_time_unix_secs'))
+                call_duration_secs = metadata.get('call_duration_secs')
+                message_count = len(transcript) if transcript else 0
+                status = details.get('status', 'completed')
+                
+                call_successful_str = details.get('call_successful')
+                if call_successful_str:
+                    call_successful = (call_successful_str == 'success')
+                else:
+                    call_successful = (status in ['done', 'completed'])
+                
+                main_language = details.get('language') or details.get('detected_language')
+                transcript_summary = (
+                    details.get('transcript_summary') or
+                    details.get('call_summary_title') or
+                    (details.get('analysis', {}).get('summary') if isinstance(details.get('analysis'), dict) else None)
+                )
+                
+                raw_metadata = json.dumps(details)
+            else:
+                # Fallback to minimal webhook data
+                agent_name = location_name
+                call_start_time = convert_timestamp(event_timestamp)
+                call_accepted_time = None
+                call_duration_secs = None
+                message_count = 0
+                status = 'webhook_only'
+                call_successful = True
+                main_language = None
+                transcript_summary = None
+                raw_metadata = json.dumps(payload_json)
+                transcript = []
+            
+            # Insert conversation record
+            location_conversation_id = None
+            
+            conn.rollback()  # Start fresh transaction
+            
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO location_conversations (
+                            tenant_id, location_id, eleven_conversation_id, eleven_agent_id,
+                            agent_name, call_start_time, call_accepted_time, call_duration_secs,
+                            message_count, status, call_successful, main_language,
+                            transcript_summary, audio_r2_path, raw_metadata
+                        )
+                        VALUES (
+                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        )
+                        RETURNING location_conversation_id
+                    """, (
+                        tenant_id, location_id, conversation_id, agent_id,
+                        agent_name, call_start_time, call_accepted_time, call_duration_secs,
+                        message_count, status, call_successful, main_language,
+                        transcript_summary, audio_r2_path, raw_metadata
+                    ))
+                    
+                    location_conversation_id = cur.fetchone()[0]
+                
+                print(f"✅ Inserted conversation: location_conversation_id={location_conversation_id}")
+                
+                # Insert transcript details if available
+                if transcript and location_conversation_id:
+                    print(f"[Step 7] Inserting {len(transcript)} transcript messages")
+                    
+                    with conn.cursor() as cur:
+                        for idx, message in enumerate(transcript):
+                            role = message.get('role', 'unknown')
+                            time_in_call_secs = message.get('time_in_call_secs') or message.get('timestamp')
+                            message_text = message.get('message') or message.get('text') or message.get('content')
+                            
+                            tool_calls = json.dumps(message.get('tool_calls')) if message.get('tool_calls') else None
+                            tool_results = json.dumps(message.get('tool_results')) if message.get('tool_results') else None
+                            llm_override = message.get('llm_override')
+                            
+                            conversation_turn_metrics = message.get('metrics') or message.get('turn_metrics')
+                            if conversation_turn_metrics:
+                                conversation_turn_metrics = json.dumps(conversation_turn_metrics)
+                            
+                            rag_retrieval_info = message.get('rag_info') or message.get('rag_retrieval')
+                            if rag_retrieval_info:
+                                rag_retrieval_info = json.dumps(rag_retrieval_info)
+                            
+                            cur.execute("""
+                                INSERT INTO location_conversation_details (
+                                    location_conversation_id, message_index, role, time_in_call_secs,
+                                    message, tool_calls, tool_results, llm_override,
+                                    conversation_turn_metrics, rag_retrieval_info
+                                )
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            """, (
+                                location_conversation_id, idx, role, time_in_call_secs,
+                                message_text, tool_calls, tool_results, llm_override,
+                                conversation_turn_metrics, rag_retrieval_info
+                            ))
+                    
+                    print(f"✅ Inserted {len(transcript)} transcript messages")
+                
+                # Step 8: Process billing (post-call usage recording)
+                print(f"\n[Step 8] Processing billing")
+                
+                # Normalize call duration to an integer number of seconds
+                call_seconds = None
+                if call_duration_secs is not None:
+                    try:
+                        # Handle int, float, or string values consistently
+                        call_seconds = int(float(call_duration_secs))
+                    except (TypeError, ValueError):
+                        call_seconds = None
+                
+                if not call_seconds or call_seconds <= 0:
+                    print(f"[Billing] Skipping billing: no valid call_duration_secs for conversation {conversation_id}")
+                else:
+                    call_secs = call_seconds
+                    
+                    # Check if this conversation was already billed (idempotency)
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            SELECT 1 
+                            FROM billing_minute_ledger
+                            WHERE tenant_id = %s 
+                              AND location_conversation_id = %s 
+                              AND source = 'call_usage'
+                            LIMIT 1
+                        """, (tenant_id, location_conversation_id))
+                        
+                        already_billed = cur.fetchone()
+                    
+                    if already_billed:
+                        print(f"[Billing] Skipping billing: call_usage already recorded for location_conversation_id={location_conversation_id}")
+                    else:
+                        # Query current balances
+                        with conn.cursor() as cur:
+                            cur.execute("""
+                                SELECT plan_seconds_balance, package_seconds_balance
+                                FROM tenant_total_seconds_balance
+                                WHERE tenant_id = %s
+                            """, (tenant_id,))
+                            
+                            balance_row = cur.fetchone()
+                        
+                        if balance_row:
+                            plan_balance, package_balance = balance_row
+                        else:
+                            plan_balance, package_balance = 0, 0
+                            print(f"[Billing] No balance row for tenant {tenant_id}, using plan=0, package=0")
+                        
+                        # Ensure non-negative
+                        plan_balance = max(plan_balance or 0, 0)
+                        package_balance = max(package_balance or 0, 0)
+                        
+                        print(f"[Billing] Tenant {tenant_id} balances: plan={plan_balance}s, package={package_balance}s")
+                        
+                        # Split usage: consume plan pool first, then package pool
+                        call_secs = call_seconds
+                        
+                        # Consume plan pool first
+                        plan_use = min(call_secs, plan_balance)
+                        remaining = call_secs - plan_use
+                        
+                        # Consume package pool second
+                        package_use = min(remaining, package_balance)
+                        
+                        # Calculate unbilled leftover
+                        leftover = call_secs - plan_use - package_use
+                        
+                        print(f"[Billing] Tenant {tenant_id}, conv {location_conversation_id}: call={call_secs}s, plan_use={plan_use}s, package_use={package_use}s, leftover={leftover}s")
+                        
+                        # Insert call_usage rows into billing_minute_ledger
+                        with conn.cursor() as cur:
+                            # Insert plan usage (if any)
+                            if plan_use > 0:
+                                cur.execute("""
+                                    INSERT INTO billing_minute_ledger (
+                                        tenant_id,
+                                        location_conversation_id,
+                                        source,
+                                        usage_bucket,
+                                        seconds_delta
+                                    ) VALUES (%s, %s, 'call_usage', 'plan', %s)
+                                """, (tenant_id, location_conversation_id, -plan_use))
+                                
+                                print(f"[Billing] Inserted plan usage: -{plan_use}s")
+                            
+                            # Insert package usage (if any)
+                            if package_use > 0:
+                                cur.execute("""
+                                    INSERT INTO billing_minute_ledger (
+                                        tenant_id,
+                                        location_conversation_id,
+                                        source,
+                                        usage_bucket,
+                                        seconds_delta
+                                    ) VALUES (%s, %s, 'call_usage', 'package', %s)
+                                """, (tenant_id, location_conversation_id, -package_use))
+                                
+                                print(f"[Billing] Inserted package usage: -{package_use}s")
+                        
+                        # Warn about unbilled time (but don't fail)
+                        if leftover > 0:
+                            print(f"[Billing] WARNING: {leftover}s of call time not covered by balance (no overage handler in this webhook)")
+                        
+                        print(f"✅ Billing processed successfully")
+                
+                # Commit transaction
+                conn.commit()
+                print(f"✅ Transaction committed successfully")
+                
+            except Exception as e:
+                conn.rollback()
+                print(f"❌ Database insert failed: {e}")
+                import traceback
+                traceback.print_exc()
+                raise
+            
+            print("=" * 80)
+            print(f"✅ Webhook processed successfully")
+            print(f"   Conversation ID: {conversation_id}")
+            print(f"   Location Conversation ID: {location_conversation_id}")
+            print(f"   Audio uploaded: {bool(audio_r2_path)}")
+            print(f"   Transcript messages: {len(transcript) if transcript else 0}")
+            print("=" * 80)
+            
+            return jsonify({
+                'success': True,
+                'message': 'Conversation processed successfully',
+                'conversation_id': conversation_id,
+                'location_conversation_id': location_conversation_id,
+                'audio_uploaded': bool(audio_r2_path),
+                'transcript_messages': len(transcript) if transcript else 0
+            }), 200
+            
+        finally:
+            conn.close()
+            
+    except Exception as e:
+        print(f"❌ Fatal error processing webhook: {e}")
+        import traceback
+        traceback.print_exc()
+        print("=" * 80)
+        
+        return jsonify({
+            'error': 'Internal server error',
+            'message': str(e)
+        }), 500
