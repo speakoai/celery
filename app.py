@@ -1839,7 +1839,7 @@ def elevenlabs_post_conversation_webhook():
                         content_type='audio/mpeg'
                     )
                     
-                    audio_r2_path = r2_key
+                    audio_r2_path = public_url  # Use full URL with CDN base
                     print(f"✅ Audio uploaded to R2: {public_url}")
                     
                 except Exception as e:
