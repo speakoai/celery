@@ -1,5 +1,6 @@
 import os
 import secrets
+import hmac
 from functools import wraps
 from flask import Flask, flash, render_template, redirect, request, jsonify
 from tasks.demo_task import add
@@ -1616,5 +1617,98 @@ def api_publish_elevenlabs_agent():
 
     except Exception as e:
         return jsonify({'error': 'Internal server error', 'message': str(e)}), 500
+
+
+@app.route('/webhook/post_conversation', methods=['POST'])
+def elevenlabs_post_conversation_webhook():
+    """
+    ElevenLabs Post-Conversation Webhook Endpoint
+    
+    This endpoint receives webhook notifications from ElevenLabs after a conversation ends.
+    
+    HMAC Authentication:
+    - ElevenLabs signs the webhook payload with a secret key using HMAC-SHA256
+    - The signature is sent in the 'elevenlabs-signature' header
+    - We verify the signature by:
+      1. Getting the raw request body (bytes)
+      2. Computing HMAC-SHA256 hash using our secret key
+      3. Comparing our computed signature with the received signature
+    
+    Setup:
+    - Set ELEVENLABS_WEBHOOK_SECRET environment variable with the secret from ElevenLabs dashboard
+    """
+    
+    # Get the raw request body for HMAC verification
+    payload_bytes = request.get_data()
+    
+    # Get the signature from headers
+    received_signature = request.headers.get('elevenlabs-signature', '')
+    
+    # Get the webhook secret from environment variable
+    webhook_secret = os.getenv('ELEVENLABS_WEBHOOK_SECRET', '')
+    
+    # Log everything for debugging
+    print("=" * 80)
+    print("ELEVENLABS POST-CONVERSATION WEBHOOK RECEIVED")
+    print("=" * 80)
+    print(f"Timestamp: {datetime.utcnow().isoformat()}Z")
+    print(f"\nHeaders:")
+    for header, value in request.headers.items():
+        print(f"  {header}: {value}")
+    
+    print(f"\nRaw Payload (bytes length): {len(payload_bytes)}")
+    print(f"Raw Payload (first 500 chars): {payload_bytes[:500]}")
+    
+    # Try to parse JSON payload
+    try:
+        payload_json = request.get_json(force=True)
+        print(f"\nParsed JSON Payload:")
+        print(json.dumps(payload_json, indent=2))
+    except Exception as e:
+        print(f"\nFailed to parse JSON: {e}")
+        payload_json = None
+    
+    # HMAC Verification
+    print(f"\n--- HMAC Verification ---")
+    print(f"Received Signature: {received_signature}")
+    print(f"Webhook Secret Set: {bool(webhook_secret)}")
+    
+    if webhook_secret and received_signature:
+        # Compute HMAC signature
+        computed_signature = hmac.new(
+            key=webhook_secret.encode('utf-8'),
+            msg=payload_bytes,
+            digestmod=hashlib.sha256
+        ).hexdigest()
+        
+        print(f"Computed Signature: {computed_signature}")
+        
+        # Compare signatures (constant-time comparison to prevent timing attacks)
+        signature_valid = hmac.compare_digest(computed_signature, received_signature)
+        print(f"Signature Valid: {signature_valid}")
+        
+        if not signature_valid:
+            print(f"\n⚠️  HMAC SIGNATURE MISMATCH - Request may not be authentic!")
+            print("=" * 80)
+            return jsonify({
+                'error': 'Invalid signature',
+                'message': 'HMAC verification failed'
+            }), 401
+    else:
+        if not webhook_secret:
+            print(f"⚠️  WARNING: ELEVENLABS_WEBHOOK_SECRET not set - cannot verify signature")
+        if not received_signature:
+            print(f"⚠️  WARNING: No signature received in headers")
+    
+    print(f"\n✅ Webhook processed successfully")
+    print("=" * 80)
+    print("\n")
+    
+    # Return success response
+    return jsonify({
+        'success': True,
+        'message': 'Webhook received and logged',
+        'received_at': datetime.utcnow().isoformat() + 'Z'
+    }), 200
 
 
