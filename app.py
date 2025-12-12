@@ -609,27 +609,31 @@ def api_send_sms():
                     'description': 'new booking SMS confirmation'
                 })
                 
+                # === EMAIL DISABLED - Now handled by external service ===
                 # Customer email task (only if notify_customer is True)
-                customer_email_task = send_email_confirmation_customer_new.delay(booking_id)
-                tasks.append({
-                    'task_id': customer_email_task.id,
-                    'type': 'customer_email',
-                    'description': 'new booking customer email confirmation'
-                })
+                # customer_email_task = send_email_confirmation_customer_new.delay(booking_id)
+                # tasks.append({
+                #     'task_id': customer_email_task.id,
+                #     'type': 'customer_email',
+                #     'description': 'new booking customer email confirmation'
+                # })
+                # === END EMAIL DISABLED ===
             
+            # === EMAIL DISABLED - Now handled by external service ===
             # Merchant email task (different based on business type) - always runs
-            if business_type == 'rest':
-                email_task = send_email_confirmation_new_rest.delay(booking_id)
-                email_description = 'restaurant new booking merchant email confirmation'
-            else:  # business_type == 'service'
-                email_task = send_email_confirmation_new.delay(booking_id)
-                email_description = 'service new booking merchant email confirmation'
-            
-            tasks.append({
-                'task_id': email_task.id,
-                'type': 'merchant_email',
-                'description': email_description
-            })
+            # if business_type == 'rest':
+            #     email_task = send_email_confirmation_new_rest.delay(booking_id)
+            #     email_description = 'restaurant new booking merchant email confirmation'
+            # else:  # business_type == 'service'
+            #     email_task = send_email_confirmation_new.delay(booking_id)
+            #     email_description = 'service new booking merchant email confirmation'
+            # 
+            # tasks.append({
+            #     'task_id': email_task.id,
+            #     'type': 'merchant_email',
+            #     'description': email_description
+            # })
+            # === END EMAIL DISABLED ===
             
             action_description = 'new booking confirmation'
             
@@ -643,27 +647,31 @@ def api_send_sms():
                     'description': 'booking modification SMS confirmation'
                 })
                 
+                # === EMAIL DISABLED - Now handled by external service ===
                 # Customer email task (only if notify_customer is True)
-                customer_email_task = send_email_confirmation_customer_mod.delay(booking_id, original_booking_id)
-                tasks.append({
-                    'task_id': customer_email_task.id,
-                    'type': 'customer_email',
-                    'description': 'booking modification customer email confirmation'
-                })
+                # customer_email_task = send_email_confirmation_customer_mod.delay(booking_id, original_booking_id)
+                # tasks.append({
+                #     'task_id': customer_email_task.id,
+                #     'type': 'customer_email',
+                #     'description': 'booking modification customer email confirmation'
+                # })
+                # === END EMAIL DISABLED ===
             
+            # === EMAIL DISABLED - Now handled by external service ===
             # Merchant email task (different based on business type) - always runs
-            if business_type == 'rest':
-                email_task = send_email_confirmation_mod_rest.delay(booking_id, original_booking_id)
-                email_description = 'restaurant booking modification merchant email confirmation'
-            else:  # business_type == 'service'
-                email_task = send_email_confirmation_mod.delay(booking_id, original_booking_id)
-                email_description = 'service booking modification merchant email confirmation'
-            
-            tasks.append({
-                'task_id': email_task.id,
-                'type': 'merchant_email',
-                'description': email_description
-            })
+            # if business_type == 'rest':
+            #     email_task = send_email_confirmation_mod_rest.delay(booking_id, original_booking_id)
+            #     email_description = 'restaurant booking modification merchant email confirmation'
+            # else:  # business_type == 'service'
+            #     email_task = send_email_confirmation_mod.delay(booking_id, original_booking_id)
+            #     email_description = 'service booking modification merchant email confirmation'
+            # 
+            # tasks.append({
+            #     'task_id': email_task.id,
+            #     'type': 'merchant_email',
+            #     'description': email_description
+            # })
+            # === END EMAIL DISABLED ===
             
             action_description = 'booking modification confirmation'
             
@@ -677,27 +685,31 @@ def api_send_sms():
                     'description': 'booking cancellation SMS confirmation'
                 })
                 
+                # === EMAIL DISABLED - Now handled by external service ===
                 # Customer email task (only if notify_customer is True)
-                customer_email_task = send_email_confirmation_customer_can.delay(booking_id)
-                tasks.append({
-                    'task_id': customer_email_task.id,
-                    'type': 'customer_email',
-                    'description': 'booking cancellation customer email confirmation'
-                })
+                # customer_email_task = send_email_confirmation_customer_can.delay(booking_id)
+                # tasks.append({
+                #     'task_id': customer_email_task.id,
+                #     'type': 'customer_email',
+                #     'description': 'booking cancellation customer email confirmation'
+                # })
+                # === END EMAIL DISABLED ===
             
+            # === EMAIL DISABLED - Now handled by external service ===
             # Merchant email task (different based on business type) - always runs
-            if business_type == 'rest':
-                email_task = send_email_confirmation_can_rest.delay(booking_id)
-                email_description = 'restaurant booking cancellation merchant email confirmation'
-            else:  # business_type == 'service'
-                email_task = send_email_confirmation_can.delay(booking_id)
-                email_description = 'service booking cancellation merchant email confirmation'
-            
-            tasks.append({
-                'task_id': email_task.id,
-                'type': 'merchant_email',
-                'description': email_description
-            })
+            # if business_type == 'rest':
+            #     email_task = send_email_confirmation_can_rest.delay(booking_id)
+            #     email_description = 'restaurant booking cancellation merchant email confirmation'
+            # else:  # business_type == 'service'
+            #     email_task = send_email_confirmation_can.delay(booking_id)
+            #     email_description = 'service booking cancellation merchant email confirmation'
+            # 
+            # tasks.append({
+            #     'task_id': email_task.id,
+            #     'type': 'merchant_email',
+            #     'description': email_description
+            # })
+            # === END EMAIL DISABLED ===
             
             action_description = 'booking cancellation confirmation'
             
