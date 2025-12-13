@@ -1,4 +1,5 @@
 import os
+import json
 import secrets
 import hmac
 import base64
@@ -85,10 +86,166 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 # Webhook configuration
 WEBHOOK_MAX_AUDIO_SIZE = 100 * 1024 * 1024  # 100MB in bytes
 
+# Usage notification threshold (percentage)
+USAGE_WARNING_THRESHOLD = 70
+
+# Trial minutes from environment (default 15)
+TRIAL_MINUTES = int(os.getenv('TRIAL_MINUTES', '15'))
+
 
 def get_db_connection():
     """Get PostgreSQL database connection for webhook processing."""
     return psycopg2.connect(DATABASE_URL)
+
+
+def trigger_usage_notification(tenant_id: int, conn) -> None:
+    """
+    Fire-and-forget function to check if usage threshold is crossed and send notification.
+    
+    This function:
+    1. Gets current usage state (minutes used, minutes included, period start)
+    2. Checks if usage >= 70% threshold
+    3. Checks if notification was already sent for this billing period
+    4. Creates notification if needed
+    
+    Args:
+        tenant_id: The tenant ID to check usage for
+        conn: Database connection (will create new cursor, won't commit)
+    """
+    print(f"\n[Notification] Checking usage notification for tenant {tenant_id}")
+    
+    try:
+        # Step 1: Get current usage state
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT
+                    tp.voice_minutes_included,
+                    tmb.current_period_start,
+                    tmb.current_period_end,
+                    bup.billing_type,
+                    bup.period_start_date,
+                    bup.period_end_date,
+                    COALESCE((
+                        SELECT ABS(SUM(l.seconds_delta))
+                        FROM billing_minute_ledger l
+                        WHERE l.tenant_id = tp.tenant_id
+                          AND l.source = 'call_usage'
+                          AND l.usage_bucket = 'plan'
+                          AND l.created_at >= bup.period_start_date
+                          AND l.created_at < bup.period_end_date
+                    ), 0) AS seconds_used_in_period
+                FROM tenant_plans tp
+                LEFT JOIN tenant_minute_balance tmb
+                    ON tmb.tenant_id = tp.tenant_id
+                LEFT JOIN billing_usage_periods bup
+                    ON bup.tenant_id = tp.tenant_id
+                    AND bup.is_current_period = true
+                WHERE tp.tenant_id = %s
+                  AND tp.active = true
+                LIMIT 1
+            """, (tenant_id,))
+            
+            row = cur.fetchone()
+        
+        if not row:
+            print(f"[Notification] No active plan found for tenant {tenant_id}")
+            return
+        
+        voice_minutes_included, current_period_start, current_period_end, billing_type, period_start_date, period_end_date, seconds_used_in_period = row
+        
+        # Determine if trial
+        is_trial = (billing_type == 'trial')
+        
+        # Calculate minutes
+        seconds_used = float(seconds_used_in_period or 0)
+        minutes_used = seconds_used / 60.0
+        
+        # Calculate included minutes based on trial vs paid
+        if is_trial:
+            minutes_included = TRIAL_MINUTES
+        else:
+            minutes_included = float(voice_minutes_included or 0)
+        
+        # Calculate usage percentage
+        if minutes_included > 0:
+            usage_percent = min(100.0, (minutes_used / minutes_included) * 100.0)
+        else:
+            usage_percent = 0.0
+        
+        # Round to 1 decimal
+        usage_percent = round(usage_percent, 1)
+        minutes_used = round(minutes_used, 1)
+        
+        print(f"[Notification] Tenant {tenant_id}: {minutes_used} / {minutes_included} minutes ({usage_percent}%)")
+        
+        # Step 2: Check if below threshold
+        if usage_percent < USAGE_WARNING_THRESHOLD:
+            print(f"[Notification] Usage {usage_percent}% is below {USAGE_WARNING_THRESHOLD}% threshold - no notification needed")
+            return
+        
+        # Step 3: Check for duplicate notification in this billing period
+        period_start = period_start_date or current_period_start
+        
+        if not period_start:
+            print(f"[Notification] No period start date found - skipping duplicate check")
+        else:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT 1 FROM tenant_notifications tn
+                    JOIN notifications n ON n.notification_id = tn.notification_id
+                    WHERE tn.tenant_id = %s 
+                      AND n.type_key = 'usage'
+                      AND (n.metadata->>'threshold')::int = %s
+                      AND n.created_at >= %s
+                    LIMIT 1
+                """, (tenant_id, USAGE_WARNING_THRESHOLD, period_start))
+                
+                already_notified = cur.fetchone()
+            
+            if already_notified:
+                print(f"[Notification] Already notified for this billing period - skipping")
+                return
+        
+        # Step 4: Create notification
+        print(f"[Notification] Creating usage warning notification for tenant {tenant_id}")
+        
+        notification_title = f"AI minutes usage at {int(usage_percent)}%"
+        notification_message = (
+            f"You've used {minutes_used} minutes of your {int(minutes_included)} minutes "
+            f"AI minutes limit. Consider upgrading your plan to avoid service interruption."
+        )
+        notification_metadata = json.dumps({
+            "threshold": USAGE_WARNING_THRESHOLD,
+            "percentage": usage_percent,
+            "resource": "AI minutes",
+            "minutes_used": minutes_used,
+            "minutes_included": minutes_included
+        })
+        
+        with conn.cursor() as cur:
+            # Insert into notifications table
+            cur.execute("""
+                INSERT INTO notifications (type_key, title, message, link_url, link_label, metadata, is_broadcast)
+                VALUES ('usage', %s, %s, '/dashboard/billing', 'View Usage', %s, false)
+                RETURNING notification_id
+            """, (notification_title, notification_message, notification_metadata))
+            
+            notification_id = cur.fetchone()[0]
+            
+            # Insert into tenant_notifications table
+            cur.execute("""
+                INSERT INTO tenant_notifications (tenant_id, notification_id)
+                VALUES (%s, %s)
+            """, (tenant_id, notification_id))
+        
+        # Note: We don't commit here - the caller will commit as part of the main transaction
+        print(f"✅ [Notification] Usage warning notification created (notification_id={notification_id})")
+        
+    except Exception as e:
+        print(f"⚠️  [Notification] Error creating usage notification: {e}")
+        # Don't re-raise - this is fire-and-forget
+        import traceback
+        traceback.print_exc()
 
 
 def allowed_knowledge_file(filename: str) -> bool:
@@ -2116,6 +2273,13 @@ def elevenlabs_post_conversation_webhook():
                                 print(f"[Billing] Inserted overage usage: -{leftover}s")
                         
                         print(f"✅ Billing processed successfully")
+                
+                # Step 9: Fire-and-forget usage notification check
+                # This runs before commit so notification is included in same transaction
+                try:
+                    trigger_usage_notification(tenant_id, conn)
+                except Exception as notif_err:
+                    print(f"⚠️  [Notification] Error checking usage notification (ignored): {notif_err}")
                 
                 # Commit transaction
                 conn.commit()
