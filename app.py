@@ -131,6 +131,8 @@ def send_demo_agent_notification(conversation_id: str, agent_config: dict) -> di
     from twilio.rest import Client as TwilioClient
     from sendgrid import SendGridAPIClient
     from sendgrid.helpers.mail import Mail
+    from tasks.utils.elevenlabs_client import get_conversation_audio
+    from tasks.utils.publish_r2 import upload_audio_to_r2
     
     result = {
         'success': True,
@@ -138,6 +140,7 @@ def send_demo_agent_notification(conversation_id: str, agent_config: dict) -> di
         'agent_name': agent_config.get('name', 'Demo Agent'),
         'sms_sent': False,
         'email_sent': False,
+        'audio_uploaded': False,
         'errors': []
     }
     
@@ -152,6 +155,28 @@ def send_demo_agent_notification(conversation_id: str, agent_config: dict) -> di
     except Exception as e:
         print(f"[Demo Agent] ⚠️  Failed to fetch conversation details: {e}")
         result['errors'].append(f"Failed to fetch details: {str(e)}")
+    
+    # Download and upload audio to R2
+    audio_url = None
+    try:
+        print(f"[Demo Agent] 🎵 Downloading conversation audio...")
+        audio_bytes, content_type = get_conversation_audio(conversation_id)
+        print(f"[Demo Agent] ✅ Downloaded audio: {len(audio_bytes)} bytes, type={content_type}")
+        
+        # Upload to R2 under demo-agents folder
+        r2_key, audio_url = upload_audio_to_r2(
+            tenant_id="demo-agents",
+            location_id=agent_config.get('name', 'demo').replace(' ', '-').lower(),
+            conversation_id=conversation_id,
+            audio_bytes=audio_bytes,
+            content_type=content_type
+        )
+        result['audio_uploaded'] = True
+        result['audio_url'] = audio_url
+        print(f"[Demo Agent] ✅ Uploaded audio to R2: {audio_url}")
+    except Exception as e:
+        print(f"[Demo Agent] ⚠️  Failed to download/upload audio: {e}")
+        result['errors'].append(f"Audio upload failed: {str(e)}")
     
     # Extract data from conversation details
     caller_phone = "Unknown"
@@ -219,18 +244,35 @@ def send_demo_agent_notification(conversation_id: str, agent_config: dict) -> di
         # Termination reason
         termination_reason = metadata.get('termination_reason', 'Unknown')
     
-    # Build SMS message (keep under ~300 chars for reliability)
+    # Build SMS message
     sms_body = (
         f"🤖 Speako AI - New Call\n\n"
         f"From: {caller_phone}\n"
         f"Duration: {duration_str}\n"
         f"Status: {status} {status_emoji}\n"
-        f"Topic: {summary_title[:50]}{'...' if len(summary_title) > 50 else ''}\n\n"
-        f"ID: {conversation_id}"
     )
+    if audio_url:
+        sms_body += f"\n🎧 Listen: {audio_url}\n"
+    sms_body += f"\nID: {conversation_id}"
     
     # Build email HTML
     email_subject = "You have a new call conversation from Speako AI"
+    # Build audio player section for email (if audio available)
+    audio_section = ""
+    if audio_url:
+        audio_section = f"""
+        <div style="margin: 20px 0; padding: 15px; background: #f0f7ff; border-radius: 8px; border-left: 4px solid #0066cc;">
+            <h3 style="color: #0066cc; margin: 0 0 10px 0;">🎧 Listen to Recording</h3>
+            <audio controls style="width: 100%; margin-bottom: 10px;">
+                <source src="{audio_url}" type="audio/mpeg">
+                Your browser does not support the audio element.
+            </audio>
+            <p style="margin: 0; font-size: 12px;">
+                <a href="{audio_url}" style="color: #0066cc;">Download audio file</a>
+            </p>
+        </div>
+        """
+    
     email_html = f"""
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: #333;">📞 New Call Conversation</h2>
@@ -250,6 +292,8 @@ def send_demo_agent_notification(conversation_id: str, agent_config: dict) -> di
             <tr><td style="padding: 8px 0; border-bottom: 1px solid #eee; color: #888;">Ended By</td>
                 <td style="padding: 8px 0; border-bottom: 1px solid #eee;">{termination_reason}</td></tr>
         </table>
+        
+        {audio_section}
         
         <h3 style="color: #333;">📝 Summary: {summary_title}</h3>
         <p style="color: #555; line-height: 1.6; background: #f9f9f9; padding: 15px; border-radius: 8px;">
