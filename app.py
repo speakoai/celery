@@ -2063,8 +2063,19 @@ def elevenlabs_post_conversation_webhook():
     print(f"Timestamp: {datetime.utcnow().isoformat()}Z")
     print(f"Payload size: {len(payload_bytes)} bytes")
     
-    # HMAC Verification
-    if webhook_secret and received_signature:
+    # Pre-parse JSON to check for demo agent (before HMAC verification)
+    # Demo agents bypass HMAC to allow testing without signature setup
+    try:
+        pre_parse_json = json.loads(payload_bytes.decode('utf-8'))
+        pre_agent_id = pre_parse_json.get('data', {}).get('agent_id', '')
+        is_demo_agent = pre_agent_id in DEMO_AGENT_NOTIFY_CONFIG
+        if is_demo_agent:
+            print(f"🎯 Demo agent detected: {pre_agent_id} - bypassing HMAC verification")
+    except Exception:
+        is_demo_agent = False
+    
+    # HMAC Verification (skip for demo agents)
+    if not is_demo_agent and webhook_secret and received_signature:
         computed_signature = hmac.new(
             key=webhook_secret.encode('utf-8'),
             msg=payload_bytes,
@@ -2082,6 +2093,8 @@ def elevenlabs_post_conversation_webhook():
             }), 401
         
         print("✅ HMAC signature verified")
+    elif is_demo_agent:
+        print("⏭️  HMAC verification skipped (demo agent)")
     else:
         if not webhook_secret:
             print(f"⚠️  WARNING: ELEVENLABS_WEBHOOK_SECRET not set")
