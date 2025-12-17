@@ -92,6 +92,232 @@ USAGE_WARNING_THRESHOLD = 70
 # Trial minutes from environment (default 15)
 TRIAL_MINUTES = int(os.getenv('TRIAL_MINUTES', '15'))
 
+# =============================================================================
+# DEMO AGENT NOTIFICATION CONFIGURATION
+# =============================================================================
+# Demo agents skip database recording and only send SMS/email notifications.
+# To add a new demo agent, add an entry with:
+#   - "name": Display name for the agent
+#   - "notify_sms": Phone number to receive SMS (E.164 format)
+#   - "notify_email": Email address to receive notification
+# =============================================================================
+DEMO_AGENT_NOTIFY_CONFIG = {
+    "agent_1801k73qzzqbe90t1zym8wc3mg8a": {
+        "name": "Surpass Demo Agent",
+        "notify_sms": "+61410248573",
+        "notify_email": "pedro@surpass.com.au",
+    },
+    # Add more demo agents here:
+    # "agent_xxxxx": {
+    #     "name": "Another Demo",
+    #     "notify_sms": "+61...",
+    #     "notify_email": "someone@example.com",
+    # },
+}
+
+
+def send_demo_agent_notification(conversation_id: str, agent_config: dict) -> dict:
+    """
+    Send SMS and email notification for demo agent conversations.
+    No database recording - notification only.
+    
+    Args:
+        conversation_id: ElevenLabs conversation ID
+        agent_config: Dict with 'name', 'notify_sms', 'notify_email'
+    
+    Returns:
+        Dict with success status and details
+    """
+    from twilio.rest import Client as TwilioClient
+    from sendgrid import SendGridAPIClient
+    from sendgrid.helpers.mail import Mail
+    
+    result = {
+        'success': True,
+        'conversation_id': conversation_id,
+        'agent_name': agent_config.get('name', 'Demo Agent'),
+        'sms_sent': False,
+        'email_sent': False,
+        'errors': []
+    }
+    
+    print(f"\n[Demo Agent] Processing notification for {agent_config.get('name')}")
+    print(f"[Demo Agent] Conversation ID: {conversation_id}")
+    
+    # Fetch conversation details from ElevenLabs API
+    details = None
+    try:
+        details = get_conversation_details(conversation_id)
+        print(f"[Demo Agent] ✅ Retrieved conversation details from ElevenLabs API")
+    except Exception as e:
+        print(f"[Demo Agent] ⚠️  Failed to fetch conversation details: {e}")
+        result['errors'].append(f"Failed to fetch details: {str(e)}")
+    
+    # Extract data from conversation details
+    caller_phone = "Unknown"
+    duration_secs = 0
+    duration_str = "Unknown"
+    status = "unknown"
+    status_emoji = "❓"
+    summary_title = "No summary available"
+    summary_text = ""
+    call_time_str = "Unknown"
+    language = "Unknown"
+    termination_reason = "Unknown"
+    
+    if details:
+        metadata = details.get('metadata', {})
+        analysis = details.get('analysis', {})
+        phone_call = metadata.get('phone_call', {})
+        dynamic_vars = details.get('conversation_initiation_client_data', {}).get('dynamic_variables', {})
+        
+        # Caller phone (try multiple sources)
+        caller_phone = (
+            phone_call.get('external_number') or
+            dynamic_vars.get('system__caller_id') or
+            "Unknown"
+        )
+        
+        # Duration
+        duration_secs = metadata.get('call_duration_secs', 0) or 0
+        mins, secs = divmod(int(duration_secs), 60)
+        duration_str = f"{mins}m {secs}s" if mins > 0 else f"{secs}s"
+        
+        # Status
+        call_successful = analysis.get('call_successful', '')
+        if call_successful == 'success':
+            status = "Successful"
+            status_emoji = "✅"
+        elif call_successful:
+            status = call_successful.title()
+            status_emoji = "⚠️"
+        else:
+            status = details.get('status', 'unknown').title()
+            status_emoji = "✅" if status.lower() in ['done', 'completed'] else "⚠️"
+        
+        # Summary
+        summary_title = analysis.get('call_summary_title', '') or 'Call completed'
+        summary_text = analysis.get('transcript_summary', '') or ''
+        
+        # Call time
+        start_unix = metadata.get('start_time_unix_secs')
+        timezone_str = metadata.get('timezone', 'UTC')
+        if start_unix:
+            try:
+                from zoneinfo import ZoneInfo
+                utc_dt = datetime.fromtimestamp(start_unix, tz=ZoneInfo('UTC'))
+                local_dt = utc_dt.astimezone(ZoneInfo(timezone_str))
+                call_time_str = local_dt.strftime('%d %b %Y, %I:%M %p')
+            except Exception:
+                call_time_str = datetime.fromtimestamp(start_unix).strftime('%d %b %Y, %I:%M %p')
+        
+        # Language
+        language = metadata.get('main_language', '') or details.get('language', 'Unknown')
+        if language:
+            language = language.upper() if len(language) == 2 else language.title()
+        
+        # Termination reason
+        termination_reason = metadata.get('termination_reason', 'Unknown')
+    
+    # Build SMS message (keep under ~300 chars for reliability)
+    sms_body = (
+        f"🤖 Speako AI - New Call\n\n"
+        f"From: {caller_phone}\n"
+        f"Duration: {duration_str}\n"
+        f"Status: {status} {status_emoji}\n"
+        f"Topic: {summary_title[:50]}{'...' if len(summary_title) > 50 else ''}\n\n"
+        f"ID: {conversation_id}"
+    )
+    
+    # Build email HTML
+    email_subject = "You have a new call conversation from Speako AI"
+    email_html = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #333;">📞 New Call Conversation</h2>
+        <p style="color: #666;">A new conversation has been completed on <strong>{agent_config.get('name', 'Demo Agent')}</strong>.</p>
+        
+        <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+            <tr><td style="padding: 8px 0; border-bottom: 1px solid #eee; color: #888;">Caller</td>
+                <td style="padding: 8px 0; border-bottom: 1px solid #eee;"><strong>{caller_phone}</strong></td></tr>
+            <tr><td style="padding: 8px 0; border-bottom: 1px solid #eee; color: #888;">Duration</td>
+                <td style="padding: 8px 0; border-bottom: 1px solid #eee;">{duration_str}</td></tr>
+            <tr><td style="padding: 8px 0; border-bottom: 1px solid #eee; color: #888;">Date/Time</td>
+                <td style="padding: 8px 0; border-bottom: 1px solid #eee;">{call_time_str}</td></tr>
+            <tr><td style="padding: 8px 0; border-bottom: 1px solid #eee; color: #888;">Status</td>
+                <td style="padding: 8px 0; border-bottom: 1px solid #eee;">{status_emoji} {status}</td></tr>
+            <tr><td style="padding: 8px 0; border-bottom: 1px solid #eee; color: #888;">Language</td>
+                <td style="padding: 8px 0; border-bottom: 1px solid #eee;">{language}</td></tr>
+            <tr><td style="padding: 8px 0; border-bottom: 1px solid #eee; color: #888;">Ended By</td>
+                <td style="padding: 8px 0; border-bottom: 1px solid #eee;">{termination_reason}</td></tr>
+        </table>
+        
+        <h3 style="color: #333;">📝 Summary: {summary_title}</h3>
+        <p style="color: #555; line-height: 1.6; background: #f9f9f9; padding: 15px; border-radius: 8px;">
+            {summary_text if summary_text else '<em>No summary available</em>'}
+        </p>
+        
+        <p style="color: #999; font-size: 12px; margin-top: 30px; border-top: 1px solid #eee; padding-top: 15px;">
+            Conversation ID: {conversation_id}<br>
+            Speako AI • Powered by ElevenLabs
+        </p>
+    </div>
+    """
+    
+    # Send SMS via Twilio
+    notify_sms = agent_config.get('notify_sms')
+    if notify_sms:
+        try:
+            twilio_sid = os.getenv("TWILIO_ACCOUNT_SID")
+            twilio_token = os.getenv("TWILIO_AUTH_TOKEN")
+            twilio_from = os.getenv("TWILIO_SEND_SMS_NUMBER")
+            
+            if twilio_sid and twilio_token and twilio_from:
+                client = TwilioClient(twilio_sid, twilio_token)
+                message = client.messages.create(
+                    body=sms_body,
+                    from_=twilio_from,
+                    to=notify_sms
+                )
+                result['sms_sent'] = True
+                result['sms_sid'] = message.sid
+                print(f"[Demo Agent] ✅ SMS sent to {notify_sms} (SID: {message.sid})")
+            else:
+                print(f"[Demo Agent] ⚠️  Twilio credentials not configured")
+                result['errors'].append("Twilio credentials not configured")
+        except Exception as e:
+            print(f"[Demo Agent] ❌ SMS failed: {e}")
+            result['errors'].append(f"SMS failed: {str(e)}")
+    
+    # Send Email via SendGrid
+    notify_email = agent_config.get('notify_email')
+    if notify_email:
+        try:
+            sendgrid_key = os.getenv("SENDGRID_API_KEY")
+            
+            if sendgrid_key:
+                sg = SendGridAPIClient(sendgrid_key)
+                message = Mail(
+                    from_email="no-reply@speako.ai",
+                    to_emails=notify_email,
+                    subject=email_subject,
+                    html_content=email_html
+                )
+                response = sg.send(message)
+                result['email_sent'] = True
+                result['email_status_code'] = response.status_code
+                print(f"[Demo Agent] ✅ Email sent to {notify_email} (Status: {response.status_code})")
+            else:
+                print(f"[Demo Agent] ⚠️  SendGrid API key not configured")
+                result['errors'].append("SendGrid API key not configured")
+        except Exception as e:
+            print(f"[Demo Agent] ❌ Email failed: {e}")
+            result['errors'].append(f"Email failed: {str(e)}")
+    
+    # Set overall success based on at least one notification sent
+    result['success'] = result['sms_sent'] or result['email_sent'] or not (notify_sms or notify_email)
+    
+    return result
+
 
 def get_db_connection():
     """Get PostgreSQL database connection for webhook processing."""
@@ -1895,6 +2121,83 @@ def elevenlabs_post_conversation_webhook():
             'error': 'Missing required fields',
             'message': 'agent_id and conversation_id are required'
         }), 400
+    
+    # ==========================================================================
+    # DEMO AGENT HANDLING - Skip DB, send notification only
+    # ==========================================================================
+    if agent_id in DEMO_AGENT_NOTIFY_CONFIG:
+        agent_config = DEMO_AGENT_NOTIFY_CONFIG[agent_id]
+        
+        # Log entry into demo agent branch
+        print("\n" + "=" * 80)
+        print("🎯 DEMO AGENT BRANCH ENTERED")
+        print("=" * 80)
+        print(f"Timestamp: {datetime.utcnow().isoformat()}Z")
+        print(f"Agent ID: {agent_id}")
+        print(f"Agent Name: {agent_config.get('name')}")
+        print(f"Conversation ID: {conversation_id}")
+        print(f"Notify SMS: {agent_config.get('notify_sms')}")
+        print(f"Notify Email: {agent_config.get('notify_email')}")
+        print(f"Webhook Type: {webhook_type}")
+        print(f"Event Timestamp: {event_timestamp}")
+        print("-" * 80)
+        print("⏭️  Skipping database recording - notification only mode")
+        print("-" * 80)
+        
+        try:
+            result = send_demo_agent_notification(conversation_id, agent_config)
+            
+            # Log success summary
+            print("\n" + "-" * 80)
+            print("📊 DEMO AGENT NOTIFICATION SUMMARY")
+            print("-" * 80)
+            print(f"Overall Success: {result.get('success')}")
+            print(f"SMS Sent: {result.get('sms_sent')} → {agent_config.get('notify_sms')}")
+            if result.get('sms_sid'):
+                print(f"   SMS SID: {result.get('sms_sid')}")
+            print(f"Email Sent: {result.get('email_sent')} → {agent_config.get('notify_email')}")
+            if result.get('email_status_code'):
+                print(f"   Email Status Code: {result.get('email_status_code')}")
+            if result.get('errors'):
+                print(f"Errors: {result.get('errors')}")
+            print("=" * 80)
+            print(f"✅ Demo agent webhook completed successfully")
+            print("=" * 80 + "\n")
+            
+            return jsonify({
+                'success': True,
+                'message': 'Demo agent notification sent',
+                'demo_agent': True,
+                'agent_name': agent_config.get('name'),
+                'conversation_id': conversation_id,
+                'sms_sent': result.get('sms_sent', False),
+                'email_sent': result.get('email_sent', False),
+                'errors': result.get('errors', [])
+            }), 200
+            
+        except Exception as e:
+            # Log failure
+            print("\n" + "-" * 80)
+            print("❌ DEMO AGENT NOTIFICATION FAILED")
+            print("-" * 80)
+            print(f"Error: {e}")
+            print(f"Error Type: {type(e).__name__}")
+            import traceback
+            traceback.print_exc()
+            print("=" * 80 + "\n")
+            
+            # Return 200 to prevent retries
+            return jsonify({
+                'success': False,
+                'message': 'Demo agent notification failed',
+                'demo_agent': True,
+                'conversation_id': conversation_id,
+                'error': str(e)
+            }), 200
+    
+    # ==========================================================================
+    # NORMAL PROCESSING - Database recording, billing, etc.
+    # ==========================================================================
     
     # Process webhook
     try:
