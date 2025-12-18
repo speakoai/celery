@@ -1174,6 +1174,134 @@ def api_send_sms():
         }), 500
 
 
+@app.route('/api/agent/sms', methods=['POST'])
+@require_api_key
+def api_agent_send_sms():
+    """
+    Send SMS with URL to caller's phone number from AI agent conversation.
+    
+    Expected JSON payload:
+    {
+        "kind": "map_location" | "ecommerce_site" | "company_website" | "product_url",
+        "message": "Your message text here",
+        "url": "https://example.com/...",
+        "callerPhoneNumber": "+61412345678",
+        "conversationId": "conv_xxx",  // For logging only
+        "agentId": "agent_xxx"         // For logging only
+    }
+    
+    Authentication: X-API-Key header required (API_SECRET_KEY env var)
+    """
+    from twilio.rest import Client as TwilioClient
+    
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'JSON payload required'}), 400
+        
+        # Validate required fields
+        required_fields = ['kind', 'message', 'url', 'callerPhoneNumber']
+        missing_fields = [field for field in required_fields if field not in data]
+        if missing_fields:
+            return jsonify({
+                'error': 'Missing required fields',
+                'missing_fields': missing_fields
+            }), 400
+        
+        # Extract parameters
+        kind = data['kind']
+        message = data['message']
+        url = data['url']
+        caller_phone = data['callerPhoneNumber']
+        conversation_id = data.get('conversationId', '')
+        agent_id = data.get('agentId', '')
+        
+        # Validate kind enum
+        valid_kinds = ['map_location', 'ecommerce_site', 'company_website', 'product_url']
+        if kind not in valid_kinds:
+            return jsonify({
+                'error': 'Invalid kind',
+                'message': f'kind must be one of: {", ".join(valid_kinds)}',
+                'provided': kind
+            }), 400
+        
+        # Validate URL format (basic check)
+        if not url.startswith(('http://', 'https://')):
+            return jsonify({
+                'error': 'Invalid URL',
+                'message': 'URL must start with http:// or https://',
+                'provided': url
+            }), 400
+        
+        # Validate phone number (basic E.164 format check)
+        if not caller_phone.startswith('+'):
+            return jsonify({
+                'error': 'Invalid phone number',
+                'message': 'Phone number must be in E.164 format (e.g., +61412345678)',
+                'provided': caller_phone
+            }), 400
+        
+        # Build SMS body: message + newline + URL
+        sms_body = f"{message}\r\n{url}"
+        
+        # Log the request
+        print(f"\n[Agent SMS] Sending SMS for conversation: {conversation_id}")
+        print(f"[Agent SMS] Agent: {agent_id}")
+        print(f"[Agent SMS] Kind: {kind}")
+        print(f"[Agent SMS] To: {caller_phone}")
+        print(f"[Agent SMS] Message length: {len(message)} chars")
+        print(f"[Agent SMS] URL: {url}")
+        
+        # Get Twilio credentials
+        twilio_sid = os.getenv("TWILIO_ACCOUNT_SID")
+        twilio_token = os.getenv("TWILIO_AUTH_TOKEN")
+        twilio_from = os.getenv("TWILIO_SEND_SMS_NUMBER")
+        
+        if not all([twilio_sid, twilio_token, twilio_from]):
+            print(f"[Agent SMS] ❌ Twilio credentials not configured")
+            return jsonify({
+                'error': 'SMS service not configured',
+                'message': 'Twilio credentials are missing'
+            }), 500
+        
+        # Send SMS via Twilio
+        try:
+            client = TwilioClient(twilio_sid, twilio_token)
+            twilio_message = client.messages.create(
+                body=sms_body,
+                from_=twilio_from,
+                to=caller_phone
+            )
+            
+            print(f"[Agent SMS] ✅ SMS sent successfully (SID: {twilio_message.sid})")
+            
+            return jsonify({
+                'success': True,
+                'message': 'SMS sent successfully',
+                'data': {
+                    'sms_sid': twilio_message.sid,
+                    'to': caller_phone,
+                    'kind': kind,
+                    'conversation_id': conversation_id,
+                    'agent_id': agent_id
+                }
+            }), 200
+            
+        except Exception as sms_error:
+            print(f"[Agent SMS] ❌ Failed to send SMS: {sms_error}")
+            return jsonify({
+                'error': 'SMS sending failed',
+                'message': str(sms_error),
+                'conversation_id': conversation_id
+            }), 500
+        
+    except Exception as e:
+        return jsonify({
+            'error': 'Internal server error',
+            'message': str(e)
+        }), 500
+
+
 @app.route('/api/health', methods=['GET'])
 def api_health_check():
     """
