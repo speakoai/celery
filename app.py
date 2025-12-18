@@ -4,6 +4,7 @@ import secrets
 import hmac
 import base64
 import psycopg2
+import redis
 from functools import wraps
 from flask import Flask, flash, render_template, redirect, request, jsonify
 from tasks.demo_task import add
@@ -83,6 +84,11 @@ r2_client = boto3.client(
 # Database configuration for webhooks
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+# Redis configuration for agent context caching
+REDIS_URL = os.getenv("REDIS_URL")
+AGENT_CONTEXT_REDIS_PREFIX = "agent_context"
+AGENT_CONTEXT_TTL = 86400  # 24 hours
+
 # Webhook configuration
 WEBHOOK_MAX_AUDIO_SIZE = 100 * 1024 * 1024  # 100MB in bytes
 
@@ -146,6 +152,24 @@ def send_demo_agent_notification(conversation_id: str, agent_config: dict) -> di
     
     print(f"\n[Demo Agent] Processing notification for {agent_config.get('name')}")
     print(f"[Demo Agent] Conversation ID: {conversation_id}")
+    
+    # Fetch caller context from Redis (if available)
+    caller_name = "not available"
+    caller_company = "not available"
+    try:
+        if REDIS_URL:
+            redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+            context_key = f"{AGENT_CONTEXT_REDIS_PREFIX}:{conversation_id}"
+            context_data = redis_client.get(context_key)
+            if context_data:
+                context_json = json.loads(context_data)
+                caller_name = context_json.get('caller_name') or 'not available'
+                caller_company = context_json.get('caller_company') or 'not available'
+                print(f"[Demo Agent] ✅ Retrieved caller context from Redis: name={caller_name}, company={caller_company}")
+            else:
+                print(f"[Demo Agent] ⚠️  No caller context found in Redis for {conversation_id}")
+    except Exception as redis_err:
+        print(f"[Demo Agent] ⚠️  Failed to fetch caller context from Redis: {redis_err}")
     
     # Fetch conversation details from ElevenLabs API
     details = None
@@ -251,6 +275,8 @@ def send_demo_agent_notification(conversation_id: str, agent_config: dict) -> di
     sms_body = (
         f"🤖 Speako AI - New Call\n\n"
         f"From: {caller_phone}\n"
+        f"Name: {caller_name}\n"
+        f"Company: {caller_company}\n"
         f"Duration: {duration_str}\n"
         f"Status: {status} {status_emoji}\n"
         f"Call Type: {call_type}\n"
@@ -285,6 +311,10 @@ def send_demo_agent_notification(conversation_id: str, agent_config: dict) -> di
         <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
             <tr><td style="padding: 8px 0; border-bottom: 1px solid #eee; color: #888;">Caller</td>
                 <td style="padding: 8px 0; border-bottom: 1px solid #eee;"><strong>{caller_phone}</strong></td></tr>
+            <tr><td style="padding: 8px 0; border-bottom: 1px solid #eee; color: #888;">Name</td>
+                <td style="padding: 8px 0; border-bottom: 1px solid #eee;">{caller_name}</td></tr>
+            <tr><td style="padding: 8px 0; border-bottom: 1px solid #eee; color: #888;">Company</td>
+                <td style="padding: 8px 0; border-bottom: 1px solid #eee;">{caller_company}</td></tr>
             <tr><td style="padding: 8px 0; border-bottom: 1px solid #eee; color: #888;">Duration</td>
                 <td style="padding: 8px 0; border-bottom: 1px solid #eee;">{duration_str}</td></tr>
             <tr><td style="padding: 8px 0; border-bottom: 1px solid #eee; color: #888;">Date/Time</td>
@@ -1297,6 +1327,96 @@ def api_agent_send_sms():
                 'error': 'SMS sending failed',
                 'message': str(sms_error),
                 'conversation_id': conversation_id
+            }), 500
+        
+    except Exception as e:
+        return jsonify({
+            'error': 'Internal server error',
+            'message': str(e)
+        }), 500
+
+
+@app.route('/api/agent/user/context', methods=['POST'])
+@require_api_key
+def api_agent_user_context():
+    """
+    Store caller context in Redis for later retrieval by webhook handler.
+    This should be called during an AI agent conversation to capture caller info.
+    
+    Expected JSON payload:
+    {
+        "caller_name": "John Smith",
+        "caller_company": "Acme Corp",
+        "caller_phone_number": "+61412345678",
+        "conversation_id": "conv_xxx"
+    }
+    
+    Authentication: X-API-Key header required (API_SECRET_KEY env var)
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'JSON payload required'}), 400
+        
+        # Validate required field
+        if not data.get('conversation_id'):
+            return jsonify({
+                'error': 'Missing required field',
+                'missing_fields': ['conversation_id']
+            }), 400
+        
+        # Extract parameters
+        conversation_id = data['conversation_id']
+        caller_name = data.get('caller_name', '')
+        caller_company = data.get('caller_company', '')
+        caller_phone_number = data.get('caller_phone_number', '')
+        
+        # Log the request
+        print(f"\n[Agent Context] Storing context for conversation: {conversation_id}")
+        print(f"[Agent Context] Name: {caller_name}")
+        print(f"[Agent Context] Company: {caller_company}")
+        print(f"[Agent Context] Phone: {caller_phone_number}")
+        
+        # Check Redis configuration
+        if not REDIS_URL:
+            print(f"[Agent Context] ❌ Redis URL not configured")
+            return jsonify({
+                'error': 'Cache service not configured',
+                'message': 'REDIS_URL is not set'
+            }), 500
+        
+        # Store in Redis
+        try:
+            redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+            context_key = f"{AGENT_CONTEXT_REDIS_PREFIX}:{conversation_id}"
+            context_data = json.dumps({
+                'caller_name': caller_name,
+                'caller_company': caller_company,
+                'caller_phone_number': caller_phone_number,
+                'stored_at': datetime.utcnow().isoformat() + 'Z'
+            })
+            
+            redis_client.setex(context_key, AGENT_CONTEXT_TTL, context_data)
+            
+            print(f"[Agent Context] ✅ Context stored in Redis (TTL: {AGENT_CONTEXT_TTL}s)")
+            
+            return jsonify({
+                'success': True,
+                'message': 'Caller context stored successfully',
+                'data': {
+                    'conversation_id': conversation_id,
+                    'caller_name': caller_name,
+                    'caller_company': caller_company,
+                    'caller_phone_number': caller_phone_number,
+                    'ttl_seconds': AGENT_CONTEXT_TTL
+                }
+            }), 200
+            
+        except Exception as redis_error:
+            print(f"[Agent Context] ❌ Failed to store in Redis: {redis_error}")
+            return jsonify({
+                'error': 'Cache storage failed',
+                'message': str(redis_error)
             }), 500
         
     except Exception as e:
