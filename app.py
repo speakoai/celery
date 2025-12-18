@@ -244,12 +244,16 @@ def send_demo_agent_notification(conversation_id: str, agent_config: dict) -> di
         # Termination reason
         termination_reason = metadata.get('termination_reason', 'Unknown')
     
+    # Call type for SMS (use summary_title or default)
+    call_type = summary_title if summary_title and summary_title != 'Call completed' else 'Cannot analysis call type'
+    
     # Build SMS message
     sms_body = (
         f"🤖 Speako AI - New Call\n\n"
         f"From: {caller_phone}\n"
         f"Duration: {duration_str}\n"
         f"Status: {status} {status_emoji}\n"
+        f"Call Type: {call_type}\n"
     )
     if audio_url:
         sms_body += f"\n🎧 Listen: {audio_url}\n"
