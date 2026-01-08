@@ -2,15 +2,14 @@
 Publish ElevenLabs AI Agent Task
 
 This task handles the publishing of ElevenLabs AI agents.
-Currently a placeholder implementation with full task tracking for workflow testing.
+Supports multiple job types: knowledges, greetings, voice-dict, personality, tools, full-agent.
 """
 
 import os
-import time
 from celery.utils.log import get_task_logger
 from tasks.celery_app import app
 from .utils.task_db import mark_task_running, mark_task_succeeded, mark_task_failed, upsert_tenant_integration_param
-from .utils.publish_helpers import publish_knowledge, publish_greetings, publish_voice_dict, publish_personality, publish_tools
+from .utils.publish_helpers import publish_knowledge, publish_greetings, publish_voice_dict, publish_personality, publish_tools, publish_full_agent
 from .utils.publish_db import get_publish_job
 
 logger = get_task_logger(__name__)
@@ -187,22 +186,30 @@ def publish_elevenlabs_agent(
             logger.info("=" * 80)
             
         elif job_type == 'full-agent':
-            # PLACEHOLDER for full-agent job type
-            logger.info(f"[publish_elevenlabs_agent] Job type '{job_type}' - executing PLACEHOLDER workflow")
-            logger.info(f"[publish_elevenlabs_agent] ⏳ Simulating work for 10 seconds...")
+            # FULL AGENT WORKFLOW - Optimized publishing of greetings + voice-dict + personality + tools
+            # Uses 2 DB queries + 1 ElevenLabs PATCH (instead of ~8 DB queries + ~3 PATCHes)
+            # NOTE: Knowledge publishing is skipped - use job_type='knowledges' separately
+            logger.info(
+                f"[publish_elevenlabs_agent] Starting FULL AGENT publishing workflow - "
+                f"tenant_id={tenant_id}, location_id={location_id}, publish_job_id={publish_job_id}"
+            )
             
-            time.sleep(10)
+            publish_result = publish_full_agent(
+                tenant_id=tenant_id,
+                location_id=location_id,
+                publish_job_id=publish_job_id
+            )
             
-            logger.info(f"[publish_elevenlabs_agent] ✅ Placeholder workflow completed for job_type: '{job_type}'")
-            
-            # Build a generic success result
-            publish_result = {
-                'job_type': job_type,
-                'status': 'completed',
-                'message': f'Placeholder workflow completed for {job_type}',
-                'simulated': True,
-                'duration_seconds': 10
-            }
+            # Log the results prominently
+            logger.info("=" * 80)
+            logger.info(f"ELEVENLABS AGENT ID: {publish_result.get('elevenlabs_agent_id')}")
+            logger.info(f"GREETINGS PROMPTS CREATED: {publish_result.get('greetings', {}).get('prompts_created')}")
+            logger.info(f"PERSONALITY TEMPERATURE: {publish_result.get('personality', {}).get('temperature')}")
+            logger.info(f"TOOLS COUNT: {len(publish_result.get('tools', {}).get('unique_tool_ids', []))}")
+            logger.info(f"VOICE-DICT PARAMS: {publish_result.get('voice_dict', {}).get('params_count')}")
+            logger.info(f"COMBINED PATCH STATUS: {publish_result.get('combined_patch', {}).get('http_status_code')}")
+            logger.info(f"SYSTEM PROMPT ID: {publish_result.get('system_prompt', {}).get('prompt_id')}")
+            logger.info("=" * 80)
             
         else:
             raise ValueError(f"Unsupported job_type: '{job_type}'. Valid types: knowledges, greetings, voice-dict, personality, tools, full-agent")
@@ -269,11 +276,15 @@ def publish_elevenlabs_agent(
                 'params_updated': publish_result.get('params_updated'),
                 'processed_param_ids': publish_result.get('processed_param_ids')
             })
-        else:
-            # Placeholder job types (full-agent)
+        elif job_type == 'full-agent':
             result.update({
-                'simulated': True,
-                'placeholder_result': publish_result
+                'elevenlabs_agent_id': publish_result.get('elevenlabs_agent_id'),
+                'greetings': publish_result.get('greetings'),
+                'personality': publish_result.get('personality'),
+                'voice_dict': publish_result.get('voice_dict'),
+                'tools': publish_result.get('tools'),
+                'combined_patch': publish_result.get('combined_patch'),
+                'system_prompt': publish_result.get('system_prompt')
             })
         
         # Include speako_task_id in response if provided

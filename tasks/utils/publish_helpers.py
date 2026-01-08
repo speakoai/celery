@@ -1837,3 +1837,601 @@ def publish_tools(tenant_id: str, location_id: str, publish_job_id: str) -> Dict
     )
     
     return result
+
+
+def publish_full_agent(tenant_id: str, location_id: str, publish_job_id: str) -> Dict[str, Any]:
+    """
+    Publish full agent configuration (greetings + voice-dict + personality + tools) in one optimized workflow.
+    
+    This function consolidates multiple publish operations into a single optimized flow:
+    - 2 DB queries (instead of ~8): location + all params in one aggregated query
+    - 1 ElevenLabs API call (instead of ~3): combined PATCH for voice-dict + personality + tools
+    - Skips knowledge publishing (handled separately via job_type='knowledges')
+    
+    Workflow:
+    1. Fetch all params in aggregated query (greetings, voice-dict, personality, tools, dictionary)
+    2. Process greetings → insert prompts to tenant_ai_prompts (DB only)
+    3. Process personality → insert prompts + extract temperature
+    4. Process tools → extract tool_ids + get tool_ids from ai_tool_types
+    5. Process voice-dict → build conversation_config + handle dictionary
+    6. Send single combined PATCH to ElevenLabs
+    7. Mark all params as published
+    8. Compose and publish system prompt
+    
+    Args:
+        tenant_id: Tenant identifier
+        location_id: Location identifier
+        publish_job_id: Publish job identifier
+    
+    Returns:
+        Dict containing results from all sub-workflows
+    """
+    logger.info("=" * 80)
+    logger.info(f"[PublishFullAgent] Starting FULL AGENT workflow")
+    logger.info(f"[PublishFullAgent] tenant_id={tenant_id}, location_id={location_id}, publish_job_id={publish_job_id}")
+    logger.info("=" * 80)
+    
+    # Import DB functions
+    from .publish_db import (
+        collect_full_agent_params,
+        get_location_operation_hours,
+        get_business_name,
+        get_location_name,
+        get_privacy_url,
+        mark_greeting_params_published,
+        mark_voice_dict_params_published,
+        mark_personality_params_published,
+        mark_tool_params_published,
+        upsert_ai_prompt,
+        get_ai_prompt_fragments,
+        update_dictionary_param_text,
+        compose_and_publish_system_prompt,
+        get_location_type,
+        get_tool_prompt_template,
+        get_tool_service_prompts
+    )
+    from .elevenlabs_client import (
+        patch_elevenlabs_agent,
+        create_pronunciation_dictionary,
+        update_pronunciation_dictionary
+    )
+    
+    result = {
+        'success': False,
+        'greetings': {},
+        'personality': {},
+        'voice_dict': {},
+        'tools': {},
+        'combined_patch': {},
+        'system_prompt': {}
+    }
+    
+    # Step 1: Mark publish job as in_progress
+    update_publish_job_status(
+        tenant_id=tenant_id,
+        publish_job_id=publish_job_id,
+        status='in_progress',
+        started_at=datetime.utcnow()
+    )
+    
+    # Step 2: Fetch ALL params in ONE aggregated query
+    logger.info("[PublishFullAgent] Step 2: Fetching all params (aggregated query)...")
+    
+    try:
+        all_params = collect_full_agent_params(tenant_id, location_id)
+    except ValueError as e:
+        logger.error(f"[PublishFullAgent] Failed to collect params: {str(e)}")
+        update_publish_job_status(
+            tenant_id=tenant_id,
+            publish_job_id=publish_job_id,
+            status='failed',
+            finished_at=datetime.utcnow(),
+            error_message=str(e)
+        )
+        raise
+    
+    location_info = all_params['location']
+    elevenlabs_agent_id = location_info['elevenlabs_agent_id']
+    location_name = location_info['name']
+    timezone = location_info['timezone']
+    
+    logger.info(f"[PublishFullAgent] Location: agent_id={elevenlabs_agent_id}, name={location_name}, tz={timezone}")
+    
+    # ===== GREETINGS PROCESSING =====
+    logger.info("=" * 80)
+    logger.info("[PublishFullAgent] Step 3: Processing GREETINGS...")
+    logger.info("=" * 80)
+    
+    greetings_params = all_params['greetings_params']
+    greetings_param_ids = []
+    prompts_created = 0
+    
+    if greetings_params:
+        logger.info(f"[PublishFullAgent] Found {len(greetings_params)} greeting params")
+        
+        # Build variable dictionary
+        variables = {}
+        schedule_json = get_location_operation_hours(tenant_id, location_id)
+        variables['operation_hours'] = get_human_friendly_operation_hours(schedule_json)
+        variables['business_name'] = get_business_name(tenant_id)
+        variables['location_name'] = get_location_name(tenant_id, location_id)
+        variables['privacy_url'] = get_privacy_url(tenant_id)
+        
+        # Build greeting map
+        greeting_map = {entry['param_code']: entry['value_text'] for entry in greetings_params if entry.get('param_code')}
+        
+        def resolve_variables(text: str, available_vars: dict) -> str:
+            result = text
+            for var_name, var_value in available_vars.items():
+                placeholder = f"{{{{{var_name}}}}}"
+                if placeholder in result:
+                    result = result.replace(placeholder, var_value or '')
+            return result
+        
+        # Extract greeting-derived variables
+        if 'agent_name' in greeting_map:
+            variables['ai_agent_name'] = resolve_variables(greeting_map['agent_name'], variables)
+        if 'after_hours' in greeting_map:
+            variables['after_hours_message'] = resolve_variables(greeting_map['after_hours'], variables)
+        if 'recording_disclosure' in greeting_map:
+            variables['recording_disclosure'] = resolve_variables(greeting_map['recording_disclosure'], variables)
+        
+        # Resolve variables and insert prompts
+        for entry in greetings_params:
+            original_text = entry.get('value_text', '')
+            param_id = entry['param_id']
+            param_code = entry.get('param_code', '')
+            greetings_param_ids.append(param_id)
+            
+            if not original_text:
+                continue
+            
+            resolved_text = resolve_variables(original_text, variables)
+            
+            if param_code in ['initial_greeting', 'return_customer']:
+                if param_code == 'initial_greeting':
+                    base_type_code = 'first_message'
+                    base_name = 'Initial Greeting'
+                    after_type_code = 'first_message_after'
+                    after_name = 'Initial Greeting With After Hour Message'
+                else:
+                    base_type_code = 'first_message_customer'
+                    base_name = 'Return Customer Greeting'
+                    after_type_code = 'first_message_customer_after'
+                    after_name = 'Return Customer Greeting With After Hour Message'
+                
+                base_text = resolved_text.replace('{{after_hours_message}}', '').strip()
+                try:
+                    base_prompt_id = upsert_ai_prompt(
+                        tenant_id=tenant_id,
+                        location_id=location_id,
+                        type_code=base_type_code,
+                        title=base_name,
+                        name=base_name,
+                        body_template=base_text,
+                        metadata={'source_param_id': param_id, 'param_code': param_code, 'version': 'base'}
+                    )
+                    if base_prompt_id:
+                        prompts_created += 1
+                        logger.info(f"[PublishFullAgent] ✓ Created greeting prompt: {base_type_code}")
+                except Exception as e:
+                    logger.error(f"[PublishFullAgent] Error creating greeting prompt: {str(e)}")
+                
+                after_hours_text = resolved_text.replace('{{after_hours_message}}', variables.get('after_hours_message', '')).strip()
+                try:
+                    after_prompt_id = upsert_ai_prompt(
+                        tenant_id=tenant_id,
+                        location_id=location_id,
+                        type_code=after_type_code,
+                        title=after_name,
+                        name=after_name,
+                        body_template=after_hours_text,
+                        metadata={'source_param_id': param_id, 'param_code': param_code, 'version': 'after_hours'}
+                    )
+                    if after_prompt_id:
+                        prompts_created += 1
+                        logger.info(f"[PublishFullAgent] ✓ Created greeting prompt: {after_type_code}")
+                except Exception as e:
+                    logger.error(f"[PublishFullAgent] Error creating after-hours prompt: {str(e)}")
+        
+        # Mark greetings as published
+        if greetings_param_ids:
+            mark_greeting_params_published(tenant_id, location_id, greetings_param_ids)
+        
+        result['greetings'] = {
+            'params_count': len(greetings_params),
+            'prompts_created': prompts_created,
+            'param_ids': greetings_param_ids
+        }
+        logger.info(f"[PublishFullAgent] ✓ Greetings: {prompts_created} prompts created")
+    else:
+        logger.info("[PublishFullAgent] No greetings params found, skipping")
+        result['greetings'] = {'params_count': 0, 'prompts_created': 0, 'param_ids': []}
+    
+    # ===== PERSONALITY PROCESSING =====
+    logger.info("=" * 80)
+    logger.info("[PublishFullAgent] Step 4: Processing PERSONALITY...")
+    logger.info("=" * 80)
+    
+    personality_params = all_params['personality_params']
+    personality_param_ids = []
+    temperature_value = None
+    personality_prompt_id = None
+    
+    if personality_params:
+        logger.info(f"[PublishFullAgent] Found {len(personality_params)} personality params")
+        
+        param_map = {}
+        temperature_param = None
+        
+        for param in personality_params:
+            param_code = param.get('param_code')
+            personality_param_ids.append(param['param_id'])
+            
+            if param_code == 'temperature':
+                temperature_param = param
+                if param.get('value_numeric') is not None:
+                    temperature_value = float(param['value_numeric'])
+                    logger.info(f"[PublishFullAgent] ✓ Temperature: {temperature_value}")
+            elif param_code == 'traits':
+                param_map['traits'] = param.get('value_text', '')
+            elif param_code == 'tone_of_voice':
+                param_map['tone_of_voice'] = param.get('value_text', '')
+            elif param_code == 'response_style':
+                param_map['response_style'] = param.get('value_text', '')
+            elif param_code == 'custom_instruction':
+                param_map['custom_instruction'] = param.get('value_text', '')
+        
+        # Get personality template fragments
+        fragments = get_ai_prompt_fragments([
+            'personality',
+            'response_style_concise',
+            'response_style_balanced',
+            'response_style_detailed',
+            'custom_instruction'
+        ])
+        
+        personality_fragment = fragments.get('personality', {})
+        personality_template = personality_fragment.get('template_text', '')
+        personality_sort_order = personality_fragment.get('sort_order', 0)
+        
+        if personality_template:
+            # Replace variables
+            personality_template = personality_template.replace('{{traits}}', param_map.get('traits', ''))
+            personality_template = personality_template.replace('{{tone_of_voice}}', param_map.get('tone_of_voice', ''))
+            
+            response_style_value = param_map.get('response_style', '').strip()
+            if response_style_value == 'Concise':
+                response_style_text = fragments.get('response_style_concise', {}).get('template_text', '')
+            elif response_style_value == 'Balanced':
+                response_style_text = fragments.get('response_style_balanced', {}).get('template_text', '')
+            elif response_style_value == 'Detailed':
+                response_style_text = fragments.get('response_style_detailed', {}).get('template_text', '')
+            else:
+                response_style_text = ''
+            
+            personality_template = personality_template.replace('{{response_style}}', response_style_text)
+            
+            personality_prompt_id = upsert_ai_prompt(
+                tenant_id=tenant_id,
+                location_id=location_id,
+                name='Personality',
+                type_code='personality',
+                title='Agent Personality Configuration',
+                body_template=personality_template,
+                sort_order=personality_sort_order
+            )
+            logger.info(f"[PublishFullAgent] ✓ Personality prompt created: {personality_prompt_id}")
+        
+        # Process custom_instruction
+        custom_instruction_value = param_map.get('custom_instruction', '').strip()
+        if custom_instruction_value:
+            custom_instruction_fragment = fragments.get('custom_instruction', {})
+            custom_instruction_template = custom_instruction_fragment.get('template_text', '')
+            custom_instruction_sort_order = custom_instruction_fragment.get('sort_order', 0)
+            
+            if custom_instruction_template:
+                custom_instruction_template = custom_instruction_template.replace('{{custom_instruction}}', custom_instruction_value)
+                
+                custom_prompt_id = upsert_ai_prompt(
+                    tenant_id=tenant_id,
+                    location_id=location_id,
+                    name='Custom Instruction',
+                    type_code='custom_instruction',
+                    title='Custom Instruction',
+                    body_template=custom_instruction_template,
+                    sort_order=custom_instruction_sort_order
+                )
+                logger.info(f"[PublishFullAgent] ✓ Custom instruction prompt created: {custom_prompt_id}")
+        
+        # Mark personality params as published
+        if personality_param_ids:
+            mark_personality_params_published(tenant_id, location_id, personality_param_ids)
+        
+        result['personality'] = {
+            'params_count': len(personality_params),
+            'prompt_id': personality_prompt_id,
+            'temperature': temperature_value,
+            'param_ids': personality_param_ids
+        }
+    else:
+        logger.info("[PublishFullAgent] No personality params found, skipping")
+        result['personality'] = {'params_count': 0, 'prompt_id': None, 'temperature': None, 'param_ids': []}
+    
+    # ===== TOOLS PROCESSING =====
+    logger.info("=" * 80)
+    logger.info("[PublishFullAgent] Step 5: Processing TOOLS...")
+    logger.info("=" * 80)
+    
+    tool_params = all_params['tool_params']
+    tool_param_ids = []
+    unique_tool_ids = []
+    tool_prompt_id = None
+    
+    if tool_params:
+        logger.info(f"[PublishFullAgent] Found {len(tool_params)} tool params")
+        
+        # Need to get tool_ids from ai_tool_types separately
+        from .publish_db import collect_tool_params
+        tool_params_with_tool_ids = collect_tool_params(tenant_id, location_id)
+        
+        all_tool_ids = []
+        enabled_param_ids = []
+        
+        for param in tool_params_with_tool_ids:
+            value_json = param.get('value_json', {})
+            is_enabled = value_json.get('enabled', False) if isinstance(value_json, dict) else False
+            
+            if is_enabled:
+                enabled_param_ids.append(param['param_id'])
+                tool_ids = param.get('tool_ids', [])
+                if tool_ids:
+                    all_tool_ids.extend(tool_ids)
+        
+        unique_tool_ids = list(set(all_tool_ids))
+        tool_param_ids = enabled_param_ids
+        
+        logger.info(f"[PublishFullAgent] ✓ Tools: {len(unique_tool_ids)} unique tool_ids from {len(enabled_param_ids)} enabled params")
+        
+        # Create tools prompt if we have tool_ids
+        if unique_tool_ids:
+            try:
+                location_type = get_location_type(tenant_id, location_id)
+                tool_template = get_tool_prompt_template(location_type)
+                
+                if tool_template:
+                    service_prompts = get_tool_service_prompts(unique_tool_ids)
+                    services_text = "\n".join(f"- {prompt}" for prompt in service_prompts) if service_prompts else "- General assistance"
+                    
+                    tool_prompt_text = tool_template.replace('{{services}}', services_text)
+                    
+                    tool_prompt_id = upsert_ai_prompt(
+                        tenant_id=tenant_id,
+                        location_id=location_id,
+                        name='Tools',
+                        type_code='tools',
+                        title='Agent Tools Configuration',
+                        body_template=tool_prompt_text,
+                        sort_order=50
+                    )
+                    logger.info(f"[PublishFullAgent] ✓ Tools prompt created: {tool_prompt_id}")
+            except Exception as e:
+                logger.warning(f"[PublishFullAgent] Could not create tools prompt: {str(e)}")
+        
+        # Mark tool params as published
+        if tool_param_ids:
+            mark_tool_params_published(tenant_id, location_id, tool_param_ids)
+        
+        result['tools'] = {
+            'params_count': len(tool_params),
+            'enabled_count': len(enabled_param_ids),
+            'unique_tool_ids': unique_tool_ids,
+            'prompt_id': tool_prompt_id,
+            'param_ids': tool_param_ids
+        }
+    else:
+        logger.info("[PublishFullAgent] No tool params found, sending empty tool_ids")
+        result['tools'] = {'params_count': 0, 'enabled_count': 0, 'unique_tool_ids': [], 'prompt_id': None, 'param_ids': []}
+    
+    # ===== VOICE DICT PROCESSING + BUILD COMBINED PAYLOAD =====
+    logger.info("=" * 80)
+    logger.info("[PublishFullAgent] Step 6: Processing VOICE-DICT + Building combined payload...")
+    logger.info("=" * 80)
+    
+    voice_dict_params = all_params['voice_dict_params']
+    voice_dict_param_ids = []
+    dictionary_entry = all_params['dictionary_entry']
+    dictionary_locator = None
+    dict_created = False
+    dict_updated = False
+    dictionary_id = None
+    
+    # Build conversation_config (combined payload)
+    conversation_config = {
+        "agent": {
+            "prompt": {}
+        },
+        "tts": {},
+        "turn": {},
+        "conversation": {}
+    }
+    
+    # Add temperature from personality
+    if temperature_value is not None:
+        conversation_config["agent"]["prompt"]["temperature"] = temperature_value
+        logger.info(f"[PublishFullAgent] ✓ Added temperature to payload: {temperature_value}")
+    
+    # Add tool_ids from tools
+    conversation_config["agent"]["prompt"]["tool_ids"] = unique_tool_ids
+    logger.info(f"[PublishFullAgent] ✓ Added tool_ids to payload: {unique_tool_ids}")
+    
+    # Process voice dict params
+    if voice_dict_params:
+        logger.info(f"[PublishFullAgent] Processing {len(voice_dict_params)} voice dict params")
+        
+        for param in voice_dict_params:
+            service = param.get('service')
+            param_code = param.get('param_code')
+            value_text = param.get('value_text')
+            value_numeric = param.get('value_numeric')
+            voice_dict_param_ids.append(param['param_id'])
+            
+            try:
+                if service == 'agent' and param_code == 'voice_id':
+                    conversation_config['tts']['voice_id'] = value_text
+                elif service == 'tts' and param_code == 'speed':
+                    conversation_config['tts']['speed'] = float(value_numeric) if value_numeric is not None else None
+                elif service == 'turn' and param_code == 'turn_timeout':
+                    conversation_config['turn']['turn_timeout'] = int(value_numeric) if value_numeric is not None else None
+                elif service == 'conversation' and param_code == 'silence_end_call_timeout':
+                    conversation_config['turn']['silence_end_call_timeout'] = int(value_numeric) if value_numeric is not None else None
+                elif service == 'conversation' and param_code == 'max_duration_seconds':
+                    conversation_config['conversation']['max_duration_seconds'] = int(value_numeric) if value_numeric is not None else None
+            except (ValueError, TypeError) as e:
+                logger.error(f"[PublishFullAgent] Error processing {service}.{param_code}: {str(e)}")
+    
+    # Process dictionary
+    if dictionary_entry:
+        param_id = dictionary_entry['param_id']
+        value_text = dictionary_entry.get('value_text')
+        value_json = dictionary_entry.get('value_json')
+        voice_dict_param_ids.append(param_id)
+        
+        rules = value_json if isinstance(value_json, list) else []
+        
+        if rules:
+            timestamp = format_timestamp_for_location(timezone)
+            dict_name = f"{location_name} - {timestamp}"
+            
+            if not value_text or value_text.strip() == '':
+                # CREATE new dictionary
+                try:
+                    dictionary_id, version_id = create_pronunciation_dictionary(rules, dict_name)
+                    logger.info(f"[PublishFullAgent] ✓ Created dictionary: id={dictionary_id}")
+                    update_dictionary_param_text(param_id, dictionary_id)
+                    dict_created = True
+                    dictionary_locator = {
+                        "pronunciation_dictionary_id": dictionary_id,
+                        "version_id": version_id
+                    }
+                except Exception as e:
+                    logger.error(f"[PublishFullAgent] Failed to create dictionary: {str(e)}")
+            else:
+                # UPDATE existing dictionary
+                dictionary_id = value_text.strip()
+                try:
+                    returned_dict_id, latest_version_id = update_pronunciation_dictionary(dictionary_id, rules)
+                    logger.info(f"[PublishFullAgent] ✓ Updated dictionary: id={returned_dict_id}")
+                    if returned_dict_id != dictionary_id:
+                        update_dictionary_param_text(param_id, returned_dict_id)
+                        dictionary_id = returned_dict_id
+                    dict_updated = True
+                    dictionary_locator = {
+                        "pronunciation_dictionary_id": dictionary_id,
+                        "version_id": latest_version_id
+                    }
+                except Exception as e:
+                    logger.error(f"[PublishFullAgent] Failed to update dictionary: {str(e)}")
+    
+    # Add dictionary locator to payload if exists
+    if dictionary_locator:
+        conversation_config['tts']['pronunciation_dictionary_locators'] = [dictionary_locator]
+        logger.info(f"[PublishFullAgent] ✓ Added dictionary locator to payload")
+    
+    # Clean up empty sections
+    if not conversation_config['agent']['prompt']:
+        del conversation_config['agent']
+    if not conversation_config['tts']:
+        del conversation_config['tts']
+    if not conversation_config['turn']:
+        del conversation_config['turn']
+    if not conversation_config['conversation']:
+        del conversation_config['conversation']
+    
+    result['voice_dict'] = {
+        'params_count': len(voice_dict_params),
+        'dictionary_created': dict_created,
+        'dictionary_updated': dict_updated,
+        'dictionary_id': dictionary_id,
+        'param_ids': voice_dict_param_ids
+    }
+    
+    # ===== SINGLE COMBINED PATCH TO ELEVENLABS =====
+    logger.info("=" * 80)
+    logger.info("[PublishFullAgent] Step 7: Sending SINGLE combined PATCH to ElevenLabs...")
+    logger.info(f"[PublishFullAgent] Payload: {json.dumps(conversation_config, indent=2)}")
+    logger.info("=" * 80)
+    
+    try:
+        http_status_code, response_json = patch_elevenlabs_agent(
+            agent_id=elevenlabs_agent_id,
+            conversation_config=conversation_config
+        )
+        logger.info(f"[PublishFullAgent] ✅ PATCH successful: HTTP {http_status_code}")
+        
+        result['combined_patch'] = {
+            'success': True,
+            'http_status_code': http_status_code,
+            'elevenlabs_agent_id': elevenlabs_agent_id
+        }
+        
+    except Exception as e:
+        logger.error(f"[PublishFullAgent] ✗ PATCH failed: {str(e)}")
+        update_publish_job_status(
+            tenant_id=tenant_id,
+            publish_job_id=publish_job_id,
+            status='failed',
+            finished_at=datetime.utcnow(),
+            error_message=str(e)
+        )
+        raise RuntimeError(f"Failed to PATCH AI Voice Service: {str(e)}") from e
+    
+    # Mark voice dict params as published
+    if voice_dict_param_ids:
+        mark_voice_dict_params_published(tenant_id, location_id, voice_dict_param_ids)
+    
+    # ===== COMPOSE AND PUBLISH SYSTEM PROMPT =====
+    logger.info("=" * 80)
+    logger.info("[PublishFullAgent] Step 8: Composing and publishing SYSTEM PROMPT...")
+    logger.info("=" * 80)
+    
+    try:
+        system_prompt_result = compose_and_publish_system_prompt(
+            tenant_id=tenant_id,
+            location_id=location_id
+        )
+        
+        logger.info(f"[PublishFullAgent] ✓ System prompt published: {system_prompt_result['system_prompt_id']}")
+        
+        result['system_prompt'] = {
+            'success': True,
+            'prompt_id': system_prompt_result['system_prompt_id'],
+            'character_count': system_prompt_result['character_count'],
+            'prompt_count': system_prompt_result['prompt_count']
+        }
+    except Exception as e:
+        logger.error(f"[PublishFullAgent] Failed to publish system prompt: {str(e)}")
+        result['system_prompt'] = {'success': False, 'error': str(e)}
+    
+    # ===== UPDATE PUBLISH JOB STATUS =====
+    update_publish_job_status(
+        tenant_id=tenant_id,
+        publish_job_id=publish_job_id,
+        status='succeeded',
+        finished_at=datetime.utcnow(),
+        response_json=result
+    )
+    
+    result['success'] = True
+    result['elevenlabs_agent_id'] = elevenlabs_agent_id
+    
+    logger.info("=" * 80)
+    logger.info("[PublishFullAgent] ✅ FULL AGENT workflow completed successfully!")
+    logger.info(f"[PublishFullAgent] Greetings: {result['greetings']['prompts_created']} prompts")
+    logger.info(f"[PublishFullAgent] Personality: temperature={result['personality']['temperature']}")
+    logger.info(f"[PublishFullAgent] Tools: {len(result['tools']['unique_tool_ids'])} tool_ids")
+    logger.info(f"[PublishFullAgent] Voice-dict: {result['voice_dict']['params_count']} params")
+    logger.info(f"[PublishFullAgent] System prompt: {result['system_prompt'].get('prompt_id')}")
+    logger.info("=" * 80)
+    
+    return result

@@ -154,6 +154,154 @@ def update_publish_job_status(
             pass
 
 
+def collect_full_agent_params(tenant_id: str, location_id: str) -> Dict[str, Any]:
+    """
+    Collect ALL parameters needed for full-agent publishing in a single query.
+    
+    This aggregated query reduces DB calls from ~8 to 2 for full-agent workflow.
+    Fetches location info + all tenant_integration_params in one go.
+    
+    Args:
+        tenant_id: Tenant identifier
+        location_id: Location identifier
+    
+    Returns:
+        Dict containing:
+            - location: {elevenlabs_agent_id, name, timezone}
+            - greetings_params: List of greeting entries
+            - voice_dict_params: List of voice dict entries
+            - personality_params: List of personality entries
+            - tool_params: List of tool entries (without ai_tool_types join - done separately)
+            - dictionary_entry: Single dictionary entry or None
+    
+    Raises:
+        ValueError: If location not found or agent ID not configured
+    """
+    logger.info(f"[publish_db] Collecting full agent params: tenant_id={tenant_id}, location_id={location_id}")
+    
+    result = {
+        'location': None,
+        'greetings_params': [],
+        'voice_dict_params': [],
+        'personality_params': [],
+        'tool_params': [],
+        'dictionary_entry': None
+    }
+    
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # Query 1: Get location info
+                cur.execute(
+                    """
+                    SELECT elevenlabs_agent_id, name, timezone
+                    FROM locations 
+                    WHERE tenant_id = %s AND location_id = %s
+                    """,
+                    (tenant_id, location_id)
+                )
+                row = cur.fetchone()
+                
+                if not row:
+                    raise ValueError(
+                        f"Location not found: tenant_id={tenant_id}, location_id={location_id}"
+                    )
+                
+                agent_id, location_name, timezone = row['elevenlabs_agent_id'], row['name'], row['timezone']
+                
+                if not agent_id:
+                    raise ValueError(
+                        f"ElevenLabs agent ID not configured for location: "
+                        f"tenant_id={tenant_id}, location_id={location_id}"
+                    )
+                
+                result['location'] = {
+                    'elevenlabs_agent_id': agent_id,
+                    'name': location_name or f"Location {location_id}",
+                    'timezone': timezone or "UTC"
+                }
+                
+                logger.info(f"[publish_db] Found location: agent_id={agent_id}, name={location_name}")
+                
+                # Query 2: Get ALL tenant_integration_params in one query
+                cur.execute(
+                    """
+                    SELECT 
+                        param_id,
+                        provider,
+                        service,
+                        param_code,
+                        value_text,
+                        value_json,
+                        value_numeric,
+                        status
+                    FROM tenant_integration_params
+                    WHERE tenant_id = %s 
+                      AND location_id = %s
+                      AND status IN ('configured', 'published')
+                      AND (
+                        (provider = 'speako' AND service = 'greetings') OR
+                        (service IN ('agent', 'turn', 'conversation', 'tts')) OR
+                        (service = 'agents' AND provider = 'elevenlabs') OR
+                        (service = 'tool' AND provider = 'speako') OR
+                        (service = 'dictionary')
+                      )
+                    ORDER BY created_at ASC
+                    """,
+                    (tenant_id, location_id)
+                )
+                rows = cur.fetchall()
+                
+                logger.info(f"[publish_db] Found {len(rows)} total params to partition")
+                
+                # Partition the results
+                for row in rows:
+                    row_dict = dict(row)
+                    provider = row_dict.get('provider')
+                    service = row_dict.get('service')
+                    param_code = row_dict.get('param_code')
+                    status = row_dict.get('status')
+                    
+                    # Greetings: provider='speako', service='greetings', status='configured'
+                    if provider == 'speako' and service == 'greetings' and status == 'configured':
+                        result['greetings_params'].append(row_dict)
+                    
+                    # Voice dict: service IN ('agent', 'turn', 'conversation', 'tts'), status='configured'
+                    elif service in ('agent', 'turn', 'conversation', 'tts') and status == 'configured':
+                        result['voice_dict_params'].append(row_dict)
+                    
+                    # Personality: service='agents', provider='elevenlabs', specific param_codes
+                    elif (service == 'agents' and provider == 'elevenlabs' and 
+                          param_code in ('traits', 'tone_of_voice', 'response_style', 'temperature', 'custom_instruction') and
+                          status == 'configured'):
+                        result['personality_params'].append(row_dict)
+                    
+                    # Tools: service='tool', provider='speako'
+                    elif service == 'tool' and provider == 'speako':
+                        result['tool_params'].append(row_dict)
+                    
+                    # Dictionary: service='dictionary', status='configured' (only first one)
+                    elif service == 'dictionary' and status == 'configured' and result['dictionary_entry'] is None:
+                        result['dictionary_entry'] = row_dict
+                
+                logger.info(
+                    f"[publish_db] Partitioned params: "
+                    f"greetings={len(result['greetings_params'])}, "
+                    f"voice_dict={len(result['voice_dict_params'])}, "
+                    f"personality={len(result['personality_params'])}, "
+                    f"tools={len(result['tool_params'])}, "
+                    f"dictionary={'yes' if result['dictionary_entry'] else 'no'}"
+                )
+                
+                return result
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 def get_elevenlabs_agent_id(tenant_id: str, location_id: str) -> tuple[str, str, str]:
     """
     Get ElevenLabs agent ID, location name, and timezone from locations table.
