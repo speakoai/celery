@@ -691,7 +691,8 @@ def add_pronunciation_rules(dictionary_id: str, rules: list) -> tuple[str, str, 
     payload = {"rules": rules}
     
     try:
-        url = f"{ELEVENLABS_BASE_URL}/pronunciation-dictionaries/{dictionary_id}/add-rules"
+        # Pronunciation dictionaries use /v1/pronunciation-dictionaries/ (no /convai/ prefix)
+        url = f"https://api.elevenlabs.io/v1/pronunciation-dictionaries/{dictionary_id}/add-rules"
         headers = _get_headers()
         headers['Content-Type'] = 'application/json'
         
@@ -782,7 +783,8 @@ def remove_pronunciation_rules(dictionary_id: str, rule_strings: list) -> tuple[
     payload = {"rule_strings": rule_strings}
     
     try:
-        url = f"{ELEVENLABS_BASE_URL}/pronunciation-dictionaries/{dictionary_id}/remove-rules"
+        # Pronunciation dictionaries use /v1/pronunciation-dictionaries/ (no /convai/ prefix)
+        url = f"https://api.elevenlabs.io/v1/pronunciation-dictionaries/{dictionary_id}/remove-rules"
         headers = _get_headers()
         headers['Content-Type'] = 'application/json'
         
