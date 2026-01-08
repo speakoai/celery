@@ -1883,7 +1883,7 @@ def publish_full_agent(tenant_id: str, location_id: str, publish_job_id: str) ->
         mark_personality_params_published,
         mark_tool_params_published,
         upsert_ai_prompt,
-        get_ai_prompt_fragments,
+        get_prompt_fragments,
         update_dictionary_param_text,
         compose_and_publish_system_prompt,
         get_location_type,
@@ -2083,7 +2083,7 @@ def publish_full_agent(tenant_id: str, location_id: str, publish_job_id: str) ->
                 param_map['custom_instruction'] = param.get('value_text', '')
         
         # Get personality template fragments
-        fragments = get_ai_prompt_fragments([
+        fragments = get_prompt_fragments([
             'personality',
             'response_style_concise',
             'response_style_balanced',
