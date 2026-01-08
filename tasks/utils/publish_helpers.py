@@ -1003,8 +1003,8 @@ def publish_voice_dict(
     if dictionary_entry and (rules or old_rules):
         dictionary_param_id = param_id
         
-        # Determine dictionary_id: prefer from JSON, fallback to value_text
-        dictionary_id = dictionary_id_from_json if dictionary_id_from_json else (value_text.strip() if value_text else None)
+        # Use value_text to determine if dictionary exists (ignore id in JSON)
+        dictionary_id = value_text.strip() if value_text else None
         
         if not dictionary_id:
             # CREATE new dictionary (no existing ID)
@@ -2352,8 +2352,8 @@ def publish_full_agent(tenant_id: str, location_id: str, publish_job_id: str) ->
             timestamp = format_timestamp_for_location(timezone)
             dict_name = f"{location_name} - {timestamp}"
             
-            # Determine dictionary_id: prefer from JSON, fallback to value_text
-            dictionary_id = dictionary_id_from_json if dictionary_id_from_json else (value_text.strip() if value_text else None)
+            # Use value_text to determine if dictionary exists (ignore id in JSON)
+            dictionary_id = value_text.strip() if value_text else None
             
             if not dictionary_id:
                 # CREATE new dictionary (no existing ID)
