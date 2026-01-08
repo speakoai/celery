@@ -2074,13 +2074,13 @@ def publish_full_agent(tenant_id: str, location_id: str, publish_job_id: str) ->
                     temperature_value = float(param['value_numeric'])
                     logger.info(f"[PublishFullAgent] ✓ Temperature: {temperature_value}")
             elif param_code == 'traits':
-                param_map['traits'] = param.get('value_text', '')
+                param_map['traits'] = param.get('value_text') or ''
             elif param_code == 'tone_of_voice':
-                param_map['tone_of_voice'] = param.get('value_text', '')
+                param_map['tone_of_voice'] = param.get('value_text') or ''
             elif param_code == 'response_style':
-                param_map['response_style'] = param.get('value_text', '')
+                param_map['response_style'] = param.get('value_text') or ''
             elif param_code == 'custom_instruction':
-                param_map['custom_instruction'] = param.get('value_text', '')
+                param_map['custom_instruction'] = param.get('value_text') or ''
         
         # Get personality template fragments
         fragments = get_prompt_fragments([
@@ -2092,21 +2092,21 @@ def publish_full_agent(tenant_id: str, location_id: str, publish_job_id: str) ->
         ])
         
         personality_fragment = fragments.get('personality', {})
-        personality_template = personality_fragment.get('template_text', '')
+        personality_template = personality_fragment.get('template_text') or ''
         personality_sort_order = personality_fragment.get('sort_order', 0)
         
         if personality_template:
-            # Replace variables
-            personality_template = personality_template.replace('{{traits}}', param_map.get('traits', ''))
-            personality_template = personality_template.replace('{{tone_of_voice}}', param_map.get('tone_of_voice', ''))
+            # Replace variables (use 'or' to handle None values)
+            personality_template = personality_template.replace('{{traits}}', param_map.get('traits') or '')
+            personality_template = personality_template.replace('{{tone_of_voice}}', param_map.get('tone_of_voice') or '')
             
-            response_style_value = param_map.get('response_style', '').strip()
+            response_style_value = (param_map.get('response_style') or '').strip()
             if response_style_value == 'Concise':
-                response_style_text = fragments.get('response_style_concise', {}).get('template_text', '')
+                response_style_text = fragments.get('response_style_concise', {}).get('template_text') or ''
             elif response_style_value == 'Balanced':
-                response_style_text = fragments.get('response_style_balanced', {}).get('template_text', '')
+                response_style_text = fragments.get('response_style_balanced', {}).get('template_text') or ''
             elif response_style_value == 'Detailed':
-                response_style_text = fragments.get('response_style_detailed', {}).get('template_text', '')
+                response_style_text = fragments.get('response_style_detailed', {}).get('template_text') or ''
             else:
                 response_style_text = ''
             
@@ -2124,10 +2124,10 @@ def publish_full_agent(tenant_id: str, location_id: str, publish_job_id: str) ->
             logger.info(f"[PublishFullAgent] ✓ Personality prompt created: {personality_prompt_id}")
         
         # Process custom_instruction
-        custom_instruction_value = param_map.get('custom_instruction', '').strip()
+        custom_instruction_value = (param_map.get('custom_instruction') or '').strip()
         if custom_instruction_value:
             custom_instruction_fragment = fragments.get('custom_instruction', {})
-            custom_instruction_template = custom_instruction_fragment.get('template_text', '')
+            custom_instruction_template = custom_instruction_fragment.get('template_text') or ''
             custom_instruction_sort_order = custom_instruction_fragment.get('sort_order', 0)
             
             if custom_instruction_template:
