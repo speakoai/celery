@@ -788,22 +788,22 @@ def upsert_ai_prompt(
                 
                 logger.info(f"[publish_db] Current max version: {current_max_version}, new version: {new_version}")
                 
-                # Deactivate existing active prompts with same tenant/type/locale/channel and set archived_at
+                # Deactivate existing active prompts for this specific location and set archived_at
                 # Also set effective_to to close the time range (required for exclusion constraint)
-                # Note: The exclusion constraint is at tenant level (not location level), so we must
-                # deactivate ALL matching prompts across all locations to avoid conflicts
+                # The exclusion constraint includes location_id, so each location can have its own active prompt
                 cur.execute(
                     """
                     UPDATE tenant_ai_prompts
                     SET is_active = false, archived_at = now(), effective_to = now(), updated_at = now()
                     WHERE tenant_id = %s 
+                      AND location_id = %s
                       AND type_code = %s
                       AND locale = %s
                       AND channel = %s
                       AND is_active = true
                       AND effective_to IS NULL
                     """,
-                    (tenant_id, type_code, locale, channel)
+                    (tenant_id, location_id, type_code, locale, channel)
                 )
                 
                 deactivated_count = cur.rowcount
