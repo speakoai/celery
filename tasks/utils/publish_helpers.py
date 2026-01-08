@@ -952,13 +952,13 @@ def publish_voice_dict(
     logger.info("[PublishVoiceDict] === STEP 5: Processing pronunciation dictionary ===")
     
     from .publish_db import collect_dictionary_entry, update_dictionary_param_text
-    from .elevenlabs_client import create_pronunciation_dictionary, update_pronunciation_dictionary
+    from .elevenlabs_client import create_pronunciation_dictionary, sync_pronunciation_dictionary_rules
     
     dictionary_entry = collect_dictionary_entry(tenant_id, location_id)
     dictionary_locator = None
     dictionary_param_id = None
     dict_created = False
-    dict_updated = False
+    dict_synced = False
     dictionary_id = None
     
     if dictionary_entry:
@@ -967,26 +967,50 @@ def publish_voice_dict(
         value_json = dictionary_entry.get('value_json')
         
         logger.info(f"[PublishVoiceDict] Found dictionary entry: param_id={param_id}")
+        logger.info(f"[PublishVoiceDict] value_json type: {type(value_json)}")
         
-        # Validate rules
+        # Parse value_json - new format: {"id": "...", "rules": [...], "old_rules": [...]}
         try:
-            rules = value_json if isinstance(value_json, list) else []
-            if not rules:
-                logger.warning("[PublishVoiceDict] Empty rules array, skipping dictionary")
+            # Handle both dict and list formats
+            if isinstance(value_json, dict):
+                # New format with id, rules, old_rules
+                dictionary_id_from_json = value_json.get('id')
+                rules = value_json.get('rules', [])
+                old_rules = value_json.get('old_rules', [])
+                logger.info(f"[PublishVoiceDict] New JSON format: id={dictionary_id_from_json}, rules={len(rules)}, old_rules={len(old_rules)}")
+            elif isinstance(value_json, list):
+                # Old format: just a list of rules (backward compatibility)
+                rules = value_json
+                old_rules = []
+                dictionary_id_from_json = None
+                logger.info(f"[PublishVoiceDict] Old JSON format (list): rules={len(rules)}")
+            else:
+                logger.warning(f"[PublishVoiceDict] Invalid value_json type: {type(value_json)}, skipping dictionary")
+                dictionary_entry = None
+                rules = []
+                old_rules = []
+                
+            if not rules and not old_rules:
+                logger.warning("[PublishVoiceDict] Empty rules and old_rules, skipping dictionary")
                 dictionary_entry = None
         except Exception as e:
             logger.error(f"[PublishVoiceDict] Invalid value_json: {str(e)}, skipping dictionary")
             dictionary_entry = None
+            rules = []
+            old_rules = []
     
     # Process dictionary if valid
-    if dictionary_entry and rules:
+    if dictionary_entry and (rules or old_rules):
         dictionary_param_id = param_id
         
-        if not value_text or value_text.strip() == '':
-            # CREATE new dictionary
+        # Determine dictionary_id: prefer from JSON, fallback to value_text
+        dictionary_id = dictionary_id_from_json if dictionary_id_from_json else (value_text.strip() if value_text else None)
+        
+        if not dictionary_id:
+            # CREATE new dictionary (no existing ID)
             logger.info("[PublishVoiceDict] Creating new pronunciation dictionary...")
             
-            # Generate name with timestamp (like knowledge)
+            # Generate name with timestamp
             timestamp = format_timestamp_for_location(timezone)
             dict_name = f"{location_name} - {timestamp}"
             
@@ -1004,7 +1028,6 @@ def publish_voice_dict(
                 }
             except Exception as e:
                 logger.error(f"[PublishVoiceDict] Failed to create dictionary: {str(e)}")
-                # Re-raise to stop workflow
                 update_publish_job_status(
                     tenant_id=tenant_id,
                     publish_job_id=publish_job_id,
@@ -1015,28 +1038,37 @@ def publish_voice_dict(
                 raise RuntimeError(f"Failed to create pronunciation dictionary: {str(e)}") from e
         
         else:
-            # UPDATE existing dictionary
-            dictionary_id = value_text.strip()
-            logger.info(f"[PublishVoiceDict] Updating existing dictionary: {dictionary_id}...")
+            # SYNC existing dictionary using add-rules/remove-rules
+            logger.info(f"[PublishVoiceDict] Syncing existing dictionary: {dictionary_id}...")
             
             try:
-                returned_dict_id, latest_version_id = update_pronunciation_dictionary(dictionary_id, rules)
-                logger.info(f"[PublishVoiceDict] ✅ Updated dictionary: id={returned_dict_id}, version={latest_version_id}")
+                returned_dict_id, version_id, version_rules_num, sync_info = sync_pronunciation_dictionary_rules(
+                    dictionary_id, rules, old_rules
+                )
+                logger.info(f"[PublishVoiceDict] ✅ Synced dictionary: id={returned_dict_id}")
+                logger.info(f"[PublishVoiceDict]   Added: {sync_info['added']}")
+                logger.info(f"[PublishVoiceDict]   Removed: {sync_info['removed']}")
+                logger.info(f"[PublishVoiceDict]   Unchanged: {sync_info['unchanged']}")
                 
-                # Check if dictionary_id changed (shouldn't happen, but handle it)
+                # Update dictionary_id if changed
                 if returned_dict_id != dictionary_id:
                     logger.warning(f"[PublishVoiceDict] Dictionary ID changed: {dictionary_id} → {returned_dict_id}")
                     update_dictionary_param_text(param_id, returned_dict_id)
                     dictionary_id = returned_dict_id
                 
-                dict_updated = True
-                dictionary_locator = {
-                    "pronunciation_dictionary_id": dictionary_id,
-                    "version_id": latest_version_id
-                }
+                dict_synced = True
+                
+                # Only set dictionary_locator if we have a version_id (changes were made)
+                if version_id:
+                    dictionary_locator = {
+                        "pronunciation_dictionary_id": dictionary_id,
+                        "version_id": version_id
+                    }
+                else:
+                    logger.info("[PublishVoiceDict] No changes made, skipping dictionary attachment update")
+                    
             except Exception as e:
-                logger.error(f"[PublishVoiceDict] Failed to update dictionary: {str(e)}")
-                # Re-raise to stop workflow
+                logger.error(f"[PublishVoiceDict] Failed to sync dictionary: {str(e)}")
                 update_publish_job_status(
                     tenant_id=tenant_id,
                     publish_job_id=publish_job_id,
@@ -1044,7 +1076,7 @@ def publish_voice_dict(
                     finished_at=datetime.utcnow(),
                     error_message=str(e)
                 )
-                raise RuntimeError(f"Failed to update pronunciation dictionary: {str(e)}") from e
+                raise RuntimeError(f"Failed to sync pronunciation dictionary: {str(e)}") from e
     else:
         logger.info("[PublishVoiceDict] No dictionary to process or invalid rules")
     
@@ -1107,7 +1139,7 @@ def publish_voice_dict(
         'conversation_config': conversation_config,
         'dictionary_processed': dictionary_entry is not None,
         'dictionary_created': dict_created,
-        'dictionary_updated': dict_updated,
+        'dictionary_synced': dict_synced,
         'dictionary_id': dictionary_id
     }
     
@@ -1130,14 +1162,14 @@ def publish_voice_dict(
         'processed_param_ids': all_param_ids,
         'dictionary_processed': dictionary_entry is not None,
         'dictionary_created': dict_created,
-        'dictionary_updated': dict_updated,
+        'dictionary_synced': dict_synced,
         'dictionary_id': dictionary_id
     }
     
     logger.info(
         f"[PublishVoiceDict] ✅ Workflow completed: "
         f"agent_id={elevenlabs_agent_id}, params_count={len(params)}, params_updated={params_updated}, "
-        f"dictionary_processed={dictionary_entry is not None}, dict_created={dict_created}, dict_updated={dict_updated}"
+        f"dictionary_processed={dictionary_entry is not None}, dict_created={dict_created}, dict_synced={dict_synced}"
     )
     
     return result
@@ -1893,7 +1925,7 @@ def publish_full_agent(tenant_id: str, location_id: str, publish_job_id: str) ->
     from .elevenlabs_client import (
         patch_elevenlabs_agent,
         create_pronunciation_dictionary,
-        update_pronunciation_dictionary
+        sync_pronunciation_dictionary_rules
     )
     
     result = {
@@ -2243,7 +2275,7 @@ def publish_full_agent(tenant_id: str, location_id: str, publish_job_id: str) ->
     dictionary_entry = all_params['dictionary_entry']
     dictionary_locator = None
     dict_created = False
-    dict_updated = False
+    dict_synced = False
     dictionary_id = None
     
     # Build conversation_config (combined payload)
@@ -2297,14 +2329,34 @@ def publish_full_agent(tenant_id: str, location_id: str, publish_job_id: str) ->
         value_json = dictionary_entry.get('value_json')
         voice_dict_param_ids.append(param_id)
         
-        rules = value_json if isinstance(value_json, list) else []
+        # Parse value_json - new format: {"id": "...", "rules": [...], "old_rules": [...]}
+        if isinstance(value_json, dict):
+            # New format with id, rules, old_rules
+            dictionary_id_from_json = value_json.get('id')
+            rules = value_json.get('rules', [])
+            old_rules = value_json.get('old_rules', [])
+            logger.info(f"[PublishFullAgent] Dictionary JSON format: id={dictionary_id_from_json}, rules={len(rules)}, old_rules={len(old_rules)}")
+        elif isinstance(value_json, list):
+            # Old format: just a list of rules (backward compatibility)
+            rules = value_json
+            old_rules = []
+            dictionary_id_from_json = None
+            logger.info(f"[PublishFullAgent] Dictionary list format: rules={len(rules)}")
+        else:
+            rules = []
+            old_rules = []
+            dictionary_id_from_json = None
+            logger.warning(f"[PublishFullAgent] Invalid dictionary value_json type: {type(value_json)}")
         
-        if rules:
+        if rules or old_rules:
             timestamp = format_timestamp_for_location(timezone)
             dict_name = f"{location_name} - {timestamp}"
             
-            if not value_text or value_text.strip() == '':
-                # CREATE new dictionary
+            # Determine dictionary_id: prefer from JSON, fallback to value_text
+            dictionary_id = dictionary_id_from_json if dictionary_id_from_json else (value_text.strip() if value_text else None)
+            
+            if not dictionary_id:
+                # CREATE new dictionary (no existing ID)
                 try:
                     dictionary_id, version_id = create_pronunciation_dictionary(rules, dict_name)
                     logger.info(f"[PublishFullAgent] ✓ Created dictionary: id={dictionary_id}")
@@ -2317,21 +2369,29 @@ def publish_full_agent(tenant_id: str, location_id: str, publish_job_id: str) ->
                 except Exception as e:
                     logger.error(f"[PublishFullAgent] Failed to create dictionary: {str(e)}")
             else:
-                # UPDATE existing dictionary
-                dictionary_id = value_text.strip()
+                # SYNC existing dictionary using add-rules/remove-rules
                 try:
-                    returned_dict_id, latest_version_id = update_pronunciation_dictionary(dictionary_id, rules)
-                    logger.info(f"[PublishFullAgent] ✓ Updated dictionary: id={returned_dict_id}")
+                    returned_dict_id, version_id, version_rules_num, sync_info = sync_pronunciation_dictionary_rules(
+                        dictionary_id, rules, old_rules
+                    )
+                    logger.info(f"[PublishFullAgent] ✓ Synced dictionary: id={returned_dict_id}")
+                    logger.info(f"[PublishFullAgent]   Added: {sync_info['added']}")
+                    logger.info(f"[PublishFullAgent]   Removed: {sync_info['removed']}")
+                    
                     if returned_dict_id != dictionary_id:
                         update_dictionary_param_text(param_id, returned_dict_id)
                         dictionary_id = returned_dict_id
-                    dict_updated = True
-                    dictionary_locator = {
-                        "pronunciation_dictionary_id": dictionary_id,
-                        "version_id": latest_version_id
-                    }
+                    
+                    dict_synced = True
+                    
+                    # Only set dictionary_locator if we have a version_id (changes were made)
+                    if version_id:
+                        dictionary_locator = {
+                            "pronunciation_dictionary_id": dictionary_id,
+                            "version_id": version_id
+                        }
                 except Exception as e:
-                    logger.error(f"[PublishFullAgent] Failed to update dictionary: {str(e)}")
+                    logger.error(f"[PublishFullAgent] Failed to sync dictionary: {str(e)}")
     
     # Add dictionary locator to payload if exists
     if dictionary_locator:
@@ -2351,7 +2411,7 @@ def publish_full_agent(tenant_id: str, location_id: str, publish_job_id: str) ->
     result['voice_dict'] = {
         'params_count': len(voice_dict_params),
         'dictionary_created': dict_created,
-        'dictionary_updated': dict_updated,
+        'dictionary_synced': dict_synced,
         'dictionary_id': dictionary_id,
         'param_ids': voice_dict_param_ids
     }

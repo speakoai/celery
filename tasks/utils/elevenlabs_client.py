@@ -569,6 +569,9 @@ def update_pronunciation_dictionary(dictionary_id: str, rules: list) -> tuple[st
     """
     Update an existing pronunciation dictionary in ElevenLabs.
     
+    DEPRECATED: This function uses PATCH which only updates metadata (name, archived).
+    Use sync_pronunciation_dictionary_rules() instead for updating rules.
+    
     Args:
         dictionary_id: ElevenLabs dictionary ID to update
         rules: List of rule dicts with keys: 'string_to_replace', 'type', 'alias'
@@ -584,7 +587,7 @@ def update_pronunciation_dictionary(dictionary_id: str, rules: list) -> tuple[st
     import json
     
     logger.info("=" * 80)
-    logger.info(f"[ElevenLabs] UPDATING PRONUNCIATION DICTIONARY:")
+    logger.info(f"[ElevenLabs] UPDATING PRONUNCIATION DICTIONARY (DEPRECATED - metadata only):")
     logger.info(f"[ElevenLabs]   Dictionary ID: {dictionary_id}")
     logger.info(f"[ElevenLabs]   Rules Count: {len(rules)}")
     logger.info("=" * 80)
@@ -659,6 +662,275 @@ def update_pronunciation_dictionary(dictionary_id: str, rules: list) -> tuple[st
         error_msg = f"Failed to parse pronunciation dictionary update response: {str(e)}"
         logger.error(f"[ElevenLabs] ❌ PARSE ERROR: {error_msg}")
         raise ValueError(error_msg) from e
+
+
+def add_pronunciation_rules(dictionary_id: str, rules: list) -> tuple[str, str, int]:
+    """
+    Add rules to an existing pronunciation dictionary in ElevenLabs.
+    
+    Args:
+        dictionary_id: ElevenLabs dictionary ID
+        rules: List of rule dicts with keys: 'string_to_replace', 'type', 'alias'
+               Example: [{"string_to_replace": "tomato", "type": "alias", "alias": "tuh-MAH-to"}]
+        
+    Returns:
+        Tuple of (dictionary_id, version_id, version_rules_num) from ElevenLabs response
+        
+    Raises:
+        requests.HTTPError: If API call fails
+        ValueError: If response cannot be parsed
+    """
+    import json
+    
+    logger.info("=" * 80)
+    logger.info(f"[ElevenLabs] ADDING RULES TO PRONUNCIATION DICTIONARY:")
+    logger.info(f"[ElevenLabs]   Dictionary ID: {dictionary_id}")
+    logger.info(f"[ElevenLabs]   Rules to Add: {len(rules)}")
+    logger.info("=" * 80)
+    
+    payload = {"rules": rules}
+    
+    try:
+        url = f"{ELEVENLABS_BASE_URL}/pronunciation-dictionaries/{dictionary_id}/add-rules"
+        headers = _get_headers()
+        headers['Content-Type'] = 'application/json'
+        
+        logger.info("=" * 80)
+        logger.info(f"[ElevenLabs] 📤 RAW REQUEST:")
+        logger.info(f"[ElevenLabs]   Method: POST")
+        logger.info(f"[ElevenLabs]   URL: {url}")
+        logger.info(f"[ElevenLabs]   Request Payload (JSON):")
+        logger.info(json.dumps(payload, indent=2))
+        logger.info("=" * 80)
+        
+        response = requests.post(
+            url,
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
+        
+        logger.info("=" * 80)
+        logger.info(f"[ElevenLabs] 📥 RAW RESPONSE:")
+        logger.info(f"[ElevenLabs]   Status Code: {response.status_code}")
+        logger.info(f"[ElevenLabs]   Response Body:")
+        logger.info(response.text)
+        logger.info("=" * 80)
+        
+        response.raise_for_status()
+        
+        response_json = response.json()
+        
+        returned_dict_id = response_json.get('id')
+        version_id = response_json.get('version_id')
+        version_rules_num = response_json.get('version_rules_num', 0)
+        
+        if not returned_dict_id or not version_id:
+            error_msg = f"Missing 'id' or 'version_id' in response: {response_json}"
+            logger.error(f"[ElevenLabs] ❌ {error_msg}")
+            raise ValueError(error_msg)
+        
+        logger.info("=" * 80)
+        logger.info(f"[ElevenLabs] ✅ RULES ADDED SUCCESSFULLY!")
+        logger.info(f"[ElevenLabs]   Dictionary ID: {returned_dict_id}")
+        logger.info(f"[ElevenLabs]   Version ID: {version_id}")
+        logger.info(f"[ElevenLabs]   Total Rules: {version_rules_num}")
+        logger.info("=" * 80)
+        
+        return returned_dict_id, version_id, version_rules_num
+        
+    except requests.HTTPError as e:
+        error_msg = f"Failed to add rules to dictionary {dictionary_id}: HTTP {e.response.status_code} - {e.response.text}"
+        logger.error(f"[ElevenLabs] ❌ API CALL FAILED: {error_msg}")
+        raise requests.HTTPError(error_msg, response=e.response) from e
+        
+    except requests.RequestException as e:
+        error_msg = f"Failed to add rules to dictionary {dictionary_id}: {str(e)}"
+        logger.error(f"[ElevenLabs] ❌ REQUEST FAILED: {error_msg}")
+        raise
+        
+    except Exception as e:
+        error_msg = f"Failed to parse add-rules response: {str(e)}"
+        logger.error(f"[ElevenLabs] ❌ PARSE ERROR: {error_msg}")
+        raise ValueError(error_msg) from e
+
+
+def remove_pronunciation_rules(dictionary_id: str, rule_strings: list) -> tuple[str, str, int]:
+    """
+    Remove rules from an existing pronunciation dictionary in ElevenLabs.
+    
+    Args:
+        dictionary_id: ElevenLabs dictionary ID
+        rule_strings: List of 'string_to_replace' values to remove
+                      Example: ["tomato", "schedule"]
+        
+    Returns:
+        Tuple of (dictionary_id, version_id, version_rules_num) from ElevenLabs response
+        
+    Raises:
+        requests.HTTPError: If API call fails
+        ValueError: If response cannot be parsed
+    """
+    import json
+    
+    logger.info("=" * 80)
+    logger.info(f"[ElevenLabs] REMOVING RULES FROM PRONUNCIATION DICTIONARY:")
+    logger.info(f"[ElevenLabs]   Dictionary ID: {dictionary_id}")
+    logger.info(f"[ElevenLabs]   Rule Strings to Remove: {rule_strings}")
+    logger.info("=" * 80)
+    
+    payload = {"rule_strings": rule_strings}
+    
+    try:
+        url = f"{ELEVENLABS_BASE_URL}/pronunciation-dictionaries/{dictionary_id}/remove-rules"
+        headers = _get_headers()
+        headers['Content-Type'] = 'application/json'
+        
+        logger.info("=" * 80)
+        logger.info(f"[ElevenLabs] 📤 RAW REQUEST:")
+        logger.info(f"[ElevenLabs]   Method: POST")
+        logger.info(f"[ElevenLabs]   URL: {url}")
+        logger.info(f"[ElevenLabs]   Request Payload (JSON):")
+        logger.info(json.dumps(payload, indent=2))
+        logger.info("=" * 80)
+        
+        response = requests.post(
+            url,
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
+        
+        logger.info("=" * 80)
+        logger.info(f"[ElevenLabs] 📥 RAW RESPONSE:")
+        logger.info(f"[ElevenLabs]   Status Code: {response.status_code}")
+        logger.info(f"[ElevenLabs]   Response Body:")
+        logger.info(response.text)
+        logger.info("=" * 80)
+        
+        response.raise_for_status()
+        
+        response_json = response.json()
+        
+        returned_dict_id = response_json.get('id')
+        version_id = response_json.get('version_id')
+        version_rules_num = response_json.get('version_rules_num', 0)
+        
+        if not returned_dict_id or not version_id:
+            error_msg = f"Missing 'id' or 'version_id' in response: {response_json}"
+            logger.error(f"[ElevenLabs] ❌ {error_msg}")
+            raise ValueError(error_msg)
+        
+        logger.info("=" * 80)
+        logger.info(f"[ElevenLabs] ✅ RULES REMOVED SUCCESSFULLY!")
+        logger.info(f"[ElevenLabs]   Dictionary ID: {returned_dict_id}")
+        logger.info(f"[ElevenLabs]   Version ID: {version_id}")
+        logger.info(f"[ElevenLabs]   Remaining Rules: {version_rules_num}")
+        logger.info("=" * 80)
+        
+        return returned_dict_id, version_id, version_rules_num
+        
+    except requests.HTTPError as e:
+        error_msg = f"Failed to remove rules from dictionary {dictionary_id}: HTTP {e.response.status_code} - {e.response.text}"
+        logger.error(f"[ElevenLabs] ❌ API CALL FAILED: {error_msg}")
+        raise requests.HTTPError(error_msg, response=e.response) from e
+        
+    except requests.RequestException as e:
+        error_msg = f"Failed to remove rules from dictionary {dictionary_id}: {str(e)}"
+        logger.error(f"[ElevenLabs] ❌ REQUEST FAILED: {error_msg}")
+        raise
+        
+    except Exception as e:
+        error_msg = f"Failed to parse remove-rules response: {str(e)}"
+        logger.error(f"[ElevenLabs] ❌ PARSE ERROR: {error_msg}")
+        raise ValueError(error_msg) from e
+
+
+def sync_pronunciation_dictionary_rules(
+    dictionary_id: str, 
+    rules: list, 
+    old_rules: list
+) -> tuple[str, str, int, dict]:
+    """
+    Sync pronunciation dictionary rules by comparing new rules vs old rules
+    and calling add-rules/remove-rules as needed.
+    
+    Args:
+        dictionary_id: ElevenLabs dictionary ID
+        rules: List of new rule dicts (current desired state)
+        old_rules: List of old rule dicts (previous state)
+        
+    Returns:
+        Tuple of (dictionary_id, version_id, version_rules_num, sync_info)
+        sync_info contains: {'added': [...], 'removed': [...], 'unchanged': [...]}
+        
+    Raises:
+        requests.HTTPError: If API call fails
+        ValueError: If response cannot be parsed
+    """
+    logger.info("=" * 80)
+    logger.info(f"[ElevenLabs] SYNCING PRONUNCIATION DICTIONARY RULES:")
+    logger.info(f"[ElevenLabs]   Dictionary ID: {dictionary_id}")
+    logger.info(f"[ElevenLabs]   New Rules Count: {len(rules)}")
+    logger.info(f"[ElevenLabs]   Old Rules Count: {len(old_rules)}")
+    logger.info("=" * 80)
+    
+    # Build sets of string_to_replace for comparison
+    new_strings = {r.get('string_to_replace') for r in rules if r.get('string_to_replace')}
+    old_strings = {r.get('string_to_replace') for r in old_rules if r.get('string_to_replace')}
+    
+    # Determine what to add/remove
+    to_remove = old_strings - new_strings
+    to_add = new_strings - old_strings
+    unchanged = new_strings & old_strings
+    
+    logger.info(f"[ElevenLabs]   To Remove: {to_remove}")
+    logger.info(f"[ElevenLabs]   To Add: {to_add}")
+    logger.info(f"[ElevenLabs]   Unchanged: {unchanged}")
+    
+    version_id = None
+    version_rules_num = 0
+    returned_dict_id = dictionary_id
+    
+    # Step 1: Remove rules first (if any)
+    if to_remove:
+        logger.info(f"[ElevenLabs] Removing {len(to_remove)} rules...")
+        returned_dict_id, version_id, version_rules_num = remove_pronunciation_rules(
+            dictionary_id, 
+            list(to_remove)
+        )
+    
+    # Step 2: Add rules (if any)
+    if to_add:
+        rules_to_add = [r for r in rules if r.get('string_to_replace') in to_add]
+        logger.info(f"[ElevenLabs] Adding {len(rules_to_add)} rules...")
+        returned_dict_id, version_id, version_rules_num = add_pronunciation_rules(
+            dictionary_id, 
+            rules_to_add
+        )
+    
+    # If nothing changed, we need to get the current version_id
+    # For now, we'll just return None and let the caller handle it
+    if not to_remove and not to_add:
+        logger.info("[ElevenLabs] No changes needed - rules are identical")
+        # Return None for version_id to indicate no change
+        version_id = None
+    
+    sync_info = {
+        'added': list(to_add),
+        'removed': list(to_remove),
+        'unchanged': list(unchanged)
+    }
+    
+    logger.info("=" * 80)
+    logger.info(f"[ElevenLabs] ✅ DICTIONARY SYNC COMPLETE!")
+    logger.info(f"[ElevenLabs]   Dictionary ID: {returned_dict_id}")
+    logger.info(f"[ElevenLabs]   Version ID: {version_id}")
+    logger.info(f"[ElevenLabs]   Total Rules: {version_rules_num}")
+    logger.info(f"[ElevenLabs]   Sync Summary: +{len(to_add)} added, -{len(to_remove)} removed, ={len(unchanged)} unchanged")
+    logger.info("=" * 80)
+    
+    return returned_dict_id, version_id, version_rules_num, sync_info
 
 
 def list_conversations(agent_id: str) -> list:
