@@ -914,8 +914,8 @@ def publish_voice_dict(
         logger.info(f"[PublishVoiceDict] Processing: service={service}, param_code={param_code}")
         
         try:
-            # service='agent' + param_code='voice_id' → conversation_config.tts.voice_id (string)
-            if service == 'agent' and param_code == 'voice_id':
+            # service='agents' + param_code='voice_id' → conversation_config.tts.voice_id (string)
+            if service == 'agents' and param_code == 'voice_id':
                 conversation_config['tts']['voice_id'] = value_text
                 logger.info(f"[PublishVoiceDict]   → tts.voice_id = {value_text}")
             
@@ -2277,7 +2277,7 @@ def publish_full_agent(tenant_id: str, location_id: str, publish_job_id: str) ->
             voice_dict_param_ids.append(param['param_id'])
             
             try:
-                if service == 'agent' and param_code == 'voice_id':
+                if service == 'agents' and param_code == 'voice_id':
                     conversation_config['tts']['voice_id'] = value_text
                 elif service == 'tts' and param_code == 'speed':
                     conversation_config['tts']['speed'] = float(value_numeric) if value_numeric is not None else None

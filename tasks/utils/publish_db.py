@@ -242,7 +242,7 @@ def collect_full_agent_params(tenant_id: str, location_id: str) -> Dict[str, Any
                       AND status IN ('configured', 'published')
                       AND (
                         (provider = 'speako' AND service = 'greetings') OR
-                        (service IN ('agent', 'turn', 'conversation', 'tts')) OR
+                        (service IN ('agents', 'turn', 'conversation', 'tts')) OR
                         (service = 'agents' AND provider = 'elevenlabs') OR
                         (service = 'tool' AND provider = 'speako') OR
                         (service = 'dictionary')
@@ -267,8 +267,8 @@ def collect_full_agent_params(tenant_id: str, location_id: str) -> Dict[str, Any
                     if provider == 'speako' and service == 'greetings' and status == 'configured':
                         result['greetings_params'].append(row_dict)
                     
-                    # Voice dict: service IN ('agent', 'turn', 'conversation', 'tts'), status='configured'
-                    elif service in ('agent', 'turn', 'conversation', 'tts') and status == 'configured':
+                    # Voice dict: service IN ('agents', 'turn', 'conversation', 'tts'), status='configured'
+                    elif service in ('agents', 'turn', 'conversation', 'tts') and status == 'configured':
                         result['voice_dict_params'].append(row_dict)
                     
                     # Personality: service='agents', provider='elevenlabs', specific param_codes
@@ -1215,7 +1215,7 @@ def collect_voice_dict_params(tenant_id: str, location_id: str) -> List[Dict[str
                     WHERE tenant_id = %s 
                       AND location_id = %s
                       AND status = 'configured'
-                      AND service IN ('agent', 'turn', 'conversation', 'tts')
+                      AND service IN ('agents', 'turn', 'conversation', 'tts')
                     ORDER BY created_at ASC
                     """,
                     (tenant_id, location_id)
