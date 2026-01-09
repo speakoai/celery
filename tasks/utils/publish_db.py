@@ -267,15 +267,16 @@ def collect_full_agent_params(tenant_id: str, location_id: str) -> Dict[str, Any
                     if provider == 'speako' and service == 'greetings' and status == 'configured':
                         result['greetings_params'].append(row_dict)
                     
-                    # Voice dict: service IN ('agents', 'turn', 'conversation', 'tts'), status='configured'
-                    elif service in ('agents', 'turn', 'conversation', 'tts') and status == 'configured':
-                        result['voice_dict_params'].append(row_dict)
-                    
                     # Personality: service='agents', provider='elevenlabs', specific param_codes
+                    # NOTE: Must check BEFORE voice_dict since both match service='agents'
                     elif (service == 'agents' and provider == 'elevenlabs' and 
                           param_code in ('traits', 'tone_of_voice', 'response_style', 'temperature', 'custom_instruction') and
                           status == 'configured'):
                         result['personality_params'].append(row_dict)
+                    
+                    # Voice dict: service IN ('turn', 'conversation', 'tts'), status='configured'
+                    elif service in ('turn', 'conversation', 'tts') and status == 'configured':
+                        result['voice_dict_params'].append(row_dict)
                     
                     # Tools: service='tool', provider='speako'
                     elif service == 'tool' and provider == 'speako':
@@ -1258,7 +1259,7 @@ def mark_voice_dict_params_published(tenant_id: str, location_id: str, param_ids
                     SET status = 'published', updated_at = now()
                     WHERE tenant_id = %s 
                       AND location_id = %s
-                      AND service IN ('agent', 'turn', 'conversation', 'tts', 'dictionary')
+                      AND service IN ('agents', 'turn', 'conversation', 'tts', 'dictionary')
                       AND param_id = ANY(%s)
                       AND status = 'configured'
                     """,

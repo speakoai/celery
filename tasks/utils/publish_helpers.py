@@ -1920,7 +1920,8 @@ def publish_full_agent(tenant_id: str, location_id: str, publish_job_id: str) ->
         compose_and_publish_system_prompt,
         get_location_type,
         get_tool_prompt_template,
-        get_tool_service_prompts
+        get_tool_service_prompts,
+        process_context_prompts
     )
     from .elevenlabs_client import (
         patch_elevenlabs_agent,
@@ -2099,20 +2100,31 @@ def publish_full_agent(tenant_id: str, location_id: str, publish_job_id: str) ->
         for param in personality_params:
             param_code = param.get('param_code')
             personality_param_ids.append(param['param_id'])
+            value_json = param.get('value_json')
+            value_text = param.get('value_text')
             
             if param_code == 'temperature':
                 temperature_param = param
                 if param.get('value_numeric') is not None:
                     temperature_value = float(param['value_numeric'])
                     logger.info(f"[PublishFullAgent] ✓ Temperature: {temperature_value}")
-            elif param_code == 'traits':
-                param_map['traits'] = param.get('value_text') or ''
-            elif param_code == 'tone_of_voice':
-                param_map['tone_of_voice'] = param.get('value_text') or ''
-            elif param_code == 'response_style':
-                param_map['response_style'] = param.get('value_text') or ''
             elif param_code == 'custom_instruction':
-                param_map['custom_instruction'] = param.get('value_text') or ''
+                # custom_instruction comes from value_text (not value_json)
+                param_map['custom_instruction'] = value_text or ''
+            elif param_code in ['traits', 'tone_of_voice']:
+                # traits and tone_of_voice come from value_json as arrays, join with comma
+                if value_json and isinstance(value_json, list) and len(value_json) > 0:
+                    param_map[param_code] = ', '.join(str(v) for v in value_json)
+                    logger.info(f"[PublishFullAgent] {param_code}: {param_map[param_code]}")
+                else:
+                    param_map[param_code] = ''
+            elif param_code == 'response_style':
+                # response_style comes from value_json as array, take first element
+                if value_json and isinstance(value_json, list) and len(value_json) > 0:
+                    param_map['response_style'] = str(value_json[0])
+                    logger.info(f"[PublishFullAgent] response_style: {param_map['response_style']}")
+                else:
+                    param_map['response_style'] = ''
         
         # Get personality template fragments
         fragments = get_prompt_fragments([
@@ -2190,6 +2202,26 @@ def publish_full_agent(tenant_id: str, location_id: str, publish_job_id: str) ->
         logger.info("[PublishFullAgent] No personality params found, skipping")
         result['personality'] = {'params_count': 0, 'prompt_id': None, 'temperature': None, 'param_ids': []}
     
+    # ===== CONTEXT PROMPTS PROCESSING =====
+    logger.info("=" * 80)
+    logger.info("[PublishFullAgent] Step 4.5: Processing CONTEXT PROMPTS (role, knowledge_scope, etc.)...")
+    logger.info("=" * 80)
+    
+    context_prompt_ids = process_context_prompts(
+        tenant_id=tenant_id,
+        location_id=location_id
+    )
+    
+    if context_prompt_ids:
+        logger.info(f"[PublishFullAgent] ✓ Created {len(context_prompt_ids)} context prompts: {context_prompt_ids}")
+    else:
+        logger.warning("[PublishFullAgent] ⚠️ No context prompts were created")
+    
+    result['context_prompts'] = {
+        'prompt_ids': context_prompt_ids,
+        'count': len(context_prompt_ids)
+    }
+    
     # ===== TOOLS PROCESSING =====
     logger.info("=" * 80)
     logger.info("[PublishFullAgent] Step 5: Processing TOOLS...")
@@ -2211,44 +2243,128 @@ def publish_full_agent(tenant_id: str, location_id: str, publish_job_id: str) ->
         enabled_param_ids = []
         
         for param in tool_params_with_tool_ids:
+            param_code = param.get('param_code', '')
             value_json = param.get('value_json', {})
+            
+            # Skip greetings tool (same as publish_tools)
+            if param_code == 'greetings':
+                logger.info(f"[PublishFullAgent] Skipping greetings tool: param_code={param_code}")
+                continue
+            
             is_enabled = value_json.get('enabled', False) if isinstance(value_json, dict) else False
             
-            if is_enabled:
-                enabled_param_ids.append(param['param_id'])
-                tool_ids = param.get('tool_ids', [])
-                if tool_ids:
-                    all_tool_ids.extend(tool_ids)
+            if not is_enabled:
+                logger.info(f"[PublishFullAgent] Skipping disabled tool: param_code={param_code}")
+                continue
+            
+            # Validate tool_ids not NULL/empty (same as publish_tools)
+            tool_ids = param.get('tool_ids', [])
+            if not tool_ids or len(tool_ids) == 0:
+                logger.error(f"[PublishFullAgent] tool_ids is NULL or empty for param_code={param_code} in ai_tool_types table")
+                continue  # Skip this param but don't fail entire workflow
+            
+            enabled_param_ids.append(param['param_id'])
+            all_tool_ids.extend(tool_ids)
+            logger.info(f"[PublishFullAgent] Enabled tool: param_code={param_code}, tool_ids={tool_ids}")
         
         unique_tool_ids = list(set(all_tool_ids))
         tool_param_ids = enabled_param_ids
         
         logger.info(f"[PublishFullAgent] ✓ Tools: {len(unique_tool_ids)} unique tool_ids from {len(enabled_param_ids)} enabled params")
         
-        # Create tools prompt if we have tool_ids
+        # Create tools prompt if we have tool_ids (same logic as publish_tools)
         if unique_tool_ids:
+            logger.info("[PublishFullAgent] Starting tools prompt composition...")
+            
             try:
+                # Get location_type
                 location_type = get_location_type(tenant_id, location_id)
-                tool_template = get_tool_prompt_template(location_type)
+                logger.info(f"[PublishFullAgent] Location type: {location_type}")
                 
-                if tool_template:
-                    service_prompts = get_tool_service_prompts(unique_tool_ids)
-                    services_text = "\n".join(f"- {prompt}" for prompt in service_prompts) if service_prompts else "- General assistance"
+                # Get tool prompt template (no args - returns dict with template_text + sort_order)
+                template_data = get_tool_prompt_template()
+                template = template_data['template_text']
+                template_sort_order = template_data['sort_order']
+                logger.info(f"[PublishFullAgent] Loaded template: {len(template)} characters, sort_order={template_sort_order}")
+                
+                # Get service prompts for all eligible tools
+                tool_prompts_data = get_tool_service_prompts(unique_tool_ids)
+                
+                if not tool_prompts_data:
+                    logger.warning("[PublishFullAgent] No service_prompts found for any tools, skipping prompt composition")
+                else:
+                    # Extract and filter prompts by location_type
+                    extracted_prompts = []
                     
-                    tool_prompt_text = tool_template.replace('{{services}}', services_text)
+                    for tool_data in tool_prompts_data:
+                        tool_id = tool_data['tool_id']
+                        service_prompts = tool_data.get('service_prompts')
+                        
+                        if not service_prompts:
+                            logger.warning(f"[PublishFullAgent] No service_prompts for tool_id={tool_id}, skipping")
+                            continue
+                        
+                        # Navigate JSON: service_prompts.by_service_type.{location_type}
+                        by_service_type = service_prompts.get('by_service_type', {})
+                        
+                        # Determine which service type to use
+                        if location_type == 'rest':
+                            service_key = 'rest'
+                        elif location_type == 'service':
+                            service_key = 'service'
+                        else:
+                            service_key = 'service'  # Default to service
+                            logger.info(f"[PublishFullAgent] Using 'service' as default for location_type={location_type}")
+                        
+                        service_prompts_array = by_service_type.get(service_key, [])
+                        
+                        if not service_prompts_array:
+                            logger.warning(f"[PublishFullAgent] No prompts for tool_id={tool_id}, service={service_key}")
+                            continue
+                        
+                        # Extract markdown from all prompts in array
+                        for prompt_obj in service_prompts_array:
+                            markdown = prompt_obj.get('markdown', '')
+                            if markdown:
+                                extracted_prompts.append(markdown)
+                                logger.info(f"[PublishFullAgent] ✓ Extracted prompt for tool_id={tool_id}, service={service_key}")
                     
-                    tool_prompt_id = upsert_ai_prompt(
-                        tenant_id=tenant_id,
-                        location_id=location_id,
-                        name='Tools',
-                        type_code='tools',
-                        title='Agent Tools Configuration',
-                        body_template=tool_prompt_text,
-                        sort_order=50
-                    )
-                    logger.info(f"[PublishFullAgent] ✓ Tools prompt created: {tool_prompt_id}")
+                    if not extracted_prompts:
+                        logger.warning("[PublishFullAgent] No prompts extracted, skipping prompt composition")
+                    else:
+                        # Compose final prompt
+                        # Join all extracted prompts with double newlines
+                        all_tool_prompts = '\n\n'.join(extracted_prompts)
+                        
+                        # Replace literal \n with actual newlines
+                        all_tool_prompts = all_tool_prompts.replace('\\n', '\n')
+                        
+                        # Combine template + tool prompts
+                        final_prompt = f"{template}\n\n{all_tool_prompts}"
+                        
+                        logger.info(f"[PublishFullAgent] Composed final prompt: {len(final_prompt)} characters, {len(extracted_prompts)} tool prompts")
+                        
+                        # Insert into tenant_ai_prompts (same type_code as publish_tools)
+                        tool_prompt_id = upsert_ai_prompt(
+                            tenant_id=tenant_id,
+                            location_id=location_id,
+                            name='Use of Tools',
+                            type_code='use_of_tools',
+                            title='Use of Tools',
+                            body_template=final_prompt,
+                            sort_order=template_sort_order
+                        )
+                        logger.info(f"[PublishFullAgent] ✓ Tools prompt created: {tool_prompt_id}")
+            
+            except ValueError as e:
+                # Template not found or location not found - log warning but don't fail
+                logger.warning(f"[PublishFullAgent] Could not compose tools prompt: {str(e)}")
+                logger.warning("[PublishFullAgent] Continuing workflow without prompt composition")
+            
             except Exception as e:
-                logger.warning(f"[PublishFullAgent] Could not create tools prompt: {str(e)}")
+                # Other errors - log error but don't fail workflow
+                logger.error(f"[PublishFullAgent] Error during prompt composition: {str(e)}")
+                logger.error("[PublishFullAgent] Continuing workflow without prompt composition")
         
         # Mark tool params as published
         if tool_param_ids:
