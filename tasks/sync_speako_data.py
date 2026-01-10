@@ -809,7 +809,6 @@ def _build_service_menu_markdown(json_data: dict) -> str:
     other_locations = data.get('other_locations', [])
     if other_locations:
         sections.append("\n---\n")
-        sections.append("## Other Locations\n")
         
         for loc in other_locations:
             loc_name = loc.get('location_name', 'Location')

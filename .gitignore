@@ -40,3 +40,4 @@ build/
 # Ignore test and manual script folders
 test-scripts/
 manual-scripts/
+scripts/
