@@ -1,198 +1,230 @@
-services:
-  - type: worker
-    name: celery-worker
-    region: virginia
-    runtime: python
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "celery --app tasks.celery_app worker --loglevel info --concurrency 4 --events"
-    autoDeploy: true
-    envVars:
-      - key: CELERY_BROKER_URL
-        fromService:
-          name: celery-redis
-          type: redis
-          property: connectionString
-      - key: DATABASE_URL
-        fromDatabase:
-          name: speako-db
-          property: connectionString
-      - key: REDIS_URL
-        fromService:
-          name: speako-cache
-          type: redis
-          property: connectionString
-      - key: CELERY_RESULT_BACKEND
-        fromService:
-          name: celery-redis
-          type: redis
-          property: connectionString
-  - type: web
-    name: app
-    region: virginia
-    runtime: python
-    buildCommand: "pip install -r requirements.txt && python -m playwright install chromium"
-    startCommand: "gunicorn app:app"
-    autoDeploy: true
-    envVars:
-      - key: CELERY_BROKER_URL
-        fromService:
-          name: celery-redis
-          type: redis
-          property: connectionString
-      - key: CELERY_RESULT_BACKEND
-        fromService:
-          name: celery-redis
-          type: redis
-          property: connectionString
-
-  - type: web
-    name: flower
-    region: virginia
-    plan: free
-    runtime: python
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "celery flower --app tasks.celery_app --loglevel info --address=0.0.0.0 --port=5555 --basic_auth=user:password --broker=$CELERY_BROKER_URL --persistent=True --db=flower.db"
-    autoDeploy: true
-    envVars:
-      - key: CELERY_BROKER_URL
-        fromService:
-          type: redis
-          name: celery-redis
-          property: connectionString
-      - key: CELERY_RESULT_BACKEND
-        fromService:
-          name: celery-redis
-          type: redis
-          property: connectionString
-
-  - type: redis
-    name: celery-redis
-    region: virginia
-    plan: starter
-    maxmemoryPolicy: noeviction
-    ipAllowList: []
-
-  - type: cron
-    name: availability-task-dispatch
-    region: virginia
-    schedule: "0 0 1 1 *"
-    runtime: python
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "PYTHONPATH=. python dispatch/availability_tasks_dispatch.py"
-    autoDeploy: true
-    envVars:
-      - key: CELERY_BROKER_URL
-        fromService:
-          name: celery-redis
-          type: redis
-          property: connectionString
-      - key: DATABASE_URL
-        fromDatabase:
-          name: speako-db
-          property: connectionString
-
-  - type: web
-    name: cache-viewer
-    region: virginia
-    runtime: python
-    plan: starter
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn cache_viewer:app
-    envVars:
-      - key: CELERY_BROKER_URL
-        fromService:
-          name: celery-redis
-          type: redis
-          property: connectionString
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: speako-cache
-          property: connectionString
-      - key: DATABASE_URL
-        fromDatabase:
-          name: speako-db
-          property: connectionString
-    autoDeploy: true
-
-  - type: cron
-    name: gen-availability-cron-aus
-    region: virginia
-    env: python
-    schedule: "0 * * * *" # runs every hour, so if it reach a timezone of anyting inside jobs dict, it trigger the worker
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "PYTHONPATH=. python dispatch/gen_availability_dispatch.py"
-    envVars:
-      - key: CELERY_BROKER_URL
-        fromService:
-          name: celery-redis
-          type: redis
-          property: connectionString
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: speako-cache
-          property: connectionString
-      - key: DATABASE_URL
-        fromDatabase:
-          name: speako-db
-          property: connectionString
-
-  - type: cron
-    name: sync-elevenlabs-conversations
-    region: virginia
-    env: python
-    schedule: "0 2 * * *" # Daily at 2 AM UTC
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "PYTHONPATH=. python dispatch/sync_elevenlabs_conversations_dispatch.py"
-    envVars:
-      - key: CELERY_BROKER_URL
-        fromService:
-          name: celery-redis
-          type: redis
-          property: connectionString
-      - key: DATABASE_URL
-        fromDatabase:
-          name: speako-db
-          property: connectionString
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: speako-cache
-          property: connectionString
-      - key: ELEVENLABS_API_KEY
-        sync: false
-      - key: R2_ENDPOINT_URL
-        sync: false
-      - key: R2_ACCESS_KEY_ID
-        sync: false
-      - key: R2_SECRET_ACCESS_KEY
+# Exported from Render on 2026-01-20T06:31:45Z
+version: "1"
+projects:
+- name: speako-workers
+  environments:
+  - name: Development
+    services:
+    - type: web
+      name: cache-viewer-dev
+      runtime: python
+      repo: https://github.com/speakoai/celery
+      branch: dev
+      plan: starter
+      envVars:
+      - key: R2_ACCOUNT_ID
         sync: false
       - key: R2_BUCKET_NAME
         sync: false
-      - key: R2_PUBLIC_BASE_URL
+      - key: R2_ENDPOINT_URL
         sync: false
-
-  - type: cron
-    name: generate-dashboard-metrics
-    region: virginia
-    env: python
-    schedule: "0 3 * * *" # Daily at 3 AM UTC (after conversations sync)
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "PYTHONPATH=. python dispatch/generate_dashboard_metrics_dispatch.py"
-    envVars:
-      - key: CELERY_BROKER_URL
-        fromService:
-          name: celery-redis
-          type: redis
-          property: connectionString
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: ALLOWED_IPS
+        sync: false
       - key: DATABASE_URL
-        fromDatabase:
-          name: speako-db
-          property: connectionString
+        sync: false
+      - key: CELERY_BROKER_URL
+        sync: false
       - key: REDIS_URL
-        fromService:
-          type: redis
-          name: speako-cache
-          property: connectionString
+        sync: false
+      region: virginia
+      buildCommand: pip install -r requirements.txt
+      startCommand: gunicorn cache_viewer:app
+      autoDeployTrigger: commit
+    - type: cron
+      name: generate-dashboard-metrics-dev
+      runtime: python
+      repo: https://github.com/speakoai/celery
+      branch: dev
+      plan: starter
+      envVars:
+      - key: PYTHON_VERSION
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: CELERY_BROKER_URL
+        sync: false
+      region: virginia
+      buildCommand: pip install -r requirements.txt
+      startCommand: PYTHONPATH=. python dispatch/generate_dashboard_metrics_dispatch.py
+      schedule: 0 3 * * *
+      autoDeployTrigger: commit
+    - type: web
+      name: app-dev
+      runtime: python
+      repo: https://github.com/speakoai/celery
+      branch: dev
+      plan: starter
+      envVars:
+      - key: REDIS_URL
+        sync: false
+      - key: SENDGRID_FROM_EMAIL
+        sync: false
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: TWILIO_SEND_SMS_NUMBER
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: OPENAI_KNOWLEDGE_MODEL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false
+      - key: R2_ENDPOINT_URL
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: API_SECRET_KEY
+        sync: false
+      - key: CELERY_RESULT_BACKEND
+        sync: false
+      - key: CELERY_BROKER_URL
+        sync: false
+      region: virginia
+      buildCommand: pip install -r requirements.txt && python -m playwright install
+        chromium
+      startCommand: gunicorn app:app
+      autoDeployTrigger: commit
+    - type: web
+      name: flower-dev
+      runtime: python
+      repo: https://github.com/speakoai/celery
+      branch: dev
+      plan: free
+      envVars:
+      - key: CELERY_RESULT_BACKEND
+        sync: false
+      - key: CELERY_BROKER_URL
+        sync: false
+      region: virginia
+      buildCommand: pip install -r requirements.txt
+      startCommand: celery flower --app tasks.celery_app --loglevel info --address=0.0.0.0
+        --port=5555 --basic_auth=user:password --broker=$CELERY_BROKER_URL --persistent=True
+        --db=flower.db
+      autoDeployTrigger: commit
+    - type: worker
+      name: celery-worker-dev
+      runtime: python
+      repo: https://github.com/speakoai/celery
+      branch: dev
+      plan: starter
+      envVars:
+      - key: ELEVENLABS_WEBHOOK_SECRET
+        sync: false
+      - key: ELEVENLABS_PLAN_CREDITS
+        sync: false
+      - key: ELEVENLABS_PLAN_COST
+        sync: false
+      - key: SCRAPER_PRIORITY
+        sync: false
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: OPENAI_SYNC_MODEL
+        sync: false
+      - key: OPENAI_KNOWLEDGE_MODEL
+        sync: false
+      - key: SCRAPE_TIMEOUT_MS
+        sync: false
+      - key: ZENROWS_API_KEY
+        sync: false
+      - key: SCRAPERAPI_KEY
+        sync: false
+      - key: SCRAPERAPI_POLL_TOTAL_TIMEOUT_MS
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_ENDPOINT_URL
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: API_SECRET_KEY
+        sync: false
+      - key: TINYURL_API_TOKEN
+        sync: false
+      - key: CELERY_RESULT_BACKEND
+        sync: false
+      - key: TWILIO_SEND_SMS_NUMBER
+        sync: false
+      - key: FALLBACK_EMAIL
+        sync: false
+      - key: SENDGRID_FROM_EMAIL
+        sync: false
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: CELERY_BROKER_URL
+        sync: false
+      region: virginia
+      buildCommand: pip install -r requirements.txt
+      startCommand: celery --app tasks.celery_app worker --loglevel info --concurrency
+        4 --events
+      autoDeployTrigger: commit
+    - type: cron
+      name: gen-availability-cron-aus-dev
+      runtime: python
+      repo: https://github.com/speakoai/celery
+      branch: dev
+      plan: starter
+      envVars:
+      - key: CELERY_BROKER_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      region: virginia
+      buildCommand: pip install -r requirements.txt
+      startCommand: PYTHONPATH=. python dispatch/gen_availability_dispatch.py
+      schedule: 0 * * * *
+      autoDeployTrigger: commit
+    - type: cron
+      name: sync-elevenlabs-conversations-dev
+      runtime: python
+      repo: https://github.com/speakoai/celery
+      branch: dev
+      plan: starter
+      envVars:
+      - key: PYTHON_VERSION
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: CELERY_BROKER_URL
+        sync: false
+      region: virginia
+      buildCommand: pip install -r requirements.txt
+      startCommand: PYTHONPATH=. python dispatch/sync_elevenlabs_conversations_dispatch.py
+      schedule: 0 2 * * *
+      autoDeployTrigger: commit
 
