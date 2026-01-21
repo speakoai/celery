@@ -54,6 +54,30 @@ projects:
       startCommand: PYTHONPATH=. python dispatch/generate_dashboard_metrics_dispatch.py
       schedule: 0 3 * * *
       autoDeployTrigger: commit
+    - type: cron
+      name: replenish-twilio-numbers-dev
+      runtime: python
+      repo: https://github.com/speakoai/celery
+      branch: dev
+      plan: starter
+      envVars:
+      - key: PYTHON_VERSION
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_WEBHOOK_URL
+        sync: false
+      - key: TWILIO_NUMBER_MODE
+        sync: false
+      region: virginia
+      buildCommand: pip install -r requirements.txt
+      startCommand: PYTHONPATH=. python dispatch/replenish_twilio_numbers_dispatch.py
+      schedule: 0 14 * * *
+      autoDeployTrigger: commit
     - type: web
       name: app-dev
       runtime: python

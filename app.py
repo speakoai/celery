@@ -22,6 +22,7 @@ from tasks.scrape_url import scrape_url_to_markdown
 from tasks.sync_speako_data import sync_speako_data
 from tasks.publish_elevenlabs_agent import publish_elevenlabs_agent
 from tasks.create_ai_agent import create_conversation_ai_agent
+from tasks.purchase_twilio_number import replenish_twilio_numbers
 # Additional imports for R2 uploads
 import boto3
 from werkzeug.utils import secure_filename
@@ -2321,6 +2322,65 @@ def api_publish_elevenlabs_agent():
                 'source': 'publish_elevenlabs_agent',
                 **({'speako_task_id': speako_task_id} if speako_task_id else {})
             }
+        }), 202
+
+    except Exception as e:
+        return jsonify({'error': 'Internal server error', 'message': str(e)}), 500
+
+
+# =============================================================================
+# TWILIO PHONE NUMBER MANAGEMENT API
+# =============================================================================
+
+@app.route('/api/twilio/replenish_numbers', methods=['POST'])
+@require_api_key
+def api_replenish_twilio_numbers():
+    """
+    Trigger Twilio phone number replenishment task.
+    
+    This endpoint dispatches a Celery task to check current phone number
+    availability per region and purchase numbers to meet targets.
+    
+    Respects TWILIO_NUMBER_MODE:
+    - DEV: Maintain 1 available number per region
+    - PROD: Use full targets per region
+    
+    Expected JSON payload (optional):
+    {
+        "dry_run": false  // If true, only report what would be purchased
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "task_id": "...",
+        "message": "Twilio number replenishment task dispatched",
+        "mode": "DEV" | "PROD"
+    }
+    """
+    try:
+        data = request.get_json() or {}
+        dry_run = data.get('dry_run', False)
+        
+        # Check if task is available
+        if replenish_twilio_numbers is None:
+            return jsonify({
+                'error': 'Task not available',
+                'message': 'Celery task for Twilio replenishment is not configured'
+            }), 500
+        
+        # Get current mode for response
+        twilio_mode = os.getenv('TWILIO_NUMBER_MODE', 'DEV').upper()
+        
+        # Dispatch the Celery task
+        task = replenish_twilio_numbers.delay(dry_run=dry_run)
+        
+        return jsonify({
+            'success': True,
+            'task_id': task.id,
+            'message': 'Twilio number replenishment task dispatched',
+            'mode': twilio_mode,
+            'dry_run': dry_run
         }), 202
 
     except Exception as e:
