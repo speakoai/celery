@@ -30,6 +30,15 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+# Debug: Print Twilio env vars (masked)
+import os
+_sid = os.getenv('TWILIO_ACCOUNT_SID', '')
+_token = os.getenv('TWILIO_AUTH_TOKEN', '')
+_webhook = os.getenv('TWILIO_WEBHOOK_URL', '')
+print(f"[DEBUG] TWILIO_ACCOUNT_SID: {'SET (' + _sid[:6] + '...)' if _sid else 'NOT SET'}")
+print(f"[DEBUG] TWILIO_AUTH_TOKEN: {'SET (' + _token[:4] + '...)' if _token else 'NOT SET'}")
+print(f"[DEBUG] TWILIO_WEBHOOK_URL: {_webhook if _webhook else 'NOT SET'}")
+
 from tasks.purchase_twilio_number import (
     maintain_phone_number_availability,
     TWILIO_NUMBER_MODE,
