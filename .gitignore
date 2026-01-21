@@ -41,3 +41,6 @@ build/
 test-scripts/
 manual-scripts/
 scripts/
+
+# Ignore md folder (local reference only)
+md/
