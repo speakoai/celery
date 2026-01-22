@@ -1,4 +1,9 @@
 {
+  "name": "Happy Sushi",
+  "tags": [
+    "restaurants",
+    "Australia/Sydney"
+  ],
   "conversation_config": {
     "asr": {
       "quality": "high",
@@ -33,9 +38,13 @@
       }
     }
   },
-  "name": "Happy Sushi",
-  "tags": [
-    "restaurants",
-    "Australia/Sydney"
-  ]
+  "platform_settings": {
+    "overrides": {
+      "conversation_config_override": {
+        "agent": {
+          "first_message": true
+        }
+      }
+    }
+  }
 }

@@ -23,6 +23,7 @@ from tasks.sync_speako_data import sync_speako_data
 from tasks.publish_elevenlabs_agent import publish_elevenlabs_agent
 from tasks.create_ai_agent import create_conversation_ai_agent
 from tasks.purchase_twilio_number import replenish_twilio_numbers
+from tasks.update_twilio_friendly_name import update_twilio_friendly_name
 # Additional imports for R2 uploads
 import boto3
 from werkzeug.utils import secure_filename
@@ -2381,6 +2382,75 @@ def api_replenish_twilio_numbers():
             'message': 'Twilio number replenishment task dispatched',
             'mode': twilio_mode,
             'dry_run': dry_run
+        }), 202
+
+    except Exception as e:
+        return jsonify({'error': 'Internal server error', 'message': str(e)}), 500
+
+
+@app.route('/api/twilio/update_friendly_name', methods=['POST'])
+@require_api_key
+def api_update_twilio_friendly_name():
+    """
+    Update Twilio phone number friendly name to match location name.
+    
+    This endpoint dispatches a Celery task to:
+    1. Look up the location name and twilio_phone_number from locations table
+    2. Find the twilio_sid in twilio_phone_numbers table
+    3. Update friendly_name in both database and Twilio API
+    
+    Expected JSON payload:
+    {
+        "location_id": "123",           // required
+        "speako_task_id": "abc-123"     // optional correlation ID
+    }
+    
+    Returns 202 with celery_task_id for polling at /api/task/<task_id>.
+    """
+    try:
+        # Parse JSON payload
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({
+                'error': 'JSON payload required',
+                'message': 'Send a valid JSON body with Content-Type: application/json',
+                'content_type': request.headers.get('Content-Type', None)
+            }), 400
+
+        location_id = data.get('location_id')
+        speako_task_id = data.get('speako_task_id')
+
+        # Validate required fields
+        if not location_id:
+            return jsonify({
+                'error': 'Missing required field',
+                'missing_fields': ['location_id']
+            }), 400
+
+        # Check if task is available
+        if update_twilio_friendly_name is None:
+            return jsonify({
+                'error': 'Task not available',
+                'message': 'Celery task for Twilio friendly name update is not configured'
+            }), 500
+
+        # Dispatch the Celery task
+        task = update_twilio_friendly_name.delay(location_id=location_id)
+
+        # Return response consistent with other async endpoints
+        return jsonify({
+            'success': True,
+            'message': 'Twilio friendly name update task started',
+            'data': {
+                'analysis': {
+                    'status': 'queued',
+                    'mode': 'background',
+                    'celery_task_id': task.id
+                },
+                'location_id': location_id,
+                'source': 'update_twilio_friendly_name',
+                **({'speako_task_id': speako_task_id} if speako_task_id else {})
+            }
         }), 202
 
     except Exception as e:
