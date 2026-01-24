@@ -152,6 +152,9 @@ def send_sms_confirmation_new(booking_id: int):
             tiny_url = create_tiny_url(manage_booking_url)
             message += f" Manage your booking: {tiny_url}"
 
+        # Add Speako AI signature
+        message += " [Speako AI]"
+
         client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
         client.messages.create(
             body=message,
@@ -266,6 +269,9 @@ def send_sms_confirmation_mod(booking_id: int):
             tiny_url = create_tiny_url(manage_booking_url)
             message += f" Manage your booking: {tiny_url}"
 
+        # Add Speako AI signature
+        message += " [Speako AI]"
+
         client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
         client.messages.create(
             body=message,
@@ -378,6 +384,9 @@ def send_sms_confirmation_can(booking_id: int):
             # Create shortened URL for SMS
             tiny_url = create_tiny_url(manage_booking_url)
             message += f" View details: {tiny_url}"
+
+        # Add Speako AI signature
+        message += " [Speako AI]"
 
         client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
         client.messages.create(
