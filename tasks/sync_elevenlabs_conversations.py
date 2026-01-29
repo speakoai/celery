@@ -36,10 +36,6 @@ REDIS_URL = os.getenv("REDIS_URL")
 SYNC_REDIS_KEY_PREFIX = "elevenlabs_sync:last_sync"
 SYNC_REDIS_TTL = 15552000  # 180 days in seconds
 
-# ElevenLabs billing plan configuration
-ELEVENLABS_PLAN_COST = float(os.getenv("ELEVENLABS_PLAN_COST", "330"))  # USD
-ELEVENLABS_PLAN_CREDITS = float(os.getenv("ELEVENLABS_PLAN_CREDITS", "200000"))  # Credits
-
 
 def get_redis_client():
     """Get Redis client for sync tracking."""
@@ -425,146 +421,6 @@ def insert_conversation_details(
         return 0
 
 
-def insert_billing_record(
-    conn,
-    location_conversation_id: int,
-    conversation_id: str,
-    agent_id: str,
-    details: Dict[str, Any]
-) -> bool:
-    """
-    Insert or update billing record into billing_location_conversations table.
-    
-    Args:
-        conn: Database connection
-        location_conversation_id: Parent conversation ID
-        conversation_id: ElevenLabs conversation ID
-        agent_id: ElevenLabs agent ID
-        details: Full conversation details from API
-    
-    Returns:
-        True if successful, False otherwise
-    """
-    try:
-        # Extract metadata
-        metadata = details.get('metadata', {})
-        charging = metadata.get('charging', {})
-        dynamic_vars = details.get('conversation_initiation_client_data', {}).get('dynamic_variables', {})
-        
-        # Duration - primary source from metadata, fallback to dynamic_variables
-        call_duration_secs = metadata.get('call_duration_secs')
-        if call_duration_secs is None:
-            call_duration_secs = dynamic_vars.get('system__call_duration_secs')
-        call_duration_secs = call_duration_secs if call_duration_secs is not None else 0
-        
-        # Credits
-        total_credits = metadata.get('cost') or 0
-        llm_credits = charging.get('llm_charge') or 0
-        call_credits = charging.get('call_charge') or 0
-        
-        # Charging info
-        charging_tier = charging.get('tier')
-        dev_discount = charging.get('dev_discount') if charging.get('dev_discount') is not None else False
-        llm_price_usd = charging.get('llm_price') or 0.0
-        
-        # Currency (hardcoded)
-        currency_code = 'USD'
-        
-        # JSONB fields
-        llm_usage = charging.get('llm_usage')
-        llm_usage_json = json.dumps(llm_usage) if llm_usage else None
-        
-        raw_billing_metadata = json.dumps(details)
-        
-        # Calculated field - llm_cost is the same as llm_price_usd (already in USD)
-        llm_cost = llm_price_usd
-        
-        # Calculate estimated total call cost based on subscription plan
-        credit_rate = ELEVENLABS_PLAN_COST / ELEVENLABS_PLAN_CREDITS if ELEVENLABS_PLAN_CREDITS > 0 else 0
-        estimated_total_call_cost = (total_credits or 0) * credit_rate
-        
-        # Calculate estimated cost per minute (handle zero duration)
-        if call_duration_secs and call_duration_secs > 0:
-            duration_minutes = call_duration_secs / 60.0
-            estimated_cost_per_minute = estimated_total_call_cost / duration_minutes
-        else:
-            estimated_cost_per_minute = None
-        
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO billing_location_conversations (
-                    location_conversation_id,
-                    provider_conversation_id,
-                    provider_agent_id,
-                    call_duration_secs,
-                    total_credits,
-                    llm_credits,
-                    call_credits,
-                    charging_tier,
-                    dev_discount,
-                    llm_price_usd,
-                    llm_cost,
-                    currency_code,
-                    llm_usage,
-                    raw_billing_metadata,
-                    estimated_total_call_cost,
-                    estimated_cost_per_minute,
-                    updated_at
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                ON CONFLICT (provider_conversation_id)
-                DO UPDATE SET
-                    location_conversation_id = EXCLUDED.location_conversation_id,
-                    call_duration_secs = EXCLUDED.call_duration_secs,
-                    total_credits = EXCLUDED.total_credits,
-                    llm_credits = EXCLUDED.llm_credits,
-                    call_credits = EXCLUDED.call_credits,
-                    charging_tier = EXCLUDED.charging_tier,
-                    dev_discount = EXCLUDED.dev_discount,
-                    llm_price_usd = EXCLUDED.llm_price_usd,
-                    llm_cost = EXCLUDED.llm_cost,
-                    currency_code = EXCLUDED.currency_code,
-                    llm_usage = EXCLUDED.llm_usage,
-                    raw_billing_metadata = EXCLUDED.raw_billing_metadata,
-                    estimated_total_call_cost = EXCLUDED.estimated_total_call_cost,
-                    estimated_cost_per_minute = EXCLUDED.estimated_cost_per_minute,
-                    updated_at = CURRENT_TIMESTAMP
-            """, (
-                location_conversation_id,
-                conversation_id,
-                agent_id,
-                call_duration_secs,
-                total_credits,
-                llm_credits,
-                call_credits,
-                charging_tier,
-                dev_discount,
-                llm_price_usd,
-                llm_cost,
-                currency_code,
-                llm_usage_json,
-                raw_billing_metadata,
-                estimated_total_call_cost,
-                estimated_cost_per_minute
-            ))
-        
-        cost_per_min_str = f"${estimated_cost_per_minute:.4f}/min" if estimated_cost_per_minute else "N/A"
-        logger.info(
-            f"[ConvSync] Upserted billing record for conversation {conversation_id}: "
-            f"duration={call_duration_secs}s, total_credits={total_credits}, "
-            f"llm_credits={llm_credits}, call_credits={call_credits}, "
-            f"estimated_cost=${estimated_total_call_cost:.4f}, cost_per_min={cost_per_min_str}"
-        )
-        
-        return True
-        
-    except Exception as e:
-        logger.error(f"[ConvSync] Failed to upsert billing record: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
-
-
 def update_audio_path(conn, location_conversation_id: int, audio_r2_path: str) -> bool:
     """
     Update audio_r2_path in location_conversations table.
@@ -743,10 +599,7 @@ def sync_conversations_for_location(
                     # 5c. Insert location_conversation_details (transcript)
                     transcript = details.get('transcript', [])
                     insert_conversation_details(conn, location_conversation_id, transcript)
-                    
-                    # 5d. Insert billing_location_conversations
-                    insert_billing_record(conn, location_conversation_id, conversation_id, agent_id, details)
-                    
+
                     # Commit transaction
                     conn.commit()
                     

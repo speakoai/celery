@@ -2496,6 +2496,19 @@ def elevenlabs_post_conversation_webhook():
     print("=" * 80)
     print(f"Timestamp: {datetime.utcnow().isoformat()}Z")
     print(f"Payload size: {len(payload_bytes)} bytes")
+
+    # Debug: Show configured environment resources
+    print("-" * 80)
+    print("🔧 CONFIGURED RESOURCES:")
+    db_url_display = DATABASE_URL[:50] + "..." if DATABASE_URL and len(DATABASE_URL) > 50 else DATABASE_URL
+    db_url_dev_display = DATABASE_URL_DEV[:50] + "..." if DATABASE_URL_DEV and len(DATABASE_URL_DEV) > 50 else DATABASE_URL_DEV
+    print(f"   DATABASE_URL (PROD): {db_url_display}")
+    print(f"   DATABASE_URL_DEV: {db_url_dev_display or 'NOT CONFIGURED'}")
+    print(f"   R2_BUCKET_NAME (PROD): {os.getenv('R2_BUCKET_NAME', 'NOT SET')}")
+    print(f"   R2_BUCKET_NAME_DEV: {os.getenv('R2_BUCKET_NAME_DEV', 'NOT SET')}")
+    print(f"   R2_PUBLIC_BASE_URL (PROD): {os.getenv('R2_PUBLIC_BASE_URL', 'NOT SET')}")
+    print(f"   R2_PUBLIC_BASE_URL_DEV: {os.getenv('R2_PUBLIC_BASE_URL_DEV', 'NOT SET')}")
+    print("-" * 80)
     
     # Pre-parse JSON to check for demo agent (before HMAC verification)
     # Demo agents bypass HMAC to allow testing without signature setup
@@ -2655,6 +2668,7 @@ def elevenlabs_post_conversation_webhook():
         try:
             # Step 1: Lookup location information
             print(f"\n[Step 1] Looking up location for agent_id: {agent_id}")
+            print(f"   🔍 Querying PROD database first...")
 
             with conn.cursor() as cur:
                 cur.execute("""
@@ -2721,7 +2735,20 @@ def elevenlabs_post_conversation_webhook():
             tenant_id, location_id, location_name, timezone_str = location_row
             env_label = "DEV" if is_dev_environment else "PROD"
             print(f"✅ Found location ({env_label}): tenant_id={tenant_id}, location_id={location_id}, name={location_name}")
-            
+
+            # Debug: Show which resources will be used for this request
+            print("-" * 40)
+            print(f"🎯 ACTIVE ENVIRONMENT: {env_label}")
+            if is_dev_environment:
+                print(f"   Database: DATABASE_URL_DEV")
+                print(f"   R2 Bucket: {os.getenv('R2_BUCKET_NAME_DEV', 'NOT SET')}")
+                print(f"   R2 Base URL: {os.getenv('R2_PUBLIC_BASE_URL_DEV', 'NOT SET')}")
+            else:
+                print(f"   Database: DATABASE_URL (PROD)")
+                print(f"   R2 Bucket: {os.getenv('R2_BUCKET_NAME', 'NOT SET')}")
+                print(f"   R2 Base URL: {os.getenv('R2_PUBLIC_BASE_URL', 'NOT SET')}")
+            print("-" * 40)
+
             # Step 2: Check for duplicate conversation (idempotency)
             print(f"\n[Step 2] Checking for duplicate conversation")
             
@@ -3084,12 +3111,17 @@ def elevenlabs_post_conversation_webhook():
                 raise
             
             env_label = "DEV" if is_dev_environment else "PROD"
+            r2_bucket_used = os.getenv('R2_BUCKET_NAME_DEV') if is_dev_environment else os.getenv('R2_BUCKET_NAME')
             print("=" * 80)
             print(f"✅ Webhook processed successfully ({env_label})")
             print(f"   Environment: {env_label}")
+            print(f"   Database: {'DATABASE_URL_DEV' if is_dev_environment else 'DATABASE_URL'}")
+            print(f"   R2 Bucket: {r2_bucket_used}")
             print(f"   Conversation ID: {conversation_id}")
             print(f"   Location Conversation ID: {location_conversation_id}")
             print(f"   Audio uploaded: {bool(audio_r2_path)}")
+            if audio_r2_path:
+                print(f"   Audio URL: {audio_r2_path}")
             print(f"   Transcript messages: {len(transcript) if transcript else 0}")
             print("=" * 80)
 
