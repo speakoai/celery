@@ -20,6 +20,10 @@ R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
 R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME")
 R2_PUBLIC_BASE_URL = os.getenv("R2_PUBLIC_BASE_URL", "https://assets.speako.ai")
 
+# Dev R2 Configuration (for webhook fallback when agent is in dev database)
+R2_BUCKET_NAME_DEV = os.getenv("R2_BUCKET_NAME_DEV")
+R2_PUBLIC_BASE_URL_DEV = os.getenv("R2_PUBLIC_BASE_URL_DEV", "https://assets-dev.speako.ai")
+
 
 def _get_r2_client():
     """Get configured boto3 S3 client for Cloudflare R2."""
@@ -143,32 +147,47 @@ def upload_audio_to_r2(
     location_id: str,
     conversation_id: str,
     audio_bytes: bytes,
-    content_type: str = 'audio/mpeg'
+    content_type: str = 'audio/mpeg',
+    use_dev: bool = False
 ) -> Tuple[str, str]:
     """
     Upload conversation audio file to Cloudflare R2 storage.
-    
+
     Args:
         tenant_id: Tenant identifier
         location_id: Location identifier
         conversation_id: ElevenLabs conversation ID
         audio_bytes: Raw audio file bytes
         content_type: MIME type of audio file (default: 'audio/mpeg')
-    
+        use_dev: If True, upload to dev R2 bucket instead of production
+
     Returns:
         Tuple of (r2_key, public_url)
         - r2_key: Full path/key in the R2 bucket
         - public_url: Public URL to access the audio file
-    
+
     Upload path structure: {tenant_id}/{location_id}/conversations/{conversation_id}.{ext}
     """
+    # Select bucket and base URL based on environment
+    if use_dev:
+        bucket_name = R2_BUCKET_NAME_DEV
+        public_base_url = R2_PUBLIC_BASE_URL_DEV
+        env_label = "DEV"
+    else:
+        bucket_name = R2_BUCKET_NAME
+        public_base_url = R2_PUBLIC_BASE_URL
+        env_label = "PROD"
+
+    if not bucket_name:
+        raise RuntimeError(f"R2 bucket name not configured for {env_label} environment")
+
     logger.info(
-        f"[publish_r2] Uploading audio to R2: tenant_id={tenant_id}, location_id={location_id}, "
+        f"[publish_r2] Uploading audio to R2 ({env_label}): tenant_id={tenant_id}, location_id={location_id}, "
         f"conversation_id={conversation_id}, audio_size={len(audio_bytes)} bytes, type={content_type}"
     )
-    
+
     r2_client = _get_r2_client()
-    
+
     # Determine file extension from content type
     extension_map = {
         'audio/mpeg': 'mp3',
@@ -180,10 +199,10 @@ def upload_audio_to_r2(
         'audio/ogg': 'ogg',
     }
     extension = extension_map.get(content_type, 'mp3')  # Default to mp3
-    
+
     # Construct R2 key (path in bucket)
     r2_key = f"{tenant_id}/{location_id}/conversations/{conversation_id}.{extension}"
-    
+
     # Prepare metadata
     metadata = {
         'tenant_id': str(tenant_id),
@@ -191,23 +210,24 @@ def upload_audio_to_r2(
         'conversation_id': conversation_id,
         'upload_timestamp': datetime.utcnow().isoformat() + 'Z',
         'content_type': content_type,
-        'group': 'conversation_audio'
+        'group': 'conversation_audio',
+        'environment': env_label.lower()
     }
-    
+
     # Upload to R2
     r2_client.put_object(
-        Bucket=R2_BUCKET_NAME,
+        Bucket=bucket_name,
         Key=r2_key,
         Body=audio_bytes,
         ContentType=content_type,
         Metadata=metadata
     )
-    
+
     # Construct public URL
-    public_url = f"{R2_PUBLIC_BASE_URL}/{r2_key}"
-    
+    public_url = f"{public_base_url}/{r2_key}"
+
     logger.info(
-        f"[publish_r2] Successfully uploaded audio to R2: key={r2_key}, url={public_url}"
+        f"[publish_r2] Successfully uploaded audio to R2 ({env_label}): key={r2_key}, url={public_url}"
     )
-    
+
     return (r2_key, public_url)

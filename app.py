@@ -85,6 +85,7 @@ r2_client = boto3.client(
 
 # Database configuration for webhooks
 DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL_DEV = os.getenv("DATABASE_URL_DEV")  # Fallback for dev environment agents
 
 # Redis configuration for agent context caching
 REDIS_URL = os.getenv("REDIS_URL")
@@ -402,6 +403,13 @@ def send_demo_agent_notification(conversation_id: str, agent_config: dict) -> di
 def get_db_connection():
     """Get PostgreSQL database connection for webhook processing."""
     return psycopg2.connect(DATABASE_URL)
+
+
+def get_dev_db_connection():
+    """Get PostgreSQL database connection to DEV database for fallback lookup."""
+    if not DATABASE_URL_DEV:
+        return None
+    return psycopg2.connect(DATABASE_URL_DEV)
 
 
 def trigger_usage_notification(tenant_id: int, conn) -> None:
@@ -2641,11 +2649,13 @@ def elevenlabs_post_conversation_webhook():
     # Process webhook
     try:
         conn = get_db_connection()
-        
+        is_dev_environment = False
+        dev_conn = None
+
         try:
             # Step 1: Lookup location information
             print(f"\n[Step 1] Looking up location for agent_id: {agent_id}")
-            
+
             with conn.cursor() as cur:
                 cur.execute("""
                     SELECT tenant_id, location_id, name, timezone
@@ -2654,15 +2664,51 @@ def elevenlabs_post_conversation_webhook():
                     AND is_active = true
                     LIMIT 1
                 """, (agent_id,))
-                
+
                 location_row = cur.fetchone()
-            
+
+            # If not found in production DB, try dev DB as fallback
+            if not location_row and DATABASE_URL_DEV:
+                print(f"⚠️  No location found in PROD database, trying DEV database...")
+                try:
+                    dev_conn = get_dev_db_connection()
+                    if dev_conn:
+                        with dev_conn.cursor() as cur:
+                            cur.execute("""
+                                SELECT tenant_id, location_id, name, timezone
+                                FROM locations
+                                WHERE elevenlabs_agent_id = %s
+                                AND is_active = true
+                                LIMIT 1
+                            """, (agent_id,))
+
+                            location_row = cur.fetchone()
+
+                        if location_row:
+                            # Switch to dev connection for all subsequent operations
+                            print(f"✅ Found location in DEV database - switching to DEV environment")
+                            conn.close()
+                            conn = dev_conn
+                            dev_conn = None  # Prevent double-close in finally
+                            is_dev_environment = True
+                        else:
+                            dev_conn.close()
+                            dev_conn = None
+                except Exception as dev_e:
+                    print(f"⚠️  Failed to check DEV database: {dev_e}")
+                    if dev_conn:
+                        try:
+                            dev_conn.close()
+                        except:
+                            pass
+                        dev_conn = None
+
             if not location_row:
                 print(f"⚠️  No location found for agent_id: {agent_id}")
                 print(f"⚠️  ORPHANED CONVERSATION: {conversation_id}")
                 print(f"⚠️  This conversation cannot be inserted without location mapping")
                 print("=" * 80)
-                
+
                 # Return 200 to prevent retries, but log critical error
                 return jsonify({
                     'success': True,
@@ -2671,9 +2717,10 @@ def elevenlabs_post_conversation_webhook():
                     'conversation_id': conversation_id,
                     'agent_id': agent_id
                 }), 200
-            
+
             tenant_id, location_id, location_name, timezone_str = location_row
-            print(f"✅ Found location: tenant_id={tenant_id}, location_id={location_id}, name={location_name}")
+            env_label = "DEV" if is_dev_environment else "PROD"
+            print(f"✅ Found location ({env_label}): tenant_id={tenant_id}, location_id={location_id}, name={location_name}")
             
             # Step 2: Check for duplicate conversation (idempotency)
             print(f"\n[Step 2] Checking for duplicate conversation")
@@ -2739,19 +2786,21 @@ def elevenlabs_post_conversation_webhook():
             
             # Step 5: Upload audio to R2
             if audio_bytes:
-                print(f"\n[Step 5] Uploading audio to R2")
-                
+                env_label = "DEV" if is_dev_environment else "PROD"
+                print(f"\n[Step 5] Uploading audio to R2 ({env_label})")
+
                 try:
                     r2_key, public_url = upload_audio_to_r2(
                         str(tenant_id),
                         str(location_id),
                         conversation_id,
                         audio_bytes,
-                        content_type='audio/mpeg'
+                        content_type='audio/mpeg',
+                        use_dev=is_dev_environment
                     )
-                    
+
                     audio_r2_path = public_url  # Use full URL with CDN base
-                    print(f"✅ Audio uploaded to R2: {public_url}")
+                    print(f"✅ Audio uploaded to R2 ({env_label}): {public_url}")
                     
                 except Exception as e:
                     print(f"⚠️  Failed to upload audio to R2: {e}")
@@ -3034,17 +3083,20 @@ def elevenlabs_post_conversation_webhook():
                 traceback.print_exc()
                 raise
             
+            env_label = "DEV" if is_dev_environment else "PROD"
             print("=" * 80)
-            print(f"✅ Webhook processed successfully")
+            print(f"✅ Webhook processed successfully ({env_label})")
+            print(f"   Environment: {env_label}")
             print(f"   Conversation ID: {conversation_id}")
             print(f"   Location Conversation ID: {location_conversation_id}")
             print(f"   Audio uploaded: {bool(audio_r2_path)}")
             print(f"   Transcript messages: {len(transcript) if transcript else 0}")
             print("=" * 80)
-            
+
             return jsonify({
                 'success': True,
                 'message': 'Conversation processed successfully',
+                'environment': env_label.lower(),
                 'conversation_id': conversation_id,
                 'location_conversation_id': location_conversation_id,
                 'audio_uploaded': bool(audio_r2_path),
