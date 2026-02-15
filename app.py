@@ -2732,7 +2732,7 @@ def elevenlabs_post_conversation_webhook():
                     'agent_id': agent_id
                 }), 200
 
-            tenant_id, location_id, location_name, timezone_str = location_row
+            tenant_id, location_id, location_name, _ = location_row
             env_label = "DEV" if is_dev_environment else "PROD"
             print(f"✅ Found location ({env_label}): tenant_id={tenant_id}, location_id={location_id}, name={location_name}")
 
@@ -2861,14 +2861,13 @@ def elevenlabs_post_conversation_webhook():
             # Step 7: Insert new conversation record
             print(f"\n[Step 6] Inserting conversation into database")
             
-            # Helper function to convert timestamp to location timezone
+            # Helper function to convert timestamp to UTC
             def convert_timestamp(unix_ts):
                 if unix_ts is None:
                     return None
                 try:
                     utc_dt = datetime.fromtimestamp(unix_ts, tz=ZoneInfo('UTC'))
-                    local_dt = utc_dt.astimezone(ZoneInfo(timezone_str))
-                    return local_dt.replace(tzinfo=None)
+                    return utc_dt.replace(tzinfo=None)
                 except Exception:
                     return None
             

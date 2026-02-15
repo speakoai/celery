@@ -47,30 +47,23 @@ def get_db_connection():
     return psycopg2.connect(DATABASE_URL)
 
 
-def convert_unix_to_location_tz(unix_timestamp: Optional[int], timezone_str: str) -> Optional[datetime]:
+def convert_unix_to_utc(unix_timestamp: Optional[int]) -> Optional[datetime]:
     """
-    Convert UNIX timestamp to location timezone (without timezone info).
-    
+    Convert UNIX timestamp to UTC datetime (without timezone info).
+
     Args:
         unix_timestamp: UNIX timestamp in seconds (or None)
-        timezone_str: IANA timezone string (e.g., 'Australia/Sydney')
-    
+
     Returns:
-        datetime in location timezone without timezone info (or None)
+        datetime in UTC without timezone info (or None)
     """
     if unix_timestamp is None:
         return None
-    
+
     try:
-        # Convert to UTC datetime first
+        # Convert to UTC datetime and strip timezone info
         utc_dt = datetime.fromtimestamp(unix_timestamp, tz=ZoneInfo('UTC'))
-        
-        # Convert to location timezone
-        location_tz = ZoneInfo(timezone_str)
-        local_dt = utc_dt.astimezone(location_tz)
-        
-        # Strip timezone info (store as naive datetime in local time)
-        return local_dt.replace(tzinfo=None)
+        return utc_dt.replace(tzinfo=None)
     except Exception as e:
         logger.warning(f"[ConvSync] Failed to convert timestamp {unix_timestamp}: {e}")
         return None
@@ -243,7 +236,6 @@ def insert_conversation(
     location_id: int,
     agent_id: str,
     location_name: str,
-    timezone_str: str,
     details: Dict[str, Any]
 ) -> Optional[int]:
     """
@@ -271,15 +263,13 @@ def insert_conversation(
         # Agent name: use from API or fallback to location name
         agent_name = details.get('agent_name') or location_name
         
-        # Convert timestamps to location timezone (from metadata)
-        call_start_time = convert_unix_to_location_tz(
-            metadata.get('start_time_unix_secs'),
-            timezone_str
+        # Convert timestamps to UTC (from metadata)
+        call_start_time = convert_unix_to_utc(
+            metadata.get('start_time_unix_secs')
         )
-        
-        call_accepted_time = convert_unix_to_location_tz(
-            metadata.get('end_time_unix_secs'),  # May not exist (nullable)
-            timezone_str
+
+        call_accepted_time = convert_unix_to_utc(
+            metadata.get('end_time_unix_secs')  # May not exist (nullable)
         )
         
         # Call duration (from metadata)
@@ -590,7 +580,7 @@ def sync_conversations_for_location(
                     # 5b. Insert location_conversations
                     location_conversation_id = insert_conversation(
                         conn, tenant_id, location_id, agent_id,
-                        location_name, timezone_str, details
+                        location_name, details
                     )
                     
                     if not location_conversation_id:
