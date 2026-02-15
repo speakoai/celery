@@ -2,16 +2,18 @@
 Dispatch script for replenishing Twilio phone numbers.
 
 This script runs the Twilio number replenishment task directly (not via Celery).
-It checks current phone number availability per region and purchases numbers
-to meet the configured targets.
+It checks current phone number availability per country/region and purchases
+numbers to meet the configured targets.
+
+Supported countries: AU, US, GB, CA, NZ
 
 Respects TWILIO_NUMBER_MODE:
-- DEV: Maintain 1 available number per region
-- PROD: Use full targets per region
+- DEV: Maintain 1 available number per country
+- PROD: Use full targets per country/region
 
 Usage:
     python dispatch/replenish_twilio_numbers_dispatch.py
-    
+
     # Dry run (no purchases):
     python dispatch/replenish_twilio_numbers_dispatch.py --dry-run
 """
@@ -42,7 +44,7 @@ print(f"[DEBUG] TWILIO_WEBHOOK_URL: {_webhook if _webhook else 'NOT SET'}")
 from tasks.purchase_twilio_number import (
     maintain_phone_number_availability,
     TWILIO_NUMBER_MODE,
-    REGION_AVAILABILITY_TARGETS
+    COUNTRY_AVAILABILITY_TARGETS
 )
 
 
@@ -64,10 +66,13 @@ def dispatch_replenish_task(dry_run: bool = False):
     print("=" * 80)
     print()
     
-    # Show configured targets
+    # Show configured targets per country
     print("[INFO] Configured availability targets:")
-    for region, target in REGION_AVAILABILITY_TARGETS.items():
-        print(f"  - {region}: {target}")
+    for country_code, targets in COUNTRY_AVAILABILITY_TARGETS.items():
+        print(f"  [{country_code}]")
+        for region, target in targets.items():
+            display_region = region if region != '_national' else '(national)'
+            print(f"    - {display_region}: {target}")
     print()
     
     # Run the task directly (not via Celery)

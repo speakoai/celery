@@ -47,67 +47,59 @@ DATABASE_URL = os.getenv('DATABASE_URL')
 # Mode: DEV or PROD - affects availability targets
 TWILIO_NUMBER_MODE = os.getenv('TWILIO_NUMBER_MODE', 'DEV').upper()
 
-# Default address SID for Australian numbers (Sydney CBD address)
-# TODO: Move to env variable after testing
-DEFAULT_ADDRESS_SID = "AD19502cc95b72134e88f2f069c4a78007"
-
-# Australian region code to full name mapping (for Twilio API)
-# Twilio requires full state names for accurate region filtering
-AUSTRALIAN_REGION_NAMES = {
-    'NSW': 'New South Wales',
-    'ACT': 'Australian Capital Territory',
-    'VIC': 'Victoria',
-    'TAS': 'Tasmania',
-    'QLD': 'Queensland',
-    'SA': 'South Australia',
-    'WA': 'Western Australia',
-    'NT': 'Northern Territory',
+# Per-country configuration for phone number purchasing and replenishment
+COUNTRY_CONFIG = {
+    'AU': {
+        'number_type': 'local',
+        'address_sid': 'AD19502cc95b72134e88f2f069c4a78007',
+        'region_names': {
+            'NSW': 'New South Wales', 'ACT': 'Australian Capital Territory',
+            'VIC': 'Victoria', 'TAS': 'Tasmania', 'QLD': 'Queensland',
+            'SA': 'South Australia', 'WA': 'Western Australia', 'NT': 'Northern Territory',
+        },
+        'targets_prod': {'NSW': 3, 'ACT': 1, 'VIC': 2, 'TAS': 1, 'QLD': 2, 'SA': 1, 'WA': 1, 'NT': 1},
+        'targets_dev': {'_national': 1},
+    },
+    'US': {
+        'number_type': 'local',
+        'address_sid': None,
+        'region_names': {},
+        'targets_prod': {'_national': 5},
+        'targets_dev': {'_national': 1},
+    },
+    'GB': {
+        'number_type': 'mobile',
+        'address_sid': 'AD5d5da1b021517e2d70e934454841369b',
+        'region_names': {},
+        'targets_prod': {'_national': 5},
+        'targets_dev': {'_national': 1},
+    },
+    'CA': {
+        'number_type': 'local',
+        'address_sid': None,
+        'region_names': {},
+        'targets_prod': {'_national': 5},
+        'targets_dev': {'_national': 1},
+    },
+    'NZ': {
+        'number_type': 'local',
+        'address_sid': 'ADa8b05363938d5d911383fc8fde8f648',
+        'region_names': {},
+        'targets_prod': {'_national': 5},
+        'targets_dev': {'_national': 1},
+    },
 }
 
-# Reverse mapping: full name -> abbreviation
-AUSTRALIAN_REGION_ABBREV = {v: k for k, v in AUSTRALIAN_REGION_NAMES.items()}
-
-# Australian area code to region mapping
-# Note: Some area codes are shared across multiple regions
-# Area code 02: NSW, ACT
-# Area code 03: VIC, TAS
-# Area code 07: QLD
-# Area code 08: SA, WA, NT
-AUSTRALIAN_AREA_CODES = {
-    'NSW': '02',
-    'ACT': '02',  # Shares with NSW
-    'VIC': '03',
-    'TAS': '03',  # Shares with VIC
-    'QLD': '07',
-    'SA': '08',
-    'WA': '08',   # Shares with SA
-    'NT': '08',   # Shares with SA/WA
-}
-
-# Region availability targets for Australia (PROD mode)
-# In DEV mode, all targets become 1
-REGION_AVAILABILITY_TARGETS_PROD = {
-    'NSW': 3,
-    'ACT': 1,
-    'VIC': 2,
-    'TAS': 1,
-    'QLD': 2,
-    'SA': 1,
-    'WA': 1,
-    'NT': 1,
-}
-
-# DEV mode: just 1 per region for testing
-REGION_AVAILABILITY_TARGETS_DEV = {region: 1 for region in REGION_AVAILABILITY_TARGETS_PROD}
-
-# Select targets based on mode
-REGION_AVAILABILITY_TARGETS = (
-    REGION_AVAILABILITY_TARGETS_PROD if TWILIO_NUMBER_MODE == 'PROD' 
-    else REGION_AVAILABILITY_TARGETS_DEV
-)
+# Derive active availability targets from mode
+COUNTRY_AVAILABILITY_TARGETS = {}
+for _cc, _cfg in COUNTRY_CONFIG.items():
+    if TWILIO_NUMBER_MODE == 'PROD':
+        COUNTRY_AVAILABILITY_TARGETS[_cc] = _cfg['targets_prod']
+    else:
+        COUNTRY_AVAILABILITY_TARGETS[_cc] = _cfg['targets_dev']
 
 # Maximum numbers to purchase in a single run (safety limit)
-MAX_PURCHASE_PER_RUN = 10
+MAX_PURCHASE_PER_RUN = 20
 
 
 def get_twilio_client():
@@ -185,10 +177,10 @@ def search_available_numbers(
     }
     
     if region:
-        # For Australian numbers, convert abbreviation to full name for accurate API filtering
-        # Twilio API requires full state names (e.g., "Tasmania" not "TAS")
-        if country_code == 'AU' and region in AUSTRALIAN_REGION_NAMES:
-            search_params['in_region'] = AUSTRALIAN_REGION_NAMES[region]
+        # Convert region abbreviation to full name if mapping exists (e.g., 'TAS' -> 'Tasmania')
+        region_names = COUNTRY_CONFIG.get(country_code, {}).get('region_names', {})
+        if region in region_names:
+            search_params['in_region'] = region_names[region]
         else:
             search_params['in_region'] = region
     if area_code:
@@ -210,7 +202,9 @@ def search_available_numbers(
     for number in available_numbers:
         # Get the region from API and convert to abbreviation for storage
         api_region = getattr(number, 'region', None)
-        region_abbrev = AUSTRALIAN_REGION_ABBREV.get(api_region, api_region) if api_region else None
+        region_names = COUNTRY_CONFIG.get(country_code, {}).get('region_names', {})
+        region_abbrev_map = {v: k for k, v in region_names.items()}
+        region_abbrev = region_abbrev_map.get(api_region, api_region) if api_region else None
         
         results.append({
             'phone_number': number.phone_number,
@@ -376,15 +370,15 @@ def list_purchased_numbers() -> list:
         conn.close()
 
 
-def get_available_count_by_region(conn) -> dict:
-    """Get count of available numbers per region."""
+def get_available_count_by_region(conn, country_code: str) -> dict:
+    """Get count of available numbers per region (or _national) for a country."""
     cur = conn.cursor()
     cur.execute("""
-        SELECT region, COUNT(*) as count
+        SELECT COALESCE(region, '_national'), COUNT(*) as count
         FROM twilio_phone_numbers
-        WHERE status = 'available' AND region IS NOT NULL
-        GROUP BY region
-    """)
+        WHERE status = 'available' AND country_code = %s
+        GROUP BY COALESCE(region, '_national')
+    """, (country_code,))
     result = {row[0]: row[1] for row in cur.fetchall()}
     cur.close()
     return result
@@ -392,174 +386,180 @@ def get_available_count_by_region(conn) -> dict:
 
 def maintain_phone_number_availability(dry_run: bool = True) -> dict:
     """
-    Maintain phone number availability per region.
-    
-    Checks current availability against REGION_AVAILABILITY_TARGETS
-    and purchases numbers to fill any shortfall.
-    
+    Maintain phone number availability across all supported countries.
+
+    Checks current availability against COUNTRY_AVAILABILITY_TARGETS
+    and purchases numbers to fill any shortfall per country/region.
+
     Respects TWILIO_NUMBER_MODE:
-    - DEV: Maintain 1 available number per region
-    - PROD: Use full targets per region
-    
+    - DEV: Maintain 1 available number per country
+    - PROD: Use full targets per country/region
+
     Args:
         dry_run: If True, only report what would be purchased (no actual purchases)
-        
+
     Returns:
         Dictionary with summary of actions taken
     """
     print("=" * 70)
     print("MAINTAIN PHONE NUMBER AVAILABILITY")
-    print(f"📍 Mode: {TWILIO_NUMBER_MODE}")
+    print(f"Mode: {TWILIO_NUMBER_MODE}")
+    print(f"Countries: {', '.join(COUNTRY_AVAILABILITY_TARGETS.keys())}")
     if dry_run:
-        print("🔍 DRY RUN MODE - No purchases will be made")
+        print("DRY RUN MODE - No purchases will be made")
     else:
-        print("⚠️  EXECUTE MODE - Purchases will be made!")
+        print("EXECUTE MODE - Purchases will be made!")
     print("=" * 70)
     print()
-    
+
     # Connect to database
     conn = get_db_connection()
-    
-    # Get current availability
-    print("📋 Checking availability per region...\n")
-    current_counts = get_available_count_by_region(conn)
-    
-    # Calculate shortfall
-    shortfall = {}
-    total_needed = 0
-    
-    print(f"{'Region':<8} {'Target':<8} {'Current':<9} {'Needed':<8}")
-    print("-" * 35)
-    
-    for region, target in REGION_AVAILABILITY_TARGETS.items():
-        current = current_counts.get(region, 0)
-        needed = max(0, target - current)
-        shortfall[region] = needed
-        total_needed += needed
-        print(f"{region:<8} {target:<8} {current:<9} {needed:<8}")
-    
-    print()
-    print(f"Total to purchase: {total_needed} numbers")
-    
-    if total_needed == 0:
-        print("\n✅ All regions have sufficient availability. No purchases needed.")
-        conn.close()
-        return {
-            'success': True,
-            'total_needed': 0,
-            'purchased': 0,
-            'failed': 0,
-            'details': {}
-        }
-    
-    # Apply safety limit
-    if total_needed > MAX_PURCHASE_PER_RUN:
-        print(f"\n⚠️  Limiting to {MAX_PURCHASE_PER_RUN} purchases (safety limit)")
-        # Distribute limit proportionally
-        remaining_limit = MAX_PURCHASE_PER_RUN
-        for region in shortfall:
-            if shortfall[region] > 0:
-                take = min(shortfall[region], remaining_limit)
-                shortfall[region] = take
-                remaining_limit -= take
-                if remaining_limit <= 0:
-                    break
-    
-    conn.close()
-    
-    # Purchase numbers for each region with shortfall
+    client = get_twilio_client()
+
+    # Overall results
     results = {
         'success': True,
-        'total_needed': total_needed,
+        'total_needed': 0,
         'purchased': 0,
         'failed': 0,
         'details': {}
     }
-    
+
+    total_needed_all = 0
+    purchase_plan = []  # List of (country_code, region, needed) tuples
+
+    # Phase 1: Check availability and calculate shortfall for all countries
+    print("Checking availability across all countries...\n")
+
+    for country_code, targets in COUNTRY_AVAILABILITY_TARGETS.items():
+        config = COUNTRY_CONFIG[country_code]
+        current_counts = get_available_count_by_region(conn, country_code)
+
+        print(f"  [{country_code}] (type: {config['number_type']})")
+        print(f"  {'Region':<12} {'Target':<8} {'Current':<9} {'Needed':<8}")
+        print(f"  {'-' * 39}")
+
+        for region, target in targets.items():
+            current = current_counts.get(region, 0)
+            needed = max(0, target - current)
+            display_region = region if region != '_national' else '(national)'
+            print(f"  {display_region:<12} {target:<8} {current:<9} {needed:<8}")
+
+            if needed > 0:
+                purchase_plan.append((country_code, region, needed))
+                total_needed_all += needed
+
+        print()
+
+    conn.close()
+
+    results['total_needed'] = total_needed_all
+    print(f"Total to purchase: {total_needed_all} numbers")
+
+    if total_needed_all == 0:
+        print("\nAll countries have sufficient availability. No purchases needed.")
+        return results
+
+    # Apply safety limit
+    if total_needed_all > MAX_PURCHASE_PER_RUN:
+        print(f"\nLimiting to {MAX_PURCHASE_PER_RUN} purchases (safety limit)")
+        remaining_limit = MAX_PURCHASE_PER_RUN
+        capped_plan = []
+        for cc, region, needed in purchase_plan:
+            take = min(needed, remaining_limit)
+            if take > 0:
+                capped_plan.append((cc, region, take))
+                remaining_limit -= take
+            if remaining_limit <= 0:
+                break
+        purchase_plan = capped_plan
+
+    # Phase 2: Purchase numbers
     print("\n" + "-" * 70)
     if dry_run:
         print("Numbers that would be purchased:")
     else:
         print("Purchasing...")
     print("-" * 70)
-    
-    client = get_twilio_client()
-    
-    for region, needed in shortfall.items():
-        if needed == 0:
-            continue
-        
-        print(f"\n{region} (need {needed}):")
-        results['details'][region] = {'needed': needed, 'purchased': [], 'errors': []}
-        
-        # Search for available numbers in this region
+
+    for country_code, region, needed in purchase_plan:
+        config = COUNTRY_CONFIG[country_code]
+        search_region = None if region == '_national' else region
+        display_region = region if region != '_national' else '(national)'
+        detail_key = f"{country_code}/{display_region}"
+
+        print(f"\n[{country_code}] {display_region} (need {needed}, type: {config['number_type']}):")
+        results['details'][detail_key] = {'needed': needed, 'purchased': [], 'errors': []}
+
+        # Search for available numbers
         try:
             available_numbers = search_available_numbers(
-                country_code='AU',
-                region=region,
-                number_type='local',
+                country_code=country_code,
+                region=search_region,
+                number_type=config['number_type'],
                 limit=needed
             )
-            
+
             if not available_numbers:
-                msg = f"No available numbers found for {region}"
-                print(f"  ⚠️  {msg}")
-                results['details'][region]['errors'].append(msg)
+                msg = f"No available numbers found for {country_code} {display_region}"
+                print(f"  Warning: {msg}")
+                results['details'][detail_key]['errors'].append(msg)
                 results['failed'] += needed
                 continue
-            
+
             # Purchase each number
             for num_info in available_numbers[:needed]:
                 phone = num_info['phone_number']
-                
+
                 if dry_run:
                     print(f"  Would purchase: {phone}")
-                    print(f"    Location: {num_info.get('locality', 'N/A')}, {region}")
+                    locality = num_info.get('locality', 'N/A')
+                    print(f"    Location: {locality}, {display_region}")
                 else:
                     try:
                         result = purchase_number(
                             phone_number=phone,
                             friendly_name=None,
                             area_code=num_info.get('locality'),
-                            region=region,
-                            country_code='AU',
-                            address_sid=DEFAULT_ADDRESS_SID
+                            region=num_info.get('region') or search_region,
+                            country_code=country_code,
+                            address_sid=config['address_sid']
                         )
-                        
+
                         if result.get('phone_number_id'):
                             results['purchased'] += 1
-                            results['details'][region]['purchased'].append(result)
+                            results['details'][detail_key]['purchased'].append(result)
                         else:
                             results['failed'] += 1
-                            results['details'][region]['errors'].append(f"Failed to save {phone}")
+                            results['details'][detail_key]['errors'].append(f"Failed to save {phone}")
                     except Exception as e:
                         error_msg = f"Error purchasing {phone}: {e}"
-                        print(f"  ❌ {error_msg}")
-                        results['details'][region]['errors'].append(error_msg)
+                        print(f"  Error: {error_msg}")
+                        results['details'][detail_key]['errors'].append(error_msg)
                         results['failed'] += 1
-                        
+
         except Exception as e:
-            error_msg = f"Error searching for {region} numbers: {e}"
-            print(f"  ❌ {error_msg}")
-            results['details'][region]['errors'].append(error_msg)
+            error_msg = f"Error searching for {country_code} {display_region} numbers: {e}"
+            print(f"  Error: {error_msg}")
+            results['details'][detail_key]['errors'].append(error_msg)
             results['failed'] += needed
-    
+
     # Summary
     print("\n" + "=" * 70)
     print("SUMMARY")
     print("=" * 70)
-    
+
     if dry_run:
-        print(f"\n🔍 DRY RUN - No purchases were made")
-        print(f"   Would purchase: {total_needed} numbers")
+        print(f"\nDRY RUN - No purchases were made")
+        print(f"   Would purchase: {total_needed_all} numbers")
         print("\n" + "-" * 70)
         print("To execute, run:")
         print("  python -m tasks.purchase_twilio_number maintain --execute")
     else:
-        print(f"\n✅ Purchased: {results['purchased']} numbers")
+        print(f"\nPurchased: {results['purchased']} numbers")
         if results['failed'] > 0:
-            print(f"❌ Failed: {results['failed']} numbers")
-    
+            print(f"Failed: {results['failed']} numbers")
+
     return results
 
 
@@ -572,9 +572,9 @@ if CELERY_AVAILABLE and app:
     @app.task(bind=True, name='tasks.purchase_twilio_number.replenish_twilio_numbers')
     def replenish_twilio_numbers(self, dry_run: bool = False) -> dict:
         """
-        Celery task to replenish Twilio phone numbers per region.
-        
-        This task checks current availability against REGION_AVAILABILITY_TARGETS
+        Celery task to replenish Twilio phone numbers across all supported countries.
+
+        This task checks current availability against COUNTRY_AVAILABILITY_TARGETS
         and purchases numbers to fill any shortfall.
         
         Args:
@@ -732,8 +732,9 @@ def cmd_search(args):
 
 def cmd_buy(args):
     """Handle buy command."""
-    # Use default address SID if not provided
-    address_sid = args.address_sid or DEFAULT_ADDRESS_SID
+    # Use address SID from args, or look up from COUNTRY_CONFIG
+    country_config = COUNTRY_CONFIG.get(args.country, {})
+    address_sid = args.address_sid or country_config.get('address_sid')
     
     if args.phone_number:
         # Purchase specific number
