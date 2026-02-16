@@ -298,10 +298,10 @@ def render_customer_booking_confirmation_template(**kwargs) -> str:
         if booking_page_alias and booking_page_alias.strip():
             if booking_access_token and booking_access_token.strip():
                 # Construct URL with token parameter
-                manage_booking_url = f"https://speako.ai/en-US/customer/booking/{booking_page_alias.strip()}/view?token={booking_access_token.strip()}"
+                manage_booking_url = f"{os.getenv('BOOKING_LINK_BASE_URL', 'https://speako.ai')}/customer/booking/{booking_page_alias.strip()}/view?token={booking_access_token.strip()}"
             else:
                 # Fallback URL without token
-                manage_booking_url = f"https://speako.ai/en-US/customer/booking/{booking_page_alias.strip()}/view"
+                manage_booking_url = f"{os.getenv('BOOKING_LINK_BASE_URL', 'https://speako.ai')}/customer/booking/{booking_page_alias.strip()}/view"
             template = template.replace('{{manage_booking_url}}', manage_booking_url)
         else:
             template = template.replace('{{manage_booking_url}}', '')
