@@ -88,7 +88,7 @@ COUNTRY_CONFIG = {
     'NZ': {
         'number_type': 'local',
         'address_sid': 'AD5d5da1b021517e2d70e934454841369b',
-        'bundle_sid': None,
+        'bundle_sid': 'BU6e85bba34da82a04ec00cde6e7d944fb',
         'region_names': {},
         'targets_prod': {'_national': 5},
         'targets_dev': {'_national': 1},
@@ -303,6 +303,8 @@ def purchase_number(
     cur = conn.cursor()
     
     try:
+        # Truncate area_code to fit varchar(10) column
+        safe_area_code = area_code[:10] if area_code else None
         cur.execute("""
             INSERT INTO twilio_phone_numbers (
                 phone_number,
@@ -320,7 +322,7 @@ def purchase_number(
             purchased_number.phone_number,
             friendly_name or purchased_number.friendly_name,
             country_code,
-            area_code,
+            safe_area_code,
             region,
             purchased_number.sid,
             'available'
