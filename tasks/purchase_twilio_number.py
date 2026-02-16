@@ -52,6 +52,7 @@ COUNTRY_CONFIG = {
     'AU': {
         'number_type': 'local',
         'address_sid': 'AD19502cc95b72134e88f2f069c4a78007',
+        'bundle_sid': None,
         'region_names': {
             'NSW': 'New South Wales', 'ACT': 'Australian Capital Territory',
             'VIC': 'Victoria', 'TAS': 'Tasmania', 'QLD': 'Queensland',
@@ -63,6 +64,7 @@ COUNTRY_CONFIG = {
     'US': {
         'number_type': 'local',
         'address_sid': None,
+        'bundle_sid': None,
         'region_names': {},
         'targets_prod': {'_national': 5},
         'targets_dev': {'_national': 1},
@@ -70,6 +72,7 @@ COUNTRY_CONFIG = {
     'GB': {
         'number_type': 'mobile',
         'address_sid': 'AD5d5da1b021517e2d70e934454841369b',
+        'bundle_sid': 'BUd7b12a2492f6c4a975e5ddf912b1fa73',
         'region_names': {},
         'targets_prod': {'_national': 5},
         'targets_dev': {'_national': 1},
@@ -77,13 +80,15 @@ COUNTRY_CONFIG = {
     'CA': {
         'number_type': 'local',
         'address_sid': None,
+        'bundle_sid': None,
         'region_names': {},
         'targets_prod': {'_national': 5},
         'targets_dev': {'_national': 1},
     },
     'NZ': {
         'number_type': 'local',
-        'address_sid': 'ADa8b05363938d5d911383fc8fde8f648',
+        'address_sid': 'AD5d5da1b021517e2d70e934454841369b',
+        'bundle_sid': None,
         'region_names': {},
         'targets_prod': {'_national': 5},
         'targets_dev': {'_national': 1},
@@ -231,11 +236,12 @@ def purchase_number(
     area_code: str = None,
     region: str = None,
     country_code: str = "AU",
-    address_sid: str = None
+    address_sid: str = None,
+    bundle_sid: str = None
 ) -> dict:
     """
     Purchase a Twilio phone number, configure webhook, and save to database.
-    
+
     Args:
         phone_number: Phone number in E.164 format (e.g., '+61212345678')
         friendly_name: Optional display name
@@ -243,6 +249,7 @@ def purchase_number(
         region: State/province (for database storage)
         country_code: ISO country code
         address_sid: Twilio Address SID for address verification
+        bundle_sid: Twilio Bundle SID for regulatory compliance
         
     Returns:
         Dictionary with purchase details
@@ -260,6 +267,9 @@ def purchase_number(
     if address_sid:
         purchase_params['address_sid'] = address_sid
         print(f"   Using address: {address_sid}")
+    if bundle_sid:
+        purchase_params['bundle_sid'] = bundle_sid
+        print(f"   Using bundle: {bundle_sid}")
     
     purchased_number = client.incoming_phone_numbers.create(**purchase_params)
     
@@ -523,7 +533,8 @@ def maintain_phone_number_availability(dry_run: bool = True) -> dict:
                             area_code=num_info.get('locality'),
                             region=num_info.get('region') or search_region,
                             country_code=country_code,
-                            address_sid=config['address_sid']
+                            address_sid=config['address_sid'],
+                            bundle_sid=config.get('bundle_sid')
                         )
 
                         if result.get('phone_number_id'):
@@ -732,10 +743,11 @@ def cmd_search(args):
 
 def cmd_buy(args):
     """Handle buy command."""
-    # Use address SID from args, or look up from COUNTRY_CONFIG
+    # Use address/bundle SID from args, or look up from COUNTRY_CONFIG
     country_config = COUNTRY_CONFIG.get(args.country, {})
     address_sid = args.address_sid or country_config.get('address_sid')
-    
+    bundle_sid = country_config.get('bundle_sid')
+
     if args.phone_number:
         # Purchase specific number
         result = purchase_number(
@@ -744,7 +756,8 @@ def cmd_buy(args):
             area_code=args.area_code,
             region=args.region,
             country_code=args.country,
-            address_sid=address_sid
+            address_sid=address_sid,
+            bundle_sid=bundle_sid
         )
     elif args.auto_select:
         if not args.country:
@@ -779,7 +792,8 @@ def cmd_buy(args):
             area_code=args.area_code or selected.get('locality'),
             region=args.region or selected.get('region'),
             country_code=args.country,
-            address_sid=address_sid
+            address_sid=address_sid,
+            bundle_sid=bundle_sid
         )
     else:
         print("❌ Error: Either --phone-number or --auto-select is required")
