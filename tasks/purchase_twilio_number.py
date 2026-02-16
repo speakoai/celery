@@ -452,7 +452,11 @@ def maintain_phone_number_availability(dry_run: bool = True) -> dict:
         print(f"  {'-' * 39}")
 
         for region, target in targets.items():
-            current = current_counts.get(region, 0)
+            if region == '_national':
+                # _national means total across all regions for this country
+                current = sum(current_counts.values())
+            else:
+                current = current_counts.get(region, 0)
             needed = max(0, target - current)
             display_region = region if region != '_national' else '(national)'
             print(f"  {display_region:<12} {target:<8} {current:<9} {needed:<8}")
