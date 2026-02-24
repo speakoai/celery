@@ -57,3 +57,4 @@ import tasks.generate_dashboard_metrics
 import tasks.create_ai_agent
 import tasks.purchase_twilio_number
 import tasks.update_twilio_friendly_name
+import tasks.refresh_annual_minutes
