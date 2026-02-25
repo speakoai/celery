@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <h2>Impersonate Tenant (System User Login)</h2>
+
+  <form method="GET" style="margin-bottom: 20px;">
+    <label for="search">Search tenant by name:</label><br>
+    <input type="text" id="search" name="q" value="{{ search_query }}"
+           placeholder="Type tenant name..." style="width: 300px; padding: 5px;">
+    <button type="submit" style="padding: 5px 15px;">Search</button>
+  </form>
+
+  {% if tenants %}
+    <h3>Search Results ({{ tenants|length }})</h3>
+    <form method="POST">
+      <input type="hidden" name="q" value="{{ search_query }}">
+      <table border="1" cellpadding="5" cellspacing="0" style="margin-bottom: 15px; border-collapse: collapse;">
+        <tr style="background: #f0f0f0;">
+          <th>Select</th>
+          <th>Tenant ID</th>
+          <th>Name</th>
+          <th>Status</th>
+          <th>Plan</th>
+        </tr>
+        {% for tenant in tenants %}
+        <tr>
+          <td><input type="radio" name="tenant_id" value="{{ tenant.tenant_id }}" required></td>
+          <td>{{ tenant.tenant_id }}</td>
+          <td>{{ tenant.name }}</td>
+          <td>{{ tenant.onboarding_status or 'N/A' }}</td>
+          <td>{{ tenant.plan_key or 'N/A' }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+      <button type="submit" style="padding: 5px 15px;">View System User</button>
+    </form>
+  {% elif search_query %}
+    <p>No tenants found matching "{{ search_query }}".</p>
+  {% endif %}
+
+  {% if error_message %}
+    <div style="margin-top: 15px; padding: 10px; background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; border-radius: 4px;">
+      {{ error_message }}
+    </div>
+  {% endif %}
+
+  {% if selected_tenant and system_user %}
+    <div style="margin-top: 20px; padding: 15px; border: 2px solid #333; background: #f9f9f9; border-radius: 4px;">
+      <h3>System User for: {{ selected_tenant.name }} (ID: {{ selected_tenant.tenant_id }})</h3>
+      <p><strong>Email:</strong> <code>{{ system_user.email }}</code></p>
+      <p>
+        <strong>Password:</strong>
+        <span id="pw-mask" style="font-family: monospace; letter-spacing: 2px;">&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;</span>
+        <span id="pw-plain" style="display:none;"><code>{{ system_user.password_text }}</code></span>
+        <button type="button" id="toggle-btn" onclick="togglePassword()" style="margin-left: 8px; cursor: pointer; padding: 2px 8px;">
+          &#128065; Show
+        </button>
+      </p>
+      <p><strong>Created:</strong> {{ system_user.created_at }}</p>
+    </div>
+  {% endif %}
+
+  <script>
+    function togglePassword() {
+      var mask = document.getElementById('pw-mask');
+      var plain = document.getElementById('pw-plain');
+      var btn = document.getElementById('toggle-btn');
+      if (mask.style.display === 'none') {
+        mask.style.display = 'inline';
+        plain.style.display = 'none';
+        btn.innerHTML = '&#128065; Show';
+      } else {
+        mask.style.display = 'none';
+        plain.style.display = 'inline';
+        btn.innerHTML = '&#128065; Hide';
+      }
+    }
+  </script>
+{% endblock %}

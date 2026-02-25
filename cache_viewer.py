@@ -885,6 +885,61 @@ def scrapper():
                          scraped_data=scraped_data)
 
 # ----------------------------
+# Impersonate - System User Credentials Lookup
+# ----------------------------
+@app.route("/impersonate", methods=["GET", "POST"])
+@restrict_ip
+def impersonate():
+    db_url = os.getenv("DATABASE_URL")
+    tenants = []
+    selected_tenant = None
+    system_user = None
+    error_message = ""
+    search_query = request.args.get("q", "").strip() or request.form.get("q", "").strip()
+
+    with psycopg2.connect(db_url, cursor_factory=RealDictCursor) as conn:
+        with conn.cursor() as cur:
+            if search_query:
+                cur.execute("""
+                    SELECT t.tenant_id, t.name, t.onboarding_status,
+                           tp.plan_key
+                    FROM tenants t
+                    LEFT JOIN tenant_plans tp ON t.tenant_id = tp.tenant_id AND tp.active = true
+                    WHERE t.name ILIKE %s
+                    ORDER BY t.name ASC
+                    LIMIT 50
+                """, (f"%{search_query}%",))
+                tenants = cur.fetchall()
+
+            if request.method == "POST" and request.form.get("tenant_id"):
+                tenant_id = int(request.form.get("tenant_id"))
+
+                cur.execute("""
+                    SELECT t.tenant_id, t.name
+                    FROM tenants t
+                    WHERE t.tenant_id = %s
+                """, (tenant_id,))
+                selected_tenant = cur.fetchone()
+
+                if selected_tenant:
+                    cur.execute("""
+                        SELECT suc.email, suc.password_text, suc.created_at
+                        FROM system_user_credentials suc
+                        WHERE suc.tenant_id = %s
+                    """, (tenant_id,))
+                    system_user = cur.fetchone()
+
+                    if not system_user:
+                        error_message = f"No system user found for tenant {tenant_id}. This tenant may have been created before the system user feature."
+
+    return render_template("impersonate.html",
+                         search_query=search_query,
+                         tenants=tenants,
+                         selected_tenant=selected_tenant,
+                         system_user=system_user,
+                         error_message=error_message)
+
+# ----------------------------
 # App Entrypoint for Local Dev (Render uses gunicorn)
 # ----------------------------
 if __name__ == "__main__":
