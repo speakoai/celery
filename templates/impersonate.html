@@ -3,40 +3,17 @@
 {% block content %}
   <h2>Impersonate Tenant (System User Login)</h2>
 
-  <form method="GET" style="margin-bottom: 20px;">
+  <div style="position: relative; margin-bottom: 20px;">
     <label for="search">Search tenant by name:</label><br>
-    <input type="text" id="search" name="q" value="{{ search_query }}"
-           placeholder="Type tenant name..." style="width: 300px; padding: 5px;">
-    <button type="submit" style="padding: 5px 15px;">Search</button>
-  </form>
-
-  {% if tenants %}
-    <h3>Search Results ({{ tenants|length }})</h3>
-    <form method="POST">
-      <input type="hidden" name="q" value="{{ search_query }}">
-      <table border="1" cellpadding="5" cellspacing="0" style="margin-bottom: 15px; border-collapse: collapse;">
-        <tr style="background: #f0f0f0;">
-          <th>Select</th>
-          <th>Tenant ID</th>
-          <th>Name</th>
-          <th>Status</th>
-          <th>Plan</th>
-        </tr>
-        {% for tenant in tenants %}
-        <tr>
-          <td><input type="radio" name="tenant_id" value="{{ tenant.tenant_id }}" required></td>
-          <td>{{ tenant.tenant_id }}</td>
-          <td>{{ tenant.name }}</td>
-          <td>{{ tenant.onboarding_status or 'N/A' }}</td>
-          <td>{{ tenant.plan_key or 'N/A' }}</td>
-        </tr>
-        {% endfor %}
-      </table>
-      <button type="submit" style="padding: 5px 15px;">View System User</button>
-    </form>
-  {% elif search_query %}
-    <p>No tenants found matching "{{ search_query }}".</p>
-  {% endif %}
+    <input type="text" id="search" autocomplete="off"
+           placeholder="Type tenant name..." style="width: 300px; padding: 5px;"
+           value="{{ search_query }}">
+    <div id="dropdown"
+         style="display:none; position:absolute; left:0; top:100%; width:500px;
+                max-height:300px; overflow-y:auto; border:1px solid #ccc;
+                background:#fff; box-shadow:0 4px 8px rgba(0,0,0,0.15); z-index:10;">
+    </div>
+  </div>
 
   {% if error_message %}
     <div style="margin-top: 15px; padding: 10px; background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; border-radius: 4px;">
@@ -47,20 +24,96 @@
   {% if selected_tenant and system_user %}
     <div style="margin-top: 20px; padding: 15px; border: 2px solid #333; background: #f9f9f9; border-radius: 4px;">
       <h3>System User for: {{ selected_tenant.name }} (ID: {{ selected_tenant.tenant_id }})</h3>
-      <p><strong>Email:</strong> <code>{{ system_user.email }}</code></p>
+      <p>
+        <strong>Email:</strong>
+        <code id="email-value">{{ system_user.email }}</code>
+        <button type="button" onclick="copyText('email-value')" style="margin-left: 6px; cursor: pointer; padding: 2px 8px;" title="Copy email">
+          &#128203; Copy
+        </button>
+      </p>
       <p>
         <strong>Password:</strong>
         <span id="pw-mask" style="font-family: monospace; letter-spacing: 2px;">&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;</span>
-        <span id="pw-plain" style="display:none;"><code>{{ system_user.password_text }}</code></span>
+        <span id="pw-plain" style="display:none;"><code id="pw-value">{{ system_user.password_text }}</code></span>
         <button type="button" id="toggle-btn" onclick="togglePassword()" style="margin-left: 8px; cursor: pointer; padding: 2px 8px;">
           &#128065; Show
+        </button>
+        <button type="button" onclick="copyText('pw-value')" style="margin-left: 4px; cursor: pointer; padding: 2px 8px;" title="Copy password">
+          &#128203; Copy
         </button>
       </p>
       <p><strong>Created:</strong> {{ system_user.created_at }}</p>
     </div>
   {% endif %}
 
+  <form id="select-form" method="POST" style="display:none;">
+    <input type="hidden" name="tenant_id" id="selected-tenant-id">
+  </form>
+
   <script>
+    var searchInput = document.getElementById('search');
+    var dropdown = document.getElementById('dropdown');
+    var debounceTimer = null;
+
+    searchInput.addEventListener('input', function() {
+      clearTimeout(debounceTimer);
+      var q = searchInput.value.trim();
+      if (q.length < 2) {
+        dropdown.style.display = 'none';
+        return;
+      }
+      debounceTimer = setTimeout(function() {
+        fetch('/impersonate/search?q=' + encodeURIComponent(q))
+          .then(function(r) { return r.json(); })
+          .then(function(tenants) {
+            if (tenants.length === 0) {
+              dropdown.innerHTML = '<div style="padding:8px 12px; color:#888;">No tenants found</div>';
+              dropdown.style.display = 'block';
+              return;
+            }
+            var html = '<table style="width:100%; border-collapse:collapse;">';
+            html += '<tr style="background:#f0f0f0; font-size:12px;">';
+            html += '<th style="padding:4px 8px; text-align:left;">ID</th>';
+            html += '<th style="padding:4px 8px; text-align:left;">Name</th>';
+            html += '<th style="padding:4px 8px; text-align:left;">Status</th>';
+            html += '<th style="padding:4px 8px; text-align:left;">Plan</th>';
+            html += '</tr>';
+            tenants.forEach(function(t) {
+              html += '<tr class="dropdown-row" data-id="' + t.tenant_id + '" style="cursor:pointer;">';
+              html += '<td style="padding:6px 8px; border-top:1px solid #eee;">' + t.tenant_id + '</td>';
+              html += '<td style="padding:6px 8px; border-top:1px solid #eee;">' + escapeHtml(t.name) + '</td>';
+              html += '<td style="padding:6px 8px; border-top:1px solid #eee;">' + (t.onboarding_status || 'N/A') + '</td>';
+              html += '<td style="padding:6px 8px; border-top:1px solid #eee;">' + (t.plan_key || 'N/A') + '</td>';
+              html += '</tr>';
+            });
+            html += '</table>';
+            dropdown.innerHTML = html;
+            dropdown.style.display = 'block';
+
+            dropdown.querySelectorAll('.dropdown-row').forEach(function(row) {
+              row.addEventListener('mouseenter', function() { row.style.background = '#e8f0fe'; });
+              row.addEventListener('mouseleave', function() { row.style.background = ''; });
+              row.addEventListener('click', function() {
+                document.getElementById('selected-tenant-id').value = row.dataset.id;
+                document.getElementById('select-form').submit();
+              });
+            });
+          });
+      }, 250);
+    });
+
+    document.addEventListener('click', function(e) {
+      if (!dropdown.contains(e.target) && e.target !== searchInput) {
+        dropdown.style.display = 'none';
+      }
+    });
+
+    function escapeHtml(str) {
+      var div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
     function togglePassword() {
       var mask = document.getElementById('pw-mask');
       var plain = document.getElementById('pw-plain');
@@ -74,6 +127,17 @@
         plain.style.display = 'inline';
         btn.innerHTML = '&#128065; Hide';
       }
+    }
+
+    function copyText(elementId) {
+      var text = document.getElementById(elementId).textContent;
+      navigator.clipboard.writeText(text).then(function() {
+        // Brief visual feedback
+        var btn = event.target;
+        var original = btn.innerHTML;
+        btn.innerHTML = '&#10003; Copied';
+        setTimeout(function() { btn.innerHTML = original; }, 1500);
+      });
     }
   </script>
 {% endblock %}

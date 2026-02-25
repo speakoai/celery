@@ -940,6 +940,33 @@ def impersonate():
                          error_message=error_message)
 
 # ----------------------------
+# Impersonate - Tenant Search API (JSON)
+# ----------------------------
+@app.route("/impersonate/search")
+@restrict_ip
+def impersonate_search():
+    db_url = os.getenv("DATABASE_URL")
+    q = request.args.get("q", "").strip()
+
+    if not q or len(q) < 2:
+        return jsonify([])
+
+    with psycopg2.connect(db_url, cursor_factory=RealDictCursor) as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT t.tenant_id, t.name, t.onboarding_status,
+                       tp.plan_key
+                FROM tenants t
+                LEFT JOIN tenant_plans tp ON t.tenant_id = tp.tenant_id AND tp.active = true
+                WHERE t.name ILIKE %s
+                ORDER BY t.name ASC
+                LIMIT 20
+            """, (f"%{q}%",))
+            tenants = cur.fetchall()
+
+    return jsonify(tenants)
+
+# ----------------------------
 # App Entrypoint for Local Dev (Render uses gunicorn)
 # ----------------------------
 if __name__ == "__main__":
