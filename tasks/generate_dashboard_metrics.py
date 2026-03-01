@@ -298,8 +298,8 @@ def get_cached_trends(tenant_id):
         redis_client = get_redis_client()
         
         # Get cached data
-        cache_key = f"dashboard_metrics:{tenant_id}:trends_data"
-        last_update_key = f"dashboard_metrics:{tenant_id}:last_update"
+        cache_key = f"dashboard_metrics:{tenant_id}:trends_data:v2"
+        last_update_key = f"dashboard_metrics:{tenant_id}:last_update:v2"
         
         cached_json = redis_client.get(cache_key)
         last_update = redis_client.get(last_update_key)
@@ -328,8 +328,8 @@ def save_trends_cache(tenant_id, trends_data):
         redis_client = get_redis_client()
         today_str = datetime.now().date().strftime("%Y-%m-%d")
         
-        cache_key = f"dashboard_metrics:{tenant_id}:trends_data"
-        last_update_key = f"dashboard_metrics:{tenant_id}:last_update"
+        cache_key = f"dashboard_metrics:{tenant_id}:trends_data:v2"
+        last_update_key = f"dashboard_metrics:{tenant_id}:last_update:v2"
         
         # Save data with 95-day TTL
         redis_client.setex(cache_key, 95 * 24 * 60 * 60, json.dumps(trends_data))
@@ -519,6 +519,10 @@ def incremental_trends_update(tenant_id, location_ids, location_names, cached_tr
                 finally:
                     conn_backfill.close()
         
+        # Update all_locations dates (slide window to match by_location)
+        cached_trends["all_locations"]["90_days"]["dates"].append(yesterday_str)
+        cached_trends["all_locations"]["90_days"]["dates"].pop(0)
+
         # Recalculate all_locations aggregation
         all_locations_ai_90 = [0] * 90
         all_locations_web_90 = [0] * 90
