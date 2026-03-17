@@ -1027,8 +1027,8 @@ def _query_locations(tenant_id: str, location_id: str) -> dict:
         # Query 2: Fetch location_info for all locations
         cursor.execute("""
             SELECT 
-                location_id, address, phone_with_country_code, 
-                email, website_url, order_link, opening_hours, ai_prompt
+                location_id, address, phone_with_country_code,
+                email, website_url, order_link, opening_hours
             FROM location_info
             WHERE tenant_id = %s
         """, (tenant_id,))
@@ -1338,7 +1338,7 @@ def _build_location_details(
             'slot_interval_minutes': loc.get('slot_interval_minutes', 0) or 0,
             'booking_email': loc.get('booking_email_recipients', '') or ''
         },
-        'notes': info.get('ai_prompt', '') or ''
+        'notes': ''
     }
 
 
