@@ -534,6 +534,8 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
             if not api_key or OpenAI is None:
                 analysis = {'status': 'skipped', 'reason': 'openai_not_configured'}
             else:
+                payload = None
+                markdown_text = None
                 try:
                     client = OpenAI(api_key=api_key)
                     prompt = build_knowledge_prompt(knowledge_type)
