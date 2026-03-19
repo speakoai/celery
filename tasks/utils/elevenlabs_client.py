@@ -269,7 +269,7 @@ def update_agent_knowledge(agent_id: str, knowledge_items: list) -> Dict[str, An
             "type": item.get("type", "file"),  # Default to "file" if not specified
             "name": item["name"],
             "id": item["id"],
-            "usage_mode": item.get("usage_mode", "auto")  # Default to "auto"
+            "usage_mode": item.get("usage_mode", "prompt")  # Default to "prompt"
         }
         for item in knowledge_items
     ]

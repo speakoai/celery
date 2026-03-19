@@ -373,7 +373,7 @@ def publish_knowledge(
         "id": new_knowledge_id,
         "name": new_knowledge_name,
         "type": "file",
-        "usage_mode": "auto"
+        "usage_mode": "prompt"
     }
     
     logger.info(
