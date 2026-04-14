@@ -986,7 +986,7 @@ def admin_voice_provider():
                     cur.execute(
                         """
                         SELECT l.tenant_id, l.location_id, l.name AS location_name,
-                               t.business_name, l.voice_ai_provider,
+                               t.name AS business_name, l.voice_ai_provider,
                                l.openai_agent_config IS NOT NULL AS has_openai_config
                         FROM locations l
                         JOIN tenants t ON l.tenant_id = t.tenant_id
@@ -999,7 +999,7 @@ def admin_voice_provider():
                     cur.execute(
                         """
                         SELECT l.tenant_id, l.location_id, l.name AS location_name,
-                               t.business_name, l.voice_ai_provider,
+                               t.name AS business_name, l.voice_ai_provider,
                                l.openai_agent_config IS NOT NULL AS has_openai_config
                         FROM locations l
                         JOIN tenants t ON l.tenant_id = t.tenant_id
