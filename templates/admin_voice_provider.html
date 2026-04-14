@@ -29,6 +29,7 @@
       <th>Location</th>
       <th>Business</th>
       <th>Location Name</th>
+      <th>Phone Number</th>
       <th>Current Provider</th>
       <th>OpenAI Config?</th>
       <th>Switch To</th>
@@ -41,6 +42,7 @@
       <td>{{ loc.location_id }}</td>
       <td>{{ loc.business_name or '-' }}</td>
       <td>{{ loc.location_name or '-' }}</td>
+      <td>{{ loc.twilio_phone_number or '-' }}</td>
       <td>
         <strong style="color:{% if loc.voice_ai_provider == 'openai' %}#0066cc{% else %}#666{% endif %};">
           {{ loc.voice_ai_provider }}

@@ -987,7 +987,8 @@ def admin_voice_provider():
                         """
                         SELECT l.tenant_id, l.location_id, l.name AS location_name,
                                t.name AS business_name, l.voice_ai_provider,
-                               l.openai_agent_config IS NOT NULL AS has_openai_config
+                               l.openai_agent_config IS NOT NULL AS has_openai_config,
+                               l.twilio_phone_number
                         FROM locations l
                         JOIN tenants t ON l.tenant_id = t.tenant_id
                         WHERE l.tenant_id = %s AND l.is_active = true
@@ -1000,7 +1001,8 @@ def admin_voice_provider():
                         """
                         SELECT l.tenant_id, l.location_id, l.name AS location_name,
                                t.name AS business_name, l.voice_ai_provider,
-                               l.openai_agent_config IS NOT NULL AS has_openai_config
+                               l.openai_agent_config IS NOT NULL AS has_openai_config,
+                               l.twilio_phone_number
                         FROM locations l
                         JOIN tenants t ON l.tenant_id = t.tenant_id
                         WHERE l.is_active = true
