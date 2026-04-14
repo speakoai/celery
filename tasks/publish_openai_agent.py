@@ -450,6 +450,112 @@ def _build_enabled_tools(tool_params: list) -> list:
     return tools, enabled_keys
 
 
+def _collect_openai_agent_params(tenant_id: str, location_id: str) -> dict:
+    """
+    Collect all parameters needed for OpenAI agent publishing.
+
+    This is the OpenAI-path equivalent of collect_full_agent_params() in
+    publish_db.py, but WITHOUT requiring elevenlabs_agent_id.  It reads
+    the same tenant_integration_params rows and partitions them identically.
+    """
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+
+    result = {
+        "location": None,
+        "greetings_params": [],
+        "voice_dict_params": [],
+        "personality_params": [],
+        "tool_params": [],
+        "dictionary_entry": None,
+    }
+
+    conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # Query 1: Location info (no elevenlabs_agent_id requirement)
+                cur.execute(
+                    """
+                    SELECT name, timezone, location_type
+                    FROM locations
+                    WHERE tenant_id = %s AND location_id = %s
+                    """,
+                    (tenant_id, location_id),
+                )
+                row = cur.fetchone()
+                if not row:
+                    raise ValueError(
+                        f"Location not found: tenant_id={tenant_id}, location_id={location_id}"
+                    )
+
+                result["location"] = {
+                    "name": row["name"] or f"Location {location_id}",
+                    "timezone": row["timezone"] or "UTC",
+                    "location_type": row.get("location_type") or "service",
+                }
+
+                # Query 2: All tenant_integration_params (same query as publish_db)
+                cur.execute(
+                    """
+                    SELECT
+                        param_id, provider, service, param_code,
+                        value_text, value_json, value_numeric, status
+                    FROM tenant_integration_params
+                    WHERE tenant_id = %s
+                      AND location_id = %s
+                      AND status IN ('configured', 'published')
+                      AND (
+                        (provider = 'speako' AND service = 'greetings') OR
+                        (service IN ('agents', 'turn', 'conversation', 'tts')) OR
+                        (service = 'agents' AND provider = 'elevenlabs') OR
+                        (service = 'tool' AND provider = 'speako') OR
+                        (service = 'dictionary')
+                      )
+                    ORDER BY created_at ASC
+                    """,
+                    (tenant_id, location_id),
+                )
+                rows = cur.fetchall()
+
+                for row in rows:
+                    row_dict = dict(row)
+                    provider = row_dict.get("provider")
+                    service = row_dict.get("service")
+                    param_code = row_dict.get("param_code")
+                    status = row_dict.get("status")
+
+                    if provider == "speako" and service == "greetings" and status == "configured":
+                        result["greetings_params"].append(row_dict)
+                    elif (
+                        service == "agents"
+                        and provider == "elevenlabs"
+                        and param_code
+                        in ("traits", "tone_of_voice", "response_style", "temperature", "custom_instruction")
+                        and status == "configured"
+                    ):
+                        result["personality_params"].append(row_dict)
+                    elif service in ("turn", "conversation", "tts") and status == "configured":
+                        result["voice_dict_params"].append(row_dict)
+                    elif service == "tool" and provider == "speako":
+                        result["tool_params"].append(row_dict)
+                    elif service == "dictionary" and status == "configured" and result["dictionary_entry"] is None:
+                        result["dictionary_entry"] = row_dict
+
+                logger.info(
+                    f"[publish_openai] Collected params: "
+                    f"greetings={len(result['greetings_params'])}, "
+                    f"voice_dict={len(result['voice_dict_params'])}, "
+                    f"personality={len(result['personality_params'])}, "
+                    f"tools={len(result['tool_params'])}, "
+                    f"dictionary={'yes' if result['dictionary_entry'] else 'no'}"
+                )
+
+                return result
+    finally:
+        conn.close()
+
+
 def _resolve_variables(text: str, variables: dict) -> str:
     """Replace {{variable}} placeholders in text."""
     result = text
@@ -480,8 +586,8 @@ def _ensure_fragments_and_compose(
 
     Returns (composed_system_prompt, temperature_value).
     """
-    from .publish_helpers import get_human_friendly_operation_hours
-    from .publish_db import (
+    from .utils.publish_helpers import get_human_friendly_operation_hours
+    from .utils.publish_db import (
         upsert_ai_prompt,
         compose_prompts_by_sort_order,
         process_context_prompts,
@@ -720,8 +826,8 @@ def _compose_openai_agent_config(
     ElevenLabs publish path — does not read tenant_ai_prompts composed rows,
     does not call any external API.
     """
-    # ── 1. Collect all params in one aggregated query ──
-    all_params = collect_full_agent_params(str(tenant_id), str(location_id))
+    # ── 1. Collect all params (OpenAI-independent, no elevenlabs_agent_id required) ──
+    all_params = _collect_openai_agent_params(str(tenant_id), str(location_id))
 
     # ── 2. Extract individual param groups ──
     voice_dict_params = all_params.get("voice_dict_params", [])
