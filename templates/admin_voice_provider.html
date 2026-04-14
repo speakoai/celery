@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Voice AI Provider Admin</h2>
+<p>Switch a location between ElevenLabs and OpenAI Realtime. Changes take effect on the next inbound call.</p>
+
+<form method="GET" action="/admin/voice-provider" style="margin-bottom:20px;">
+  <label>Filter by Tenant ID:</label>
+  <input type="text" name="tenant_id" value="{{ filter_tenant }}" placeholder="e.g. 42" style="width:100px;">
+  <button type="submit">Filter</button>
+  {% if filter_tenant %}
+    <a href="/admin/voice-provider"><button type="button">Clear</button></a>
+  {% endif %}
+</form>
+
+{% if error_message %}
+  <p style="color:red;"><strong>Error:</strong> {{ error_message }}</p>
+{% endif %}
+
+{% if success_message %}
+  <p style="color:green;"><strong>{{ success_message }}</strong></p>
+{% endif %}
+
+{% if locations %}
+<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse; font-size:14px;">
+  <thead>
+    <tr style="background:#eee;">
+      <th>Tenant</th>
+      <th>Location</th>
+      <th>Business</th>
+      <th>Location Name</th>
+      <th>Current Provider</th>
+      <th>OpenAI Config?</th>
+      <th>Switch To</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for loc in locations %}
+    <tr>
+      <td>{{ loc.tenant_id }}</td>
+      <td>{{ loc.location_id }}</td>
+      <td>{{ loc.business_name or '-' }}</td>
+      <td>{{ loc.location_name or '-' }}</td>
+      <td>
+        <strong style="color:{% if loc.voice_ai_provider == 'openai' %}#0066cc{% else %}#666{% endif %};">
+          {{ loc.voice_ai_provider }}
+        </strong>
+      </td>
+      <td>{{ 'Yes' if loc.has_openai_config else 'No' }}</td>
+      <td>
+        {% if loc.voice_ai_provider == 'elevenlabs' %}
+        <form method="POST" action="/admin/voice-provider/update" style="display:inline;"
+              onsubmit="return confirm('Switch location {{ loc.location_id }} to OpenAI?');">
+          <input type="hidden" name="tenant_id" value="{{ loc.tenant_id }}">
+          <input type="hidden" name="location_id" value="{{ loc.location_id }}">
+          <input type="hidden" name="voice_ai_provider" value="openai">
+          <button type="submit" style="background:#0066cc; color:#fff; border:none; padding:4px 12px; cursor:pointer;">
+            Switch to OpenAI
+          </button>
+        </form>
+        {% else %}
+        <form method="POST" action="/admin/voice-provider/update" style="display:inline;"
+              onsubmit="return confirm('Switch location {{ loc.location_id }} back to ElevenLabs?');">
+          <input type="hidden" name="tenant_id" value="{{ loc.tenant_id }}">
+          <input type="hidden" name="location_id" value="{{ loc.location_id }}">
+          <input type="hidden" name="voice_ai_provider" value="elevenlabs">
+          <button type="submit" style="background:#666; color:#fff; border:none; padding:4px 12px; cursor:pointer;">
+            Switch to ElevenLabs
+          </button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+  <p>No locations found. {% if not filter_tenant %}Try filtering by tenant ID.{% endif %}</p>
+{% endif %}
+{% endblock %}

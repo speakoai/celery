@@ -967,6 +967,101 @@ def impersonate_search():
     return jsonify(tenants)
 
 # ----------------------------
+# Voice AI Provider Admin Page
+# ----------------------------
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+@app.route("/admin/voice-provider", methods=["GET"])
+@restrict_ip
+def admin_voice_provider():
+    """List locations with their current voice_ai_provider for admin switching."""
+    filter_tenant = request.args.get("tenant_id", "").strip()
+
+    locations = []
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                if filter_tenant:
+                    cur.execute(
+                        """
+                        SELECT l.tenant_id, l.location_id, l.name AS location_name,
+                               t.business_name, l.voice_ai_provider,
+                               l.openai_agent_config IS NOT NULL AS has_openai_config
+                        FROM locations l
+                        JOIN tenants t ON l.tenant_id = t.tenant_id
+                        WHERE l.tenant_id = %s AND l.is_active = true
+                        ORDER BY l.location_id
+                        """,
+                        (filter_tenant,),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT l.tenant_id, l.location_id, l.name AS location_name,
+                               t.business_name, l.voice_ai_provider,
+                               l.openai_agent_config IS NOT NULL AS has_openai_config
+                        FROM locations l
+                        JOIN tenants t ON l.tenant_id = t.tenant_id
+                        WHERE l.is_active = true
+                        ORDER BY l.tenant_id, l.location_id
+                        LIMIT 100
+                        """
+                    )
+                locations = cur.fetchall()
+        conn.close()
+    except Exception as e:
+        return render_template(
+            "admin_voice_provider.html",
+            locations=[],
+            filter_tenant=filter_tenant,
+            error_message=str(e),
+            success_message=None,
+        )
+
+    return render_template(
+        "admin_voice_provider.html",
+        locations=locations,
+        filter_tenant=filter_tenant,
+        error_message=None,
+        success_message=request.args.get("success"),
+    )
+
+
+@app.route("/admin/voice-provider/update", methods=["POST"])
+@restrict_ip
+def admin_voice_provider_update():
+    """Switch a single location's voice_ai_provider."""
+    location_id = request.form.get("location_id")
+    tenant_id = request.form.get("tenant_id")
+    new_provider = request.form.get("voice_ai_provider")
+
+    if new_provider not in ("elevenlabs", "openai"):
+        return redirect(url_for("admin_voice_provider", tenant_id=tenant_id or ""))
+
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE locations
+                    SET voice_ai_provider = %s, updated_at = CURRENT_TIMESTAMP
+                    WHERE tenant_id = %s AND location_id = %s
+                    """,
+                    (new_provider, tenant_id, location_id),
+                )
+        conn.close()
+        msg = f"Location {location_id} switched to {new_provider}"
+    except Exception as e:
+        msg = f"Error: {e}"
+
+    return redirect(
+        url_for("admin_voice_provider", tenant_id=tenant_id or "", success=msg)
+    )
+
+
+# ----------------------------
 # App Entrypoint for Local Dev (Render uses gunicorn)
 # ----------------------------
 if __name__ == "__main__":
