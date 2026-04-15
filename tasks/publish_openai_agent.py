@@ -74,6 +74,16 @@ _GENERIC_DATETIME_PROPS = {
 def _tool_schema_registry():
     """Return the full registry of tool_key → OpenAI function schema."""
     return {
+        "end_call": {
+            "type": "function",
+            "name": "end_call",
+            "description": (
+                "End the phone call. Use this ONLY after the caller has clearly indicated "
+                "they are done — e.g., 'goodbye', 'that's all', 'thanks, bye', 'I'm done'. "
+                "Say a brief farewell FIRST, then call this tool to hang up."
+            ),
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
         "transfer_to_human": {
             "type": "function",
             "name": "transfer_to_human",
@@ -445,6 +455,15 @@ def _build_enabled_tools(tool_params: list) -> list:
             logger.warning(
                 f"[publish_openai] Enabled tool '{param_code}' has no OpenAI schema, skipping"
             )
+
+    # Always include system-level tools that aren't tenant-configurable
+    system_tools = ["end_call"]
+    for st_key in system_tools:
+        if st_key not in enabled_keys:
+            schema = registry.get(st_key)
+            if schema:
+                tools.insert(0, schema)
+                enabled_keys.insert(0, st_key)
 
     logger.info(f"[publish_openai] Enabled tools: {enabled_keys}")
     return tools, enabled_keys
