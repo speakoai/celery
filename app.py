@@ -563,6 +563,92 @@ def trigger_usage_notification(tenant_id: int, conn) -> None:
         traceback.print_exc()
 
 
+def record_call_billing(conn, tenant_id: int, location_conversation_id: int, call_duration_secs: int) -> None:
+    """
+    Record call duration in billing_minute_ledger.
+
+    Splits seconds across plan pool → package pool → overage.
+    Shared by both the ElevenLabs webhook and the OpenAI webhook.
+
+    Args:
+        conn: Database connection (caller manages transaction/commit)
+        tenant_id: Tenant identifier
+        location_conversation_id: Conversation row ID
+        call_duration_secs: Duration in seconds to bill
+    """
+    if not call_duration_secs or call_duration_secs <= 0:
+        print(f"[Billing] Skipping billing: no valid call_duration_secs")
+        return
+
+    # Idempotency check
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT 1
+            FROM billing_minute_ledger
+            WHERE tenant_id = %s
+              AND location_conversation_id = %s
+              AND source = 'call_usage'
+            LIMIT 1
+        """, (tenant_id, location_conversation_id))
+        if cur.fetchone():
+            print(f"[Billing] Skipping: already billed for conversation {location_conversation_id}")
+            return
+
+    # Get current balances
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT plan_seconds_balance, package_seconds_balance
+            FROM tenant_total_seconds_balance
+            WHERE tenant_id = %s
+        """, (tenant_id,))
+        balance_row = cur.fetchone()
+
+    if balance_row:
+        plan_balance, package_balance = balance_row
+    else:
+        plan_balance, package_balance = 0, 0
+        print(f"[Billing] No balance row for tenant {tenant_id}, using plan=0, package=0")
+
+    plan_balance = max(plan_balance or 0, 0)
+    package_balance = max(package_balance or 0, 0)
+
+    # Split: plan first, then package, then overage
+    call_secs = call_duration_secs
+    plan_use = min(call_secs, plan_balance)
+    remaining = call_secs - plan_use
+    package_use = min(remaining, package_balance)
+    leftover = call_secs - plan_use - package_use
+
+    print(f"[Billing] Tenant {tenant_id}, conv {location_conversation_id}: call={call_secs}s, plan_use={plan_use}s, package_use={package_use}s, leftover={leftover}s")
+
+    with conn.cursor() as cur:
+        if plan_use > 0:
+            cur.execute("""
+                INSERT INTO billing_minute_ledger (
+                    tenant_id, location_conversation_id, source, usage_bucket, seconds_delta
+                ) VALUES (%s, %s, 'call_usage', 'plan', %s)
+            """, (tenant_id, location_conversation_id, -plan_use))
+            print(f"[Billing] Inserted plan usage: -{plan_use}s")
+
+        if package_use > 0:
+            cur.execute("""
+                INSERT INTO billing_minute_ledger (
+                    tenant_id, location_conversation_id, source, usage_bucket, seconds_delta
+                ) VALUES (%s, %s, 'call_usage', 'package', %s)
+            """, (tenant_id, location_conversation_id, -package_use))
+            print(f"[Billing] Inserted package usage: -{package_use}s")
+
+        if leftover > 0:
+            cur.execute("""
+                INSERT INTO billing_minute_ledger (
+                    tenant_id, location_conversation_id, source, usage_bucket, seconds_delta
+                ) VALUES (%s, %s, 'call_usage_overage', NULL, %s)
+            """, (tenant_id, location_conversation_id, -leftover))
+            print(f"[Billing] Inserted overage usage: -{leftover}s")
+
+    print(f"✅ Billing processed successfully")
+
+
 def allowed_knowledge_file(filename: str) -> bool:
     """Return True if filename has an allowed knowledge extension (doc/x, xls/x, pdf, csv, txt)."""
     if not filename:
@@ -3048,117 +3134,19 @@ def elevenlabs_post_conversation_webhook():
                 
                 # Step 8: Process billing (post-call usage recording)
                 print(f"\n[Step 8] Processing billing")
-                
+
                 # Normalize call duration to an integer number of seconds
                 call_seconds = None
                 if call_duration_secs is not None:
                     try:
-                        # Handle int, float, or string values consistently
                         call_seconds = int(float(call_duration_secs))
                     except (TypeError, ValueError):
                         call_seconds = None
-                
-                if not call_seconds or call_seconds <= 0:
-                    print(f"[Billing] Skipping billing: no valid call_duration_secs for conversation {conversation_id}")
+
+                if call_seconds and call_seconds > 0:
+                    record_call_billing(conn, tenant_id, location_conversation_id, call_seconds)
                 else:
-                    # Check if this conversation was already billed (idempotency)
-                    with conn.cursor() as cur:
-                        cur.execute("""
-                            SELECT 1 
-                            FROM billing_minute_ledger
-                            WHERE tenant_id = %s 
-                              AND location_conversation_id = %s 
-                              AND source = 'call_usage'
-                            LIMIT 1
-                        """, (tenant_id, location_conversation_id))
-                        
-                        already_billed = cur.fetchone()
-                    
-                    if already_billed:
-                        print(f"[Billing] Skipping billing: call_usage already recorded for location_conversation_id={location_conversation_id}")
-                    else:
-                        # Query current balances
-                        with conn.cursor() as cur:
-                            cur.execute("""
-                                SELECT plan_seconds_balance, package_seconds_balance
-                                FROM tenant_total_seconds_balance
-                                WHERE tenant_id = %s
-                            """, (tenant_id,))
-                            
-                            balance_row = cur.fetchone()
-                        
-                        if balance_row:
-                            plan_balance, package_balance = balance_row
-                        else:
-                            plan_balance, package_balance = 0, 0
-                            print(f"[Billing] No balance row for tenant {tenant_id}, using plan=0, package=0")
-                        
-                        # Ensure non-negative
-                        plan_balance = max(plan_balance or 0, 0)
-                        package_balance = max(package_balance or 0, 0)
-                        
-                        print(f"[Billing] Tenant {tenant_id} balances: plan={plan_balance}s, package={package_balance}s")
-                        
-                        # Split usage: consume plan pool first, then package pool
-                        call_secs = call_seconds
-                        
-                        # Consume plan pool first
-                        plan_use = min(call_secs, plan_balance)
-                        remaining = call_secs - plan_use
-                        
-                        # Consume package pool second
-                        package_use = min(remaining, package_balance)
-                        
-                        # Calculate unbilled leftover
-                        leftover = call_secs - plan_use - package_use
-                        
-                        print(f"[Billing] Tenant {tenant_id}, conv {location_conversation_id}: call={call_secs}s, plan_use={plan_use}s, package_use={package_use}s, leftover={leftover}s")
-                        
-                        # Insert call_usage rows into billing_minute_ledger
-                        with conn.cursor() as cur:
-                            # Insert plan usage (if any)
-                            if plan_use > 0:
-                                cur.execute("""
-                                    INSERT INTO billing_minute_ledger (
-                                        tenant_id,
-                                        location_conversation_id,
-                                        source,
-                                        usage_bucket,
-                                        seconds_delta
-                                    ) VALUES (%s, %s, 'call_usage', 'plan', %s)
-                                """, (tenant_id, location_conversation_id, -plan_use))
-                                
-                                print(f"[Billing] Inserted plan usage: -{plan_use}s")
-                            
-                            # Insert package usage (if any)
-                            if package_use > 0:
-                                cur.execute("""
-                                    INSERT INTO billing_minute_ledger (
-                                        tenant_id,
-                                        location_conversation_id,
-                                        source,
-                                        usage_bucket,
-                                        seconds_delta
-                                    ) VALUES (%s, %s, 'call_usage', 'package', %s)
-                                """, (tenant_id, location_conversation_id, -package_use))
-                                
-                                print(f"[Billing] Inserted package usage: -{package_use}s")
-                            
-                            # Insert overage debt if leftover exists
-                            if leftover > 0:
-                                cur.execute("""
-                                    INSERT INTO billing_minute_ledger (
-                                        tenant_id,
-                                        location_conversation_id,
-                                        source,
-                                        usage_bucket,
-                                        seconds_delta
-                                    ) VALUES (%s, %s, 'call_usage_overage', NULL, %s)
-                                """, (tenant_id, location_conversation_id, -leftover))
-                                
-                                print(f"[Billing] Inserted overage usage: -{leftover}s")
-                        
-                        print(f"✅ Billing processed successfully")
+                    print(f"[Billing] Skipping billing: no valid call_duration_secs for conversation {conversation_id}")
                 
                 # Step 9: Fire-and-forget usage notification check
                 # This runs before commit so notification is included in same transaction
@@ -3211,8 +3199,220 @@ def elevenlabs_post_conversation_webhook():
         import traceback
         traceback.print_exc()
         print("=" * 80)
-        
+
         return jsonify({
             'error': 'Internal server error',
             'message': str(e)
         }), 500
+
+
+# =============================================================================
+# OPENAI REALTIME POST-CONVERSATION WEBHOOK
+# =============================================================================
+
+@app.route('/webhook/post_openai_conversation', methods=['POST'])
+@require_api_key
+def openai_post_conversation_webhook():
+    """
+    Post-call processing for OpenAI Realtime conversations.
+
+    Called by voice-ai (app_open.py) after a call ends. Handles:
+    - INSERT into location_conversations + location_conversation_details
+    - Download audio from Twilio → upload to R2
+    - Billing (shared record_call_billing function)
+    - Summary generation
+    - Usage notification check
+    """
+    try:
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({'error': 'JSON payload required'}), 400
+
+        tenant_id = data.get('tenant_id')
+        location_id = data.get('location_id')
+        if not tenant_id or not location_id:
+            return jsonify({'error': 'tenant_id and location_id required'}), 400
+
+        print("=" * 80)
+        print("OPENAI POST-CONVERSATION WEBHOOK RECEIVED")
+        print(f"tenant_id={tenant_id}, location_id={location_id}")
+        print(f"provider_conversation_id={data.get('provider_conversation_id')}")
+        print(f"duration={data.get('call_duration_secs')}s, messages={data.get('message_count')}")
+        print("=" * 80)
+
+        is_dev = os.getenv('FLASK_ENV') == 'development' or os.getenv('RENDER_SERVICE_NAME', '').endswith('-dev')
+
+        conn = get_db_connection()
+
+        try:
+            # Step 1: Download audio from Twilio → upload to R2
+            audio_r2_path = None
+            recording_sid = data.get('recording_sid')
+
+            if recording_sid:
+                print(f"\n[Step 1] Downloading audio from Twilio recording {recording_sid}")
+                try:
+                    import requests as http_requests
+
+                    twilio_sid = os.getenv('TWILIO_ACCOUNT_SID')
+                    twilio_token = os.getenv('TWILIO_AUTH_TOKEN')
+
+                    if twilio_sid and twilio_token:
+                        twilio_url = f"https://api.twilio.com/2010-04-01/Accounts/{twilio_sid}/Recordings/{recording_sid}.mp3"
+                        audio_resp = http_requests.get(twilio_url, auth=(twilio_sid, twilio_token), timeout=30)
+
+                        if audio_resp.status_code == 200 and len(audio_resp.content) > 0:
+                            print(f"✅ Downloaded audio: {len(audio_resp.content)} bytes")
+
+                            from tasks.utils.publish_r2 import upload_audio_to_r2
+
+                            conversation_id = data.get('provider_conversation_id') or recording_sid
+                            r2_key, public_url = upload_audio_to_r2(
+                                str(tenant_id), str(location_id), conversation_id,
+                                audio_resp.content, content_type='audio/mpeg', use_dev=is_dev,
+                            )
+                            audio_r2_path = public_url
+                            print(f"✅ Uploaded to R2: {public_url}")
+                        else:
+                            print(f"⚠️  Failed to download audio: status={audio_resp.status_code}")
+                    else:
+                        print(f"⚠️  Twilio credentials not configured")
+                except Exception as audio_err:
+                    print(f"⚠️  Audio download/upload failed: {audio_err}")
+            else:
+                print(f"\n[Step 1] No recording_sid, skipping audio")
+
+            # Step 2: INSERT conversation row
+            print(f"\n[Step 2] Inserting conversation")
+
+            call_start_time = data.get('call_start_time')
+            if isinstance(call_start_time, str):
+                from dateutil import parser as dt_parser
+                try:
+                    call_start_time = dt_parser.parse(call_start_time).replace(tzinfo=None)
+                except Exception:
+                    call_start_time = datetime.utcnow()
+
+            call_accepted_time = data.get('call_accepted_time')
+            if isinstance(call_accepted_time, str):
+                from dateutil import parser as dt_parser
+                try:
+                    call_accepted_time = dt_parser.parse(call_accepted_time).replace(tzinfo=None)
+                except Exception:
+                    call_accepted_time = None
+
+            location_conversation_id = None
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO location_conversations (
+                        tenant_id, location_id, provider,
+                        provider_conversation_id, provider_agent_id,
+                        agent_name, call_start_time, call_accepted_time,
+                        call_duration_secs, message_count, status,
+                        call_successful, main_language,
+                        transcript_summary, audio_r2_path, raw_metadata
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING location_conversation_id
+                """, (
+                    tenant_id, location_id, data.get('provider', 'openai'),
+                    data.get('provider_conversation_id'), data.get('provider_agent_id'),
+                    data.get('agent_name'), call_start_time, call_accepted_time,
+                    data.get('call_duration_secs'), data.get('message_count', 0),
+                    data.get('status', 'done'), data.get('call_successful', True),
+                    data.get('main_language'), None, audio_r2_path,
+                    json.dumps(data.get('raw_metadata')) if data.get('raw_metadata') else None,
+                ))
+                location_conversation_id = cur.fetchone()[0]
+
+            print(f"✅ Inserted conversation: id={location_conversation_id}")
+
+            # Step 3: INSERT transcript details
+            transcript = data.get('transcript', [])
+            if transcript and location_conversation_id:
+                print(f"\n[Step 3] Inserting {len(transcript)} transcript messages")
+                with conn.cursor() as cur:
+                    for entry in transcript:
+                        tool_calls_json = json.dumps(entry.get('tool_calls')) if entry.get('tool_calls') else None
+                        tool_results_json = json.dumps(entry.get('tool_results')) if entry.get('tool_results') else None
+                        cur.execute("""
+                            INSERT INTO location_conversation_details (
+                                location_conversation_id, message_index, role,
+                                time_in_call_secs, message, tool_calls, tool_results
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        """, (
+                            location_conversation_id, entry.get('message_index', 0),
+                            entry.get('role', 'unknown'), entry.get('time_in_call_secs'),
+                            entry.get('message'), tool_calls_json, tool_results_json,
+                        ))
+                print(f"✅ Inserted {len(transcript)} transcript messages")
+
+            # Step 4: Billing
+            print(f"\n[Step 4] Processing billing")
+            call_duration_secs = data.get('call_duration_secs')
+            if call_duration_secs and int(call_duration_secs) > 0 and location_conversation_id:
+                record_call_billing(conn, int(tenant_id), location_conversation_id, int(call_duration_secs))
+
+            # Step 5: Usage notification
+            try:
+                trigger_usage_notification(int(tenant_id), conn)
+            except Exception as notif_err:
+                print(f"⚠️  [Notification] Error: {notif_err}")
+
+            conn.commit()
+            print(f"✅ Transaction committed")
+
+            # Step 6: Generate summary (after commit)
+            if transcript and location_conversation_id:
+                try:
+                    transcript_text = "\n".join(
+                        f"{t.get('role', 'unknown')}: {t.get('message', '')}"
+                        for t in transcript if t.get('message')
+                    )
+                    if transcript_text:
+                        openai_api_key = os.getenv('OPENAI_API_KEY')
+                        if openai_api_key:
+                            import requests as http_requests
+                            resp = http_requests.post(
+                                "https://api.openai.com/v1/chat/completions",
+                                headers={"Authorization": f"Bearer {openai_api_key}", "Content-Type": "application/json"},
+                                json={
+                                    "model": "gpt-4o-mini",
+                                    "messages": [
+                                        {"role": "system", "content": "Summarize this phone call transcript in 1-2 sentences. Focus on the caller's intent and the outcome."},
+                                        {"role": "user", "content": transcript_text[:4000]},
+                                    ],
+                                    "max_tokens": 150, "temperature": 0.3,
+                                },
+                                timeout=15,
+                            )
+                            if resp.ok:
+                                summary = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                                if summary:
+                                    conn2 = get_db_connection()
+                                    with conn2.cursor() as cur:
+                                        cur.execute(
+                                            "UPDATE location_conversations SET transcript_summary = %s WHERE location_conversation_id = %s",
+                                            (summary, location_conversation_id),
+                                        )
+                                    conn2.commit()
+                                    conn2.close()
+                                    print(f"✅ Summary: {summary[:80]}...")
+                except Exception as summary_err:
+                    print(f"⚠️  Summary failed: {summary_err}")
+
+            print("=" * 80)
+            return jsonify({
+                'success': True,
+                'location_conversation_id': location_conversation_id,
+                'audio_uploaded': bool(audio_r2_path),
+                'transcript_messages': len(transcript),
+            }), 200
+
+        finally:
+            conn.close()
+
+    except Exception as e:
+        print(f"❌ Fatal error in OpenAI conversation webhook: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': 'Internal server error', 'message': str(e)}), 500
