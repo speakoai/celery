@@ -3249,6 +3249,8 @@ def openai_post_conversation_webhook():
             audio_r2_path = None
             recording_sid = data.get('recording_sid')
 
+            _audio_needs_retry = False
+
             if recording_sid:
                 print(f"\n[Step 1] Downloading audio from Twilio recording {recording_sid}")
                 try:
@@ -3283,7 +3285,11 @@ def openai_post_conversation_webhook():
                                 _time.sleep(5)
                             else:
                                 print(f"⚠️  Failed to download audio: status={audio_resp.status_code} (attempt {attempt + 1})")
+                                # Enqueue background retry task (will be updated with conv ID after INSERT)
+                                _audio_needs_retry = True
                                 break
+                        else:
+                            _audio_needs_retry = False
                     else:
                         print(f"⚠️  Twilio credentials not configured")
                 except Exception as audio_err:
@@ -3334,6 +3340,26 @@ def openai_post_conversation_webhook():
                 location_conversation_id = cur.fetchone()[0]
 
             print(f"✅ Inserted conversation: id={location_conversation_id}")
+
+            # Enqueue audio retry task if initial download failed
+            if _audio_needs_retry and recording_sid and location_conversation_id:
+                try:
+                    from tasks.retry_audio_upload import retry_audio_upload
+                    conversation_id_for_r2 = data.get('provider_conversation_id') or recording_sid
+                    retry_audio_upload.apply_async(
+                        kwargs={
+                            "tenant_id": str(tenant_id),
+                            "location_id": str(location_id),
+                            "location_conversation_id": location_conversation_id,
+                            "recording_sid": recording_sid,
+                            "conversation_id": conversation_id_for_r2,
+                            "attempt": 1,
+                        },
+                        countdown=30,  # First retry after 30s (recording is likely ready by then)
+                    )
+                    print(f"✅ Enqueued audio retry task for recording {recording_sid}")
+                except Exception as retry_err:
+                    print(f"⚠️  Failed to enqueue audio retry: {retry_err}")
 
             # Step 3: INSERT transcript details
             transcript = data.get('transcript', [])
