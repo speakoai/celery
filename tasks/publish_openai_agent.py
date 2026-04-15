@@ -533,6 +533,7 @@ def _collect_openai_agent_params(tenant_id: str, location_id: str) -> dict:
                         (provider = 'speako' AND service = 'greetings') OR
                         (service IN ('agents', 'turn', 'conversation', 'tts')) OR
                         (service = 'agents' AND provider = 'elevenlabs') OR
+                        (service = 'agents' AND provider = 'openai') OR
                         (service = 'tool' AND provider = 'speako') OR
                         (service = 'dictionary')
                       )
@@ -551,6 +552,13 @@ def _collect_openai_agent_params(tenant_id: str, location_id: str) -> dict:
 
                     if provider == "speako" and service == "greetings" and status == "configured":
                         result["greetings_params"].append(row_dict)
+                    elif (
+                        service == "agents"
+                        and provider == "openai"
+                        and param_code == "voice_id"
+                    ):
+                        # OpenAI voice_id goes to voice_dict_params
+                        result["voice_dict_params"].append(row_dict)
                     elif (
                         service == "agents"
                         and provider == "elevenlabs"
