@@ -78,9 +78,13 @@ def _tool_schema_registry():
             "type": "function",
             "name": "end_call",
             "description": (
-                "End the phone call. Use this ONLY after the caller has clearly indicated "
-                "they are done — e.g., 'goodbye', 'that's all', 'thanks, bye', 'I'm done'. "
-                "Say a brief farewell FIRST, then call this tool to hang up."
+                "End the phone call and hang up. You MUST call this tool when: "
+                "(1) the caller says goodbye, thanks bye, that's all, I'm done, no more questions, "
+                "I'm all good, nothing else, or any similar closing phrase; "
+                "(2) you have said your farewell message. "
+                "Say a brief goodbye FIRST (e.g. 'Thank you for calling, have a great day'), "
+                "then IMMEDIATELY call this tool. Do NOT ask if there's anything else after "
+                "the caller has already indicated they are done."
             ),
             "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
         },
