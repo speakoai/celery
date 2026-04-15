@@ -913,26 +913,14 @@ def _ensure_fragments_and_compose(
     except Exception as e:
         logger.warning(f"[publish_openai] Failed to collect knowledge: {e}")
 
-    INLINE_THRESHOLD = 30 * 1024  # 30KB
-
-    if knowledge_sections and knowledge_total_size < INLINE_THRESHOLD:
-        # Tier 1: Inline into system prompt
-        knowledge_md = "\n\n# Knowledge Base\n"
-        for section in knowledge_sections:
-            # Use param_code as section header (food_menu → Food Menu)
-            title = section["param_code"].replace("_", " ").title()
-            knowledge_md += f"\n## {title}\n\n{section['content']}\n"
-
-        composed += knowledge_md
+    # Knowledge is NEVER inlined into the system prompt.
+    # Large system prompts cause intermittent silence in the Realtime API
+    # (model generates text but zero audio). All knowledge goes through the
+    # search_knowledge tool (vector store) to keep the prompt lean.
+    if knowledge_sections:
         logger.info(
-            f"[publish_openai] Inlined {len(knowledge_sections)} knowledge entries "
-            f"({knowledge_total_size} bytes) into system prompt"
-        )
-    elif knowledge_sections and knowledge_total_size >= INLINE_THRESHOLD:
-        # Tier 2: Vector store needed — handled in _compose_openai_agent_config
-        logger.info(
-            f"[publish_openai] Knowledge too large for inline ({knowledge_total_size} bytes), "
-            f"vector store required"
+            f"[publish_openai] {len(knowledge_sections)} knowledge entries "
+            f"({knowledge_total_size} bytes) — will use search_knowledge tool, not inlined"
         )
 
     return composed, temperature_value, knowledge_sections, knowledge_total_size
@@ -978,16 +966,16 @@ def _compose_openai_agent_config(
     # ── 5. Build enabled tools ──
     tools, enabled_tool_keys = _build_enabled_tools(tool_params)
 
-    # ── 5b. If knowledge is Tier 2 (too large for inline), add search_knowledge tool ──
-    INLINE_THRESHOLD = 30 * 1024
-    needs_vector_store = knowledge_sections and knowledge_total_size >= INLINE_THRESHOLD
-    if needs_vector_store:
+    # ── 5b. Add search_knowledge tool when any knowledge entries exist ──
+    # Knowledge is never inlined into the prompt (causes silent response issues).
+    # Always use the search_knowledge tool for on-demand retrieval.
+    if knowledge_sections:
         registry = _tool_schema_registry()
         search_tool = registry.get("search_knowledge")
         if search_tool and "search_knowledge" not in enabled_tool_keys:
             tools.append(search_tool)
             enabled_tool_keys.append("search_knowledge")
-            logger.info("[publish_openai] Added search_knowledge tool (knowledge > 30KB)")
+            logger.info("[publish_openai] Added search_knowledge tool (%d knowledge entries)", len(knowledge_sections))
 
     # ── 6. Append pronunciation hints to instructions ──
     instructions = system_prompt
@@ -1053,13 +1041,11 @@ def _compose_openai_agent_config(
         "greeting": greetings,
         # ── knowledge ──
         "knowledge": {
-            "inline_snippets": [
-                {"type": s["param_code"], "content_length": len(s["content"])}
-                for s in knowledge_sections
-            ] if knowledge_sections and knowledge_total_size < INLINE_THRESHOLD else [],
-            "vector_store": None,  # Populated by Tier 2 when knowledge > 30KB
+            "inline_snippets": [],  # Never inline — all knowledge via search_knowledge tool
+            "vector_store": None,  # Populated when vector store upload is implemented
             "total_knowledge_size": knowledge_total_size,
-            "tier": "inline" if knowledge_total_size < INLINE_THRESHOLD else "vector_store",
+            "tier": "vector_store" if knowledge_sections else "none",
+            "knowledge_entries": [s["param_code"] for s in knowledge_sections] if knowledge_sections else [],
         },
         # ── pronunciation (kept for audit, already baked into instructions) ──
         "pronunciation_hints": pronunciation_hints,
