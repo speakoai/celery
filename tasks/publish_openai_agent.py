@@ -78,15 +78,12 @@ def _tool_schema_registry():
             "type": "function",
             "name": "end_call",
             "description": (
-                "End the phone call and hang up. You MUST call this tool when the caller "
-                "says goodbye, thanks bye, that's all, I'm done, no more questions, "
-                "I'm all good, nothing else, or any similar closing phrase. "
-                "IMPORTANT: In the SAME response that calls this tool, you MUST also "
-                "include a spoken farewell message such as 'Thank you for calling "
-                "[business name], have a wonderful day.' or if the caller has a booking, "
-                "'I'll see you on [day]. Have a great day.' "
-                "The farewell message and end_call MUST be in the same response. "
-                "Do NOT call this tool alone without a farewell message. "
+                "End the phone call and hang up. Call this tool when the caller says "
+                "goodbye, thanks bye, that's all, I'm done, I'm all good, or any "
+                "similar closing phrase. After calling this tool, you will receive a "
+                "spoken_reply in the result — you MUST speak that reply warmly and "
+                "naturally to the caller as your farewell. Do NOT say just 'Goodbye' — "
+                "always use the spoken_reply from the tool result. "
                 "Do NOT ask 'is there anything else' after the caller has already "
                 "indicated they are done."
             ),
