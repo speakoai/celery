@@ -926,6 +926,145 @@ def _ensure_fragments_and_compose(
     return composed, temperature_value, knowledge_sections, knowledge_total_size
 
 
+def _upload_knowledge_to_vector_store(
+    tenant_id: str,
+    location_id: str,
+    knowledge_sections: list,
+) -> str | None:
+    """
+    Upload knowledge to an OpenAI Vector Store.
+    Creates the store if it doesn't exist, replaces files if it does.
+    Returns the vector_store_id, or None if upload fails.
+    """
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    import requests
+    import tempfile
+
+    openai_key = os.getenv("OPENAI_API_KEY")
+    if not openai_key:
+        logger.error("[publish_openai] OPENAI_API_KEY not set, cannot create vector store")
+        return None
+
+    headers = {
+        "Authorization": f"Bearer {openai_key}",
+        "OpenAI-Beta": "assistants=v2",
+    }
+
+    # Check if location already has a vector store
+    conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT openai_vector_store_id FROM locations WHERE tenant_id = %s AND location_id = %s",
+                (tenant_id, location_id),
+            )
+            row = cur.fetchone()
+            existing_vs_id = row["openai_vector_store_id"] if row else None
+    finally:
+        conn.close()
+
+    vector_store_id = existing_vs_id
+
+    # Create vector store if it doesn't exist
+    if not vector_store_id:
+        logger.info("[publish_openai] Creating new vector store for tenant=%s location=%s", tenant_id, location_id)
+        resp = requests.post(
+            "https://api.openai.com/v1/vector_stores",
+            headers=headers,
+            json={
+                "name": f"speako-{tenant_id}-{location_id}",
+                "metadata": {"tenant_id": str(tenant_id), "location_id": str(location_id)},
+            },
+            timeout=30,
+        )
+        if resp.ok:
+            vector_store_id = resp.json().get("id")
+            logger.info("[publish_openai] Created vector store: %s", vector_store_id)
+
+            # Save to DB
+            conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE locations SET openai_vector_store_id = %s WHERE tenant_id = %s AND location_id = %s",
+                        (vector_store_id, tenant_id, location_id),
+                    )
+                conn.commit()
+            finally:
+                conn.close()
+        else:
+            logger.error("[publish_openai] Failed to create vector store: %s %s", resp.status_code, resp.text[:300])
+            return None
+    else:
+        # Delete existing files from the store before re-uploading
+        logger.info("[publish_openai] Clearing existing files from vector store %s", vector_store_id)
+        try:
+            list_resp = requests.get(
+                f"https://api.openai.com/v1/vector_stores/{vector_store_id}/files",
+                headers=headers,
+                timeout=15,
+            )
+            if list_resp.ok:
+                for f in list_resp.json().get("data", []):
+                    file_id = f.get("id")
+                    requests.delete(
+                        f"https://api.openai.com/v1/vector_stores/{vector_store_id}/files/{file_id}",
+                        headers=headers,
+                        timeout=10,
+                    )
+                    logger.info("[publish_openai] Deleted file %s from vector store", file_id)
+        except Exception as e:
+            logger.warning("[publish_openai] Error clearing vector store files: %s", e)
+
+    # Aggregate all knowledge into one markdown file
+    md_content = ""
+    for section in knowledge_sections:
+        title = section["param_code"].replace("_", " ").title()
+        md_content += f"# {title}\n\n{section['content']}\n\n---\n\n"
+
+    # Upload as a file
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
+            tmp.write(md_content)
+            tmp_path = tmp.name
+
+        with open(tmp_path, "rb") as f:
+            upload_resp = requests.post(
+                "https://api.openai.com/v1/files",
+                headers={"Authorization": f"Bearer {openai_key}"},
+                files={"file": (f"knowledge-{tenant_id}-{location_id}.md", f, "text/markdown")},
+                data={"purpose": "assistants"},
+                timeout=60,
+            )
+
+        os.unlink(tmp_path)
+
+        if not upload_resp.ok:
+            logger.error("[publish_openai] File upload failed: %s %s", upload_resp.status_code, upload_resp.text[:300])
+            return vector_store_id
+
+        file_id = upload_resp.json().get("id")
+        logger.info("[publish_openai] Uploaded file %s (%d bytes)", file_id, len(md_content))
+
+        # Attach file to vector store
+        attach_resp = requests.post(
+            f"https://api.openai.com/v1/vector_stores/{vector_store_id}/files",
+            headers=headers,
+            json={"file_id": file_id},
+            timeout=30,
+        )
+        if attach_resp.ok:
+            logger.info("[publish_openai] Attached file %s to vector store %s", file_id, vector_store_id)
+        else:
+            logger.error("[publish_openai] File attach failed: %s %s", attach_resp.status_code, attach_resp.text[:300])
+
+    except Exception as e:
+        logger.error("[publish_openai] Vector store upload error: %s", e)
+
+    return vector_store_id
+
+
 def _compose_openai_agent_config(
     tenant_id: str,
     location_id: str,
@@ -969,6 +1108,7 @@ def _compose_openai_agent_config(
     # ── 5b. Add search_knowledge tool when any knowledge entries exist ──
     # Knowledge is never inlined into the prompt (causes silent response issues).
     # Always use the search_knowledge tool for on-demand retrieval.
+    vector_store_id = None
     if knowledge_sections:
         registry = _tool_schema_registry()
         search_tool = registry.get("search_knowledge")
@@ -976,6 +1116,11 @@ def _compose_openai_agent_config(
             tools.append(search_tool)
             enabled_tool_keys.append("search_knowledge")
             logger.info("[publish_openai] Added search_knowledge tool (%d knowledge entries)", len(knowledge_sections))
+
+        # Upload knowledge to OpenAI Vector Store
+        vector_store_id = _upload_knowledge_to_vector_store(
+            str(tenant_id), str(location_id), knowledge_sections
+        )
 
     # ── 6. Append pronunciation hints to instructions ──
     instructions = system_prompt
@@ -1042,7 +1187,9 @@ def _compose_openai_agent_config(
         # ── knowledge ──
         "knowledge": {
             "inline_snippets": [],  # Never inline — all knowledge via search_knowledge tool
-            "vector_store": None,  # Populated when vector store upload is implemented
+            "vector_store": {
+                "vector_store_id": vector_store_id,
+            } if vector_store_id else None,
             "total_knowledge_size": knowledge_total_size,
             "tier": "vector_store" if knowledge_sections else "none",
             "knowledge_entries": [s["param_code"] for s in knowledge_sections] if knowledge_sections else [],
