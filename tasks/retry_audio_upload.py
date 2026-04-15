@@ -30,6 +30,7 @@ def retry_audio_upload(
     recording_sid: str,
     conversation_id: str,
     attempt: int = 1,
+    is_dev: bool = False,
 ):
     """
     Download audio from Twilio and upload to R2, retrying on failure.
@@ -60,22 +61,22 @@ def retry_audio_upload(
         resp = requests.get(twilio_url, auth=(twilio_sid, twilio_token), timeout=30)
     except Exception as e:
         logger.warning("[RetryAudio] Download error: %s", e)
-        return _maybe_retry(self, tenant_id, location_id, location_conversation_id, recording_sid, conversation_id, attempt, str(e))
+        return _maybe_retry(self, tenant_id, location_id, location_conversation_id, recording_sid, conversation_id, attempt, str(e), is_dev=is_dev)
 
     if resp.status_code == 404:
         logger.info("[RetryAudio] Recording still not ready (404)")
-        return _maybe_retry(self, tenant_id, location_id, location_conversation_id, recording_sid, conversation_id, attempt, "404")
+        return _maybe_retry(self, tenant_id, location_id, location_conversation_id, recording_sid, conversation_id, attempt, "404", is_dev=is_dev)
 
     if resp.status_code != 200 or len(resp.content) == 0:
         logger.warning("[RetryAudio] Unexpected response: status=%s size=%d", resp.status_code, len(resp.content))
-        return _maybe_retry(self, tenant_id, location_id, location_conversation_id, recording_sid, conversation_id, attempt, f"status_{resp.status_code}")
+        return _maybe_retry(self, tenant_id, location_id, location_conversation_id, recording_sid, conversation_id, attempt, f"status_{resp.status_code}", is_dev=is_dev)
 
     # Upload to R2
     logger.info("[RetryAudio] Downloaded %d bytes, uploading to R2", len(resp.content))
     try:
         from tasks.utils.publish_r2 import upload_audio_to_r2
 
-        is_dev = os.getenv("FLASK_ENV") == "development" or os.getenv("RENDER_SERVICE_NAME", "").endswith("-dev")
+        # is_dev passed from caller (voice-ai knows its environment)
 
         r2_key, public_url = upload_audio_to_r2(
             str(tenant_id), str(location_id), conversation_id,
@@ -84,7 +85,7 @@ def retry_audio_upload(
         logger.info("[RetryAudio] Uploaded to R2: %s", public_url)
     except Exception as e:
         logger.error("[RetryAudio] R2 upload failed: %s", e)
-        return _maybe_retry(self, tenant_id, location_id, location_conversation_id, recording_sid, conversation_id, attempt, str(e))
+        return _maybe_retry(self, tenant_id, location_id, location_conversation_id, recording_sid, conversation_id, attempt, str(e), is_dev=is_dev)
 
     # Update DB
     try:
@@ -105,7 +106,7 @@ def retry_audio_upload(
     return {"success": True, "attempt": attempt, "r2_url": public_url}
 
 
-def _maybe_retry(task, tenant_id, location_id, location_conversation_id, recording_sid, conversation_id, attempt, reason):
+def _maybe_retry(task, tenant_id, location_id, location_conversation_id, recording_sid, conversation_id, attempt, reason, is_dev=False):
     """Re-enqueue with delay if under max retries, otherwise give up."""
     if attempt >= MAX_RETRIES:
         logger.warning("[RetryAudio] Giving up after %d attempts for recording %s: %s", attempt, recording_sid, reason)
@@ -120,6 +121,7 @@ def _maybe_retry(task, tenant_id, location_id, location_conversation_id, recordi
             "recording_sid": recording_sid,
             "conversation_id": conversation_id,
             "attempt": attempt + 1,
+            "is_dev": is_dev,
         },
         countdown=RETRY_DELAY_SECONDS,
     )

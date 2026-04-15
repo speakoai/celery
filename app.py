@@ -3240,7 +3240,8 @@ def openai_post_conversation_webhook():
         print(f"duration={data.get('call_duration_secs')}s, messages={data.get('message_count')}")
         print("=" * 80)
 
-        is_dev = os.getenv('FLASK_ENV') == 'development' or os.getenv('RENDER_SERVICE_NAME', '').endswith('-dev')
+        # Use is_dev from voice-ai payload (voice-ai knows its own environment)
+        is_dev = data.get('is_dev', False)
 
         conn = get_db_connection()
 
@@ -3365,6 +3366,7 @@ def openai_post_conversation_webhook():
                             "recording_sid": recording_sid,
                             "conversation_id": conversation_id_for_r2,
                             "attempt": 1,
+                            "is_dev": is_dev,
                         },
                         countdown=30,  # First retry after 30s (recording is likely ready by then)
                     )
