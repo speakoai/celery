@@ -3253,28 +3253,37 @@ def openai_post_conversation_webhook():
                 print(f"\n[Step 1] Downloading audio from Twilio recording {recording_sid}")
                 try:
                     import requests as http_requests
+                    import time as _time
 
                     twilio_sid = os.getenv('TWILIO_ACCOUNT_SID')
                     twilio_token = os.getenv('TWILIO_AUTH_TOKEN')
 
                     if twilio_sid and twilio_token:
                         twilio_url = f"https://api.twilio.com/2010-04-01/Accounts/{twilio_sid}/Recordings/{recording_sid}.mp3"
-                        audio_resp = http_requests.get(twilio_url, auth=(twilio_sid, twilio_token), timeout=30)
 
-                        if audio_resp.status_code == 200 and len(audio_resp.content) > 0:
-                            print(f"✅ Downloaded audio: {len(audio_resp.content)} bytes")
+                        # Retry up to 3 times — Twilio recordings may not be ready immediately
+                        for attempt in range(3):
+                            audio_resp = http_requests.get(twilio_url, auth=(twilio_sid, twilio_token), timeout=30)
 
-                            from tasks.utils.publish_r2 import upload_audio_to_r2
+                            if audio_resp.status_code == 200 and len(audio_resp.content) > 0:
+                                print(f"✅ Downloaded audio: {len(audio_resp.content)} bytes (attempt {attempt + 1})")
 
-                            conversation_id = data.get('provider_conversation_id') or recording_sid
-                            r2_key, public_url = upload_audio_to_r2(
-                                str(tenant_id), str(location_id), conversation_id,
-                                audio_resp.content, content_type='audio/mpeg', use_dev=is_dev,
-                            )
-                            audio_r2_path = public_url
-                            print(f"✅ Uploaded to R2: {public_url}")
-                        else:
-                            print(f"⚠️  Failed to download audio: status={audio_resp.status_code}")
+                                from tasks.utils.publish_r2 import upload_audio_to_r2
+
+                                conversation_id = data.get('provider_conversation_id') or recording_sid
+                                r2_key, public_url = upload_audio_to_r2(
+                                    str(tenant_id), str(location_id), conversation_id,
+                                    audio_resp.content, content_type='audio/mpeg', use_dev=is_dev,
+                                )
+                                audio_r2_path = public_url
+                                print(f"✅ Uploaded to R2: {public_url}")
+                                break
+                            elif audio_resp.status_code == 404 and attempt < 2:
+                                print(f"⚠️  Recording not ready yet (attempt {attempt + 1}/3), waiting 5s...")
+                                _time.sleep(5)
+                            else:
+                                print(f"⚠️  Failed to download audio: status={audio_resp.status_code} (attempt {attempt + 1})")
+                                break
                     else:
                         print(f"⚠️  Twilio credentials not configured")
                 except Exception as audio_err:
