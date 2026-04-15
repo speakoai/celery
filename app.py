@@ -3276,6 +3276,7 @@ def openai_post_conversation_webhook():
                                 r2_key, public_url = upload_audio_to_r2(
                                     str(tenant_id), str(location_id), conversation_id,
                                     audio_resp.content, content_type='audio/mpeg',
+                                    use_dev=is_dev,
                                 )
                                 audio_r2_path = public_url
                                 print(f"✅ Uploaded to R2: {public_url}")
