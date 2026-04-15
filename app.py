@@ -3270,16 +3270,26 @@ def openai_post_conversation_webhook():
                             if audio_resp.status_code == 200 and len(audio_resp.content) > 0:
                                 print(f"✅ Downloaded audio: {len(audio_resp.content)} bytes (attempt {attempt + 1})")
 
-                                from tasks.utils.publish_r2 import upload_audio_to_r2
+                                from tasks.utils.publish_r2 import _get_r2_client
 
                                 conversation_id = data.get('provider_conversation_id') or recording_sid
-                                r2_key, public_url = upload_audio_to_r2(
-                                    str(tenant_id), str(location_id), conversation_id,
-                                    audio_resp.content, content_type='audio/mpeg',
-                                    use_dev=is_dev,
+                                r2_key = f"{tenant_id}/{location_id}/conversations/{conversation_id}.mp3"
+
+                                # Always use R2_BUCKET_NAME (manually set per env)
+                                bucket = os.getenv('R2_BUCKET_NAME')
+                                # URL: use _DEV variant for dev, standard for prod
+                                if is_dev:
+                                    public_base = os.getenv('R2_PUBLIC_BASE_URL_DEV', 'https://assets-dev.speako.ai')
+                                else:
+                                    public_base = os.getenv('R2_PUBLIC_BASE_URL', 'https://assets.speako.ai')
+
+                                r2_client = _get_r2_client()
+                                r2_client.put_object(
+                                    Bucket=bucket, Key=r2_key,
+                                    Body=audio_resp.content, ContentType='audio/mpeg',
                                 )
-                                audio_r2_path = public_url
-                                print(f"✅ Uploaded to R2: {public_url}")
+                                audio_r2_path = f"{public_base}/{r2_key}"
+                                print(f"✅ Uploaded to R2: bucket={bucket} url={audio_r2_path}")
                                 break
                             elif audio_resp.status_code == 404 and attempt < 2:
                                 print(f"⚠️  Recording not ready yet (attempt {attempt + 1}/3), waiting 5s...")
