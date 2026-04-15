@@ -74,6 +74,29 @@ _GENERIC_DATETIME_PROPS = {
 def _tool_schema_registry():
     """Return the full registry of tool_key → OpenAI function schema."""
     return {
+        "search_knowledge": {
+            "type": "function",
+            "name": "search_knowledge",
+            "description": (
+                "Search the business knowledge base for information about menu items, "
+                "prices, services, catalogs, or any detailed business information. "
+                "Use this when the caller asks about specific items, prices, or details "
+                "that are not in your general instructions. "
+                "Before calling this tool, say: 'Let me look that up for you, one moment please.' "
+                "After receiving the result, speak the spoken_reply naturally to the caller."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query — what the caller is asking about",
+                    }
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+        },
         "end_call": {
             "type": "function",
             "name": "end_call",
@@ -842,7 +865,77 @@ def _ensure_fragments_and_compose(
             f"tenant_id={tenant_id}, location_id={location_id}"
         )
 
-    return composed, temperature_value
+    # ── 6. Collect and inline knowledge (food_menu, service_menu, etc.) ──
+    # In ElevenLabs, these are uploaded as RAG docs. For OpenAI Realtime
+    # (which has no built-in RAG), we inline them into the system prompt
+    # if total size < 30KB. Larger docs will use a vector store (Tier 2).
+    knowledge_sections = []
+    knowledge_total_size = 0
+    try:
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+
+        conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT param_code, value_text
+                    FROM tenant_integration_params
+                    WHERE tenant_id = %s
+                      AND location_id = %s
+                      AND service = 'knowledge'
+                      AND provider = 'speako'
+                      AND status IN ('configured', 'published')
+                      AND value_text IS NOT NULL
+                      AND value_text != ''
+                    ORDER BY param_code
+                    """,
+                    (tenant_id, location_id),
+                )
+                rows = cur.fetchall()
+
+                for row in rows:
+                    param_code = row["param_code"]
+                    value_text = row["value_text"]
+
+                    # Skip special knowledge already inlined via tenant_ai_prompts
+                    if param_code in ("business_info", "locations"):
+                        continue
+
+                    knowledge_sections.append({
+                        "param_code": param_code,
+                        "content": value_text,
+                    })
+                    knowledge_total_size += len(value_text)
+
+        conn.close()
+    except Exception as e:
+        logger.warning(f"[publish_openai] Failed to collect knowledge: {e}")
+
+    INLINE_THRESHOLD = 30 * 1024  # 30KB
+
+    if knowledge_sections and knowledge_total_size < INLINE_THRESHOLD:
+        # Tier 1: Inline into system prompt
+        knowledge_md = "\n\n# Knowledge Base\n"
+        for section in knowledge_sections:
+            # Use param_code as section header (food_menu → Food Menu)
+            title = section["param_code"].replace("_", " ").title()
+            knowledge_md += f"\n## {title}\n\n{section['content']}\n"
+
+        composed += knowledge_md
+        logger.info(
+            f"[publish_openai] Inlined {len(knowledge_sections)} knowledge entries "
+            f"({knowledge_total_size} bytes) into system prompt"
+        )
+    elif knowledge_sections and knowledge_total_size >= INLINE_THRESHOLD:
+        # Tier 2: Vector store needed — handled in _compose_openai_agent_config
+        logger.info(
+            f"[publish_openai] Knowledge too large for inline ({knowledge_total_size} bytes), "
+            f"vector store required"
+        )
+
+    return composed, temperature_value, knowledge_sections, knowledge_total_size
 
 
 def _compose_openai_agent_config(
@@ -871,7 +964,7 @@ def _compose_openai_agent_config(
     # ── 3. Write fragments to tenant_ai_prompts then compose system prompt ──
     # tenant_ai_prompts is the single source of truth — both ElevenLabs and
     # OpenAI paths write to it and read from it. This ensures identical prompts.
-    system_prompt, composed_temperature = _ensure_fragments_and_compose(
+    system_prompt, composed_temperature, knowledge_sections, knowledge_total_size = _ensure_fragments_and_compose(
         str(tenant_id), str(location_id), all_params
     )
 
@@ -884,6 +977,17 @@ def _compose_openai_agent_config(
 
     # ── 5. Build enabled tools ──
     tools, enabled_tool_keys = _build_enabled_tools(tool_params)
+
+    # ── 5b. If knowledge is Tier 2 (too large for inline), add search_knowledge tool ──
+    INLINE_THRESHOLD = 30 * 1024
+    needs_vector_store = knowledge_sections and knowledge_total_size >= INLINE_THRESHOLD
+    if needs_vector_store:
+        registry = _tool_schema_registry()
+        search_tool = registry.get("search_knowledge")
+        if search_tool and "search_knowledge" not in enabled_tool_keys:
+            tools.append(search_tool)
+            enabled_tool_keys.append("search_knowledge")
+            logger.info("[publish_openai] Added search_knowledge tool (knowledge > 30KB)")
 
     # ── 6. Append pronunciation hints to instructions ──
     instructions = system_prompt
@@ -903,6 +1007,8 @@ def _compose_openai_agent_config(
         "enabled_tool_keys": sorted(enabled_tool_keys),
         "pronunciation_hints": pronunciation_hints,
         "greetings": greetings,
+        "knowledge_total_size": knowledge_total_size,
+        "knowledge_keys": sorted([s["param_code"] for s in knowledge_sections]) if knowledge_sections else [],
     }
     source_hash = _deterministic_hash(hash_inputs)
 
@@ -947,8 +1053,13 @@ def _compose_openai_agent_config(
         "greeting": greetings,
         # ── knowledge ──
         "knowledge": {
-            "inline_snippets": [],
-            "vector_store": None,
+            "inline_snippets": [
+                {"type": s["param_code"], "content_length": len(s["content"])}
+                for s in knowledge_sections
+            ] if knowledge_sections and knowledge_total_size < INLINE_THRESHOLD else [],
+            "vector_store": None,  # Populated by Tier 2 when knowledge > 30KB
+            "total_knowledge_size": knowledge_total_size,
+            "tier": "inline" if knowledge_total_size < INLINE_THRESHOLD else "vector_store",
         },
         # ── pronunciation (kept for audit, already baked into instructions) ──
         "pronunciation_hints": pronunciation_hints,
