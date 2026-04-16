@@ -940,6 +940,14 @@ def _ensure_fragments_and_compose(
     if knowledge_sections and knowledge_total_size < INLINE_THRESHOLD:
         # Tier 1: Inline into system prompt (small knowledge, < 30KB)
         knowledge_md = "\n\n# Knowledge Base\n"
+        knowledge_md += (
+            "IMPORTANT: This knowledge is for REFERENCE ONLY when answering caller questions.\n"
+            "- Summarize and speak naturally — do NOT read items, prices, or lists verbatim.\n"
+            "- For menus: describe categories and highlights. Only give specific item details or prices when the caller asks about a specific item.\n"
+            "- Never read out markdown formatting, 'null', or raw data artifacts.\n"
+            "- Say currency names naturally in the caller's language (e.g. '澳元' not 'AUD', 'dollars' not '$').\n"
+            "- Keep responses concise — a few sentences, not a full listing.\n\n"
+        )
         for section in knowledge_sections:
             title = section["param_code"].replace("_", " ").title()
             knowledge_md += f"\n## {title}\n\n{section['content']}\n"
