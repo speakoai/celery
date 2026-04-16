@@ -935,14 +935,24 @@ def _ensure_fragments_and_compose(
     except Exception as e:
         logger.warning(f"[publish_openai] Failed to collect knowledge: {e}")
 
-    # Knowledge is NEVER inlined into the system prompt.
-    # Large system prompts cause intermittent silence in the Realtime API
-    # (model generates text but zero audio). All knowledge goes through the
-    # search_knowledge tool (vector store) to keep the prompt lean.
-    if knowledge_sections:
+    INLINE_THRESHOLD = 30 * 1024  # 30KB
+
+    if knowledge_sections and knowledge_total_size < INLINE_THRESHOLD:
+        # Tier 1: Inline into system prompt (small knowledge, < 30KB)
+        knowledge_md = "\n\n# Knowledge Base\n"
+        for section in knowledge_sections:
+            title = section["param_code"].replace("_", " ").title()
+            knowledge_md += f"\n## {title}\n\n{section['content']}\n"
+        composed += knowledge_md
+        logger.info(
+            f"[publish_openai] Inlined {len(knowledge_sections)} knowledge entries "
+            f"({knowledge_total_size} bytes) into system prompt"
+        )
+    elif knowledge_sections:
+        # Tier 2: Too large for inline — will use OpenAI vector store + search_knowledge tool
         logger.info(
             f"[publish_openai] {len(knowledge_sections)} knowledge entries "
-            f"({knowledge_total_size} bytes) — will use search_knowledge tool, not inlined"
+            f"({knowledge_total_size} bytes) — will use vector store (> 30KB)"
         )
 
     return composed, temperature_value, knowledge_sections, knowledge_total_size
@@ -1127,17 +1137,21 @@ def _compose_openai_agent_config(
     # ── 5. Build enabled tools ──
     tools, enabled_tool_keys = _build_enabled_tools(tool_params)
 
-    # ── 5b. Add search_knowledge tool when any knowledge entries exist ──
-    # Knowledge is never inlined into the prompt (causes silent response issues).
-    # Always use the search_knowledge tool for on-demand retrieval.
+    # ── 5b. Add search_knowledge tool for Tier 2 (large knowledge, >= 30KB) ──
+    # Tier 1 (< 30KB): already inlined into system prompt by _ensure_fragments_and_compose
+    # Tier 2 (>= 30KB): upload to OpenAI Vector Store + add search_knowledge tool
+    INLINE_THRESHOLD = 30 * 1024  # 30KB — must match _ensure_fragments_and_compose
     vector_store_id = None
-    if knowledge_sections:
+    knowledge_is_inline = knowledge_sections and knowledge_total_size < INLINE_THRESHOLD
+
+    if knowledge_sections and not knowledge_is_inline:
+        # Tier 2: large knowledge — needs vector store + search_knowledge tool
         registry = _tool_schema_registry()
         search_tool = registry.get("search_knowledge")
         if search_tool and "search_knowledge" not in enabled_tool_keys:
             tools.append(search_tool)
             enabled_tool_keys.append("search_knowledge")
-            logger.info("[publish_openai] Added search_knowledge tool (%d knowledge entries)", len(knowledge_sections))
+            logger.info("[publish_openai] Added search_knowledge tool (%d knowledge entries, %d bytes — Tier 2)", len(knowledge_sections), knowledge_total_size)
 
         # Upload knowledge to OpenAI Vector Store
         vector_store_id = _upload_knowledge_to_vector_store(
@@ -1208,12 +1222,14 @@ def _compose_openai_agent_config(
         "greeting": greetings,
         # ── knowledge ──
         "knowledge": {
-            "inline_snippets": [],  # Never inline — all knowledge via search_knowledge tool
+            "inline_snippets": [
+                {"type": s["param_code"], "content": s["content"][:200] + "…"} for s in knowledge_sections
+            ] if knowledge_is_inline else [],
             "vector_store": {
                 "vector_store_id": vector_store_id,
             } if vector_store_id else None,
             "total_knowledge_size": knowledge_total_size,
-            "tier": "vector_store" if knowledge_sections else "none",
+            "tier": "inline" if knowledge_is_inline else ("vector_store" if knowledge_sections else "none"),
             "knowledge_entries": [s["param_code"] for s in knowledge_sections] if knowledge_sections else [],
         },
         # ── pronunciation (kept for audit, already baked into instructions) ──
