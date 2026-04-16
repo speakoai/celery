@@ -465,6 +465,18 @@ def _build_enabled_tools(tool_params: list) -> list:
     which filters for service='tool', provider='speako', status in ('configured','published').
     Each entry has param_code (= ai_tool_types.key) and value_json (= {enabled: bool}).
     """
+    # Bundle param_codes map to multiple individual tools
+    BUNDLE_MAP = {
+        "booking_manager_rest": [
+            "check_availabilities", "make_booking", "check_latest_booking",
+            "check_modify_availabilities", "modify_booking", "cancel_booking",
+        ],
+        "booking_manager_service": [
+            "check_availabilities_service", "make_booking_service", "check_latest_booking",
+            "check_modify_availabilities_service", "modify_booking", "cancel_booking",
+        ],
+    }
+
     registry = _tool_schema_registry()
     tools = []
     enabled_keys = []
@@ -473,6 +485,16 @@ def _build_enabled_tools(tool_params: list) -> list:
         param_code = p.get("param_code", "")
         value_json = p.get("value_json") or {}
         if not value_json.get("enabled", False):
+            continue
+
+        # Check if this is a bundle that expands to multiple tools
+        if param_code in BUNDLE_MAP:
+            for tool_key in BUNDLE_MAP[param_code]:
+                if tool_key not in enabled_keys:
+                    schema = registry.get(tool_key)
+                    if schema:
+                        tools.append(schema)
+                        enabled_keys.append(tool_key)
             continue
 
         schema = registry.get(param_code)
