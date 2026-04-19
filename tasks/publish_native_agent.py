@@ -613,7 +613,7 @@ def _collect_native_agent_params(tenant_id: str, location_id: str, provider: str
                         and row_provider == "elevenlabs"
                         and param_code
                         in ("traits", "tone_of_voice", "response_style", "temperature", "custom_instruction")
-                        and status == "configured"
+                        and status in ("configured", "published")
                     ):
                         result["personality_params"].append(row_dict)
                     elif service in ("turn", "conversation", "tts") and status == "configured":
