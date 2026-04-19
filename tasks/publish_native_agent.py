@@ -1211,32 +1211,48 @@ def _compose_native_agent_config(
             "supported": supported,
         }
 
-        # Append language enforcement directive to instructions
-        lang_lines = [f"Your primary language is {primary_lang}. Start the conversation in this language."]
-        if enabled_langs:
-            lang_lines.append(f"You also support: {', '.join(enabled_langs)}.")
-            lang_lines.append("If the caller switches to one of these supported languages, follow their lead.")
-        lang_lines.append("Do NOT respond in any language not listed above.")
-
-        # Fetch speaking style hints for supported languages
+        # Fetch language names and speaking style hints
         import psycopg2
         from psycopg2.extras import RealDictCursor as _RDC
+        lang_hints = {}  # language_code -> {name, hint}
         _hint_conn = psycopg2.connect(os.getenv("DATABASE_URL"))
         try:
             with _hint_conn:
                 with _hint_conn.cursor(cursor_factory=_RDC) as _cur:
                     _cur.execute(
-                        """SELECT language_code, speaking_style_hint
+                        """SELECT language_code, language_name, speaking_style_hint
                            FROM ai_language_presets
-                           WHERE language_code = ANY(%s)
-                             AND speaking_style_hint IS NOT NULL""",
+                           WHERE language_code = ANY(%s)""",
                         (supported,),
                     )
                     for row in _cur.fetchall():
-                        lang_lines.append("")
-                        lang_lines.append(row["speaking_style_hint"])
+                        lang_hints[row["language_code"]] = {
+                            "name": row["language_name"],
+                            "hint": row["speaking_style_hint"],
+                        }
         finally:
             _hint_conn.close()
+
+        # Build human-readable language name for primary
+        primary_name = lang_hints.get(primary_lang, {}).get("name", primary_lang)
+
+        # Append language enforcement directive to instructions
+        lang_lines = [f"Your primary language is {primary_name} ({primary_lang}). Start the conversation in this language."]
+        if enabled_langs:
+            secondary_names = [
+                f"{lang_hints.get(l, {}).get('name', l)} ({l})"
+                for l in enabled_langs
+            ]
+            lang_lines.append(f"You also support: {', '.join(secondary_names)}.")
+            lang_lines.append("If the caller switches to one of these supported languages, follow their lead.")
+        lang_lines.append("Do NOT respond in any language not listed above.")
+
+        # Append speaking style hints for all supported languages that have one
+        for lang_code in supported:
+            hint = lang_hints.get(lang_code, {}).get("hint")
+            if hint:
+                lang_lines.append("")
+                lang_lines.append(hint)
 
         instructions += "\n\n# Language rules\n" + "\n".join(lang_lines)
 
