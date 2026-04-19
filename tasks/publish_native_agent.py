@@ -1158,12 +1158,28 @@ def _compose_native_agent_config(
         str(tenant_id), str(location_id), all_params
     )
 
-    # ── 4. Extract voice/speed/temperature ──
+    # ── 4. Extract voice/speed/temperature/azure-specific settings ──
     voice = _extract_voice_id(voice_dict_params, provider=provider)
     speed = _extract_speed(voice_dict_params)
     temperature = composed_temperature if composed_temperature is not None else _extract_temperature(personality_params)
     greetings = _extract_greetings(greetings_params)
     pronunciation_hints = _extract_pronunciation_hints(dictionary_entry)
+
+    # Azure-specific: VAD, pitch, volume
+    vad_threshold = 0.7
+    vad_silence_duration_ms = 1000
+    pitch = "+0%"
+    volume = "+0%"
+    for p in voice_dict_params:
+        pc = p.get("param_code")
+        if pc == "vad_threshold" and p.get("value_numeric") is not None:
+            vad_threshold = float(p["value_numeric"])
+        elif pc == "vad_silence_duration_ms" and p.get("value_numeric") is not None:
+            vad_silence_duration_ms = int(p["value_numeric"])
+        elif pc == "pitch" and p.get("value_text"):
+            pitch = p["value_text"]
+        elif pc == "volume" and p.get("value_text"):
+            volume = p["value_text"]
 
     # ── 5. Build enabled tools ──
     tools, enabled_tool_keys = _build_enabled_tools(tool_params)
@@ -1310,7 +1326,13 @@ def _compose_native_agent_config(
                     "format": {"type": "audio/pcm", "rate": 24000},
                     "voice": voice,
                     "speed": speed,
+                    "pitch": pitch,
+                    "volume": volume,
                 },
+            },
+            "vad": {
+                "threshold": vad_threshold,
+                "silence_duration_ms": vad_silence_duration_ms,
             },
             "tools": tools,
             "tool_choice": "auto",
