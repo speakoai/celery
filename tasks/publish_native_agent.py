@@ -1233,6 +1233,10 @@ def _compose_native_agent_config(
         finally:
             _hint_conn.close()
 
+        # Flag whether primary language has a speaking style hint
+        primary_hint = lang_hints.get(primary_lang, {}).get("hint")
+        language_block["primary_has_style_hint"] = bool(primary_hint)
+
         # Build human-readable language name for primary
         primary_name = lang_hints.get(primary_lang, {}).get("name", primary_lang)
 
