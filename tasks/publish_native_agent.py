@@ -1217,6 +1217,27 @@ def _compose_native_agent_config(
             lang_lines.append(f"You also support: {', '.join(enabled_langs)}.")
             lang_lines.append("If the caller switches to one of these supported languages, follow their lead.")
         lang_lines.append("Do NOT respond in any language not listed above.")
+
+        # Fetch speaking style hints for supported languages
+        import psycopg2
+        from psycopg2.extras import RealDictCursor as _RDC
+        _hint_conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+        try:
+            with _hint_conn:
+                with _hint_conn.cursor(cursor_factory=_RDC) as _cur:
+                    _cur.execute(
+                        """SELECT language_code, speaking_style_hint
+                           FROM ai_language_presets
+                           WHERE language_code = ANY(%s)
+                             AND speaking_style_hint IS NOT NULL""",
+                        (supported,),
+                    )
+                    for row in _cur.fetchall():
+                        lang_lines.append("")
+                        lang_lines.append(row["speaking_style_hint"])
+        finally:
+            _hint_conn.close()
+
         instructions += "\n\n# Language rules\n" + "\n".join(lang_lines)
 
     # ── 7. Assemble the blob ──
