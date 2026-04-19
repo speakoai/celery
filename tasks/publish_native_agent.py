@@ -537,6 +537,7 @@ def _collect_native_agent_params(tenant_id: str, location_id: str, provider: str
         "location": None,
         "greetings_params": [],
         "voice_dict_params": [],
+        "language_config": None,
         "personality_params": [],
         "tool_params": [],
         "dictionary_entry": None,
@@ -622,13 +623,31 @@ def _collect_native_agent_params(tenant_id: str, location_id: str, provider: str
                     elif service == "dictionary" and status == "configured" and result["dictionary_entry"] is None:
                         result["dictionary_entry"] = row_dict
 
+                # Query 3: language_config for this provider
+                cur.execute(
+                    """
+                    SELECT value_json
+                    FROM tenant_integration_params
+                    WHERE tenant_id = %s AND location_id = %s
+                      AND param_code = 'language_config'
+                      AND provider = %s
+                      AND status IN ('configured', 'published')
+                    LIMIT 1
+                    """,
+                    (tenant_id, location_id, provider),
+                )
+                lc_row = cur.fetchone()
+                if lc_row and lc_row.get("value_json"):
+                    result["language_config"] = lc_row["value_json"]
+
                 logger.info(
-                    f"[publish_openai] Collected params: "
+                    f"[publish_native] Collected params: "
                     f"greetings={len(result['greetings_params'])}, "
                     f"voice_dict={len(result['voice_dict_params'])}, "
                     f"personality={len(result['personality_params'])}, "
                     f"tools={len(result['tool_params'])}, "
-                    f"dictionary={'yes' if result['dictionary_entry'] else 'no'}"
+                    f"dictionary={'yes' if result['dictionary_entry'] else 'no'}, "
+                    f"language_config={'yes' if result['language_config'] else 'no'}"
                 )
 
                 return result
@@ -1176,6 +1195,30 @@ def _compose_native_agent_config(
         hint_lines = [f'- Pronounce "{h["from"]}" as "{h["to"]}".' for h in pronunciation_hints]
         instructions += "\n\n# Pronunciation guide\n" + "\n".join(hint_lines)
 
+    # ── 6b. Build language config and append language enforcement directive ──
+    language_config_raw = all_params.get("language_config")
+    language_block = None
+    if language_config_raw:
+        primary_lang = language_config_raw.get("primary_language", "en")
+        detection_enabled = language_config_raw.get("language_detection_enabled", False)
+        presets = language_config_raw.get("language_presets", {})
+        enabled_langs = [lang for lang, cfg in presets.items() if cfg.get("enabled")]
+        supported = [primary_lang] + enabled_langs
+
+        language_block = {
+            "primary": primary_lang,
+            "detection_enabled": detection_enabled,
+            "supported": supported,
+        }
+
+        # Append language enforcement directive to instructions
+        lang_lines = [f"Your primary language is {primary_lang}. Start the conversation in this language."]
+        if enabled_langs:
+            lang_lines.append(f"You also support: {', '.join(enabled_langs)}.")
+            lang_lines.append("If the caller switches to one of these supported languages, follow their lead.")
+        lang_lines.append("Do NOT respond in any language not listed above.")
+        instructions += "\n\n# Language rules\n" + "\n".join(lang_lines)
+
     # ── 7. Assemble the blob ──
     now = datetime.now(timezone.utc).isoformat()
 
@@ -1190,6 +1233,7 @@ def _compose_native_agent_config(
         "greetings": greetings,
         "knowledge_total_size": knowledge_total_size,
         "knowledge_keys": sorted([s["param_code"] for s in knowledge_sections]) if knowledge_sections else [],
+        "language": language_block,
     }
     source_hash = _deterministic_hash(hash_inputs)
 
@@ -1232,6 +1276,8 @@ def _compose_native_agent_config(
         },
         # ── greeting variants ──
         "greeting": greetings,
+        # ── language configuration ──
+        "language": language_block,
         # ── knowledge ──
         "knowledge": {
             "inline_snippets": [
