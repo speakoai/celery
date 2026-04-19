@@ -522,7 +522,7 @@ def _build_enabled_tools(tool_params: list) -> list:
     return tools, enabled_keys
 
 
-def _collect_native_agent_params(tenant_id: str, location_id: str) -> dict:
+def _collect_native_agent_params(tenant_id: str, location_id: str, provider: str = "openai") -> dict:
     """
     Collect all parameters needed for OpenAI agent publishing.
 
@@ -593,23 +593,23 @@ def _collect_native_agent_params(tenant_id: str, location_id: str) -> dict:
 
                 for row in rows:
                     row_dict = dict(row)
-                    provider = row_dict.get("provider")
+                    row_provider = row_dict.get("provider")
                     service = row_dict.get("service")
                     param_code = row_dict.get("param_code")
                     status = row_dict.get("status")
 
-                    if provider == "speako" and service == "greetings" and status == "configured":
+                    if row_provider == "speako" and service == "greetings" and status == "configured":
                         result["greetings_params"].append(row_dict)
                     elif (
                         service == "agents"
-                        and provider in ("openai", "azure")
+                        and row_provider == provider
                         and param_code == "voice_id"
                     ):
-                        # Native provider voice_id goes to voice_dict_params
+                        # Voice_id for the target provider only
                         result["voice_dict_params"].append(row_dict)
                     elif (
                         service == "agents"
-                        and provider == "elevenlabs"
+                        and row_provider == "elevenlabs"
                         and param_code
                         in ("traits", "tone_of_voice", "response_style", "temperature", "custom_instruction")
                         and status == "configured"
@@ -617,7 +617,7 @@ def _collect_native_agent_params(tenant_id: str, location_id: str) -> dict:
                         result["personality_params"].append(row_dict)
                     elif service in ("turn", "conversation", "tts") and status == "configured":
                         result["voice_dict_params"].append(row_dict)
-                    elif service == "tool" and provider == "speako":
+                    elif service == "tool" and row_provider == "speako":
                         result["tool_params"].append(row_dict)
                     elif service == "dictionary" and status == "configured" and result["dictionary_entry"] is None:
                         result["dictionary_entry"] = row_dict
@@ -1123,7 +1123,7 @@ def _compose_native_agent_config(
     does not call any external API.
     """
     # ── 1. Collect all params (OpenAI-independent, no elevenlabs_agent_id required) ──
-    all_params = _collect_native_agent_params(str(tenant_id), str(location_id))
+    all_params = _collect_native_agent_params(str(tenant_id), str(location_id), provider=provider)
 
     # ── 2. Extract individual param groups ──
     voice_dict_params = all_params.get("voice_dict_params", [])
