@@ -2,7 +2,7 @@
 
 {% block content %}
 <h2>Voice AI Provider Admin</h2>
-<p>Switch a location between ElevenLabs and OpenAI Realtime. Changes take effect on the next inbound call.</p>
+<p>Switch a location between ElevenLabs, OpenAI Realtime, and Azure Voice Live. Changes take effect on the next inbound call.</p>
 
 <form method="GET" action="/admin/voice-provider" style="margin-bottom:20px;">
   <label>Filter by Tenant ID:</label>
@@ -31,7 +31,7 @@
       <th>Location Name</th>
       <th>Phone Number</th>
       <th>Current Provider</th>
-      <th>OpenAI Config?</th>
+      <th>Native Config?</th>
       <th>Switch To</th>
     </tr>
   </thead>
@@ -44,33 +44,25 @@
       <td>{{ loc.location_name or '-' }}</td>
       <td>{{ loc.twilio_phone_number or '-' }}</td>
       <td>
-        <strong style="color:{% if loc.voice_ai_provider == 'openai' %}#0066cc{% else %}#666{% endif %};">
+        <strong style="color:{% if loc.voice_ai_provider == 'openai' %}#0066cc{% elif loc.voice_ai_provider == 'azure' %}#0078d4{% else %}#666{% endif %};">
           {{ loc.voice_ai_provider }}
         </strong>
       </td>
-      <td>{{ 'Yes' if loc.has_openai_config else 'No' }}</td>
+      <td>{{ 'Yes' if loc.has_native_config else 'No' }}</td>
       <td>
-        {% if loc.voice_ai_provider == 'elevenlabs' %}
-        <form method="POST" action="/admin/voice-provider/update" style="display:inline;"
-              onsubmit="return confirm('Switch location {{ loc.location_id }} to OpenAI?');">
+        <form method="POST" action="/admin/voice-provider/update" style="display:inline;">
           <input type="hidden" name="tenant_id" value="{{ loc.tenant_id }}">
           <input type="hidden" name="location_id" value="{{ loc.location_id }}">
-          <input type="hidden" name="voice_ai_provider" value="openai">
-          <button type="submit" style="background:#0066cc; color:#fff; border:none; padding:4px 12px; cursor:pointer;">
-            Switch to OpenAI
+          <select name="voice_ai_provider" style="margin-right:4px;">
+            <option value="elevenlabs" {% if loc.voice_ai_provider == 'elevenlabs' %}selected{% endif %}>ElevenLabs</option>
+            <option value="openai" {% if loc.voice_ai_provider == 'openai' %}selected{% endif %}>OpenAI</option>
+            <option value="azure" {% if loc.voice_ai_provider == 'azure' %}selected{% endif %}>Azure</option>
+          </select>
+          <button type="submit" style="background:#333; color:#fff; border:none; padding:4px 12px; cursor:pointer;"
+                  onclick="return confirm('Switch location {{ loc.location_id }} to ' + this.form.voice_ai_provider.value + '?');">
+            Switch
           </button>
         </form>
-        {% else %}
-        <form method="POST" action="/admin/voice-provider/update" style="display:inline;"
-              onsubmit="return confirm('Switch location {{ loc.location_id }} back to ElevenLabs?');">
-          <input type="hidden" name="tenant_id" value="{{ loc.tenant_id }}">
-          <input type="hidden" name="location_id" value="{{ loc.location_id }}">
-          <input type="hidden" name="voice_ai_provider" value="elevenlabs">
-          <button type="submit" style="background:#666; color:#fff; border:none; padding:4px 12px; cursor:pointer;">
-            Switch to ElevenLabs
-          </button>
-        </form>
-        {% endif %}
       </td>
     </tr>
     {% endfor %}

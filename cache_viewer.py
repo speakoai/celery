@@ -987,7 +987,7 @@ def admin_voice_provider():
                         """
                         SELECT l.tenant_id, l.location_id, l.name AS location_name,
                                t.name AS business_name, l.voice_ai_provider,
-                               l.openai_agent_config IS NOT NULL AS has_openai_config,
+                               l.native_agent_config IS NOT NULL AS has_native_config,
                                l.twilio_phone_number
                         FROM locations l
                         JOIN tenants t ON l.tenant_id = t.tenant_id
@@ -1001,7 +1001,7 @@ def admin_voice_provider():
                         """
                         SELECT l.tenant_id, l.location_id, l.name AS location_name,
                                t.name AS business_name, l.voice_ai_provider,
-                               l.openai_agent_config IS NOT NULL AS has_openai_config,
+                               l.native_agent_config IS NOT NULL AS has_native_config,
                                l.twilio_phone_number
                         FROM locations l
                         JOIN tenants t ON l.tenant_id = t.tenant_id
@@ -1038,7 +1038,7 @@ def admin_voice_provider_update():
     tenant_id = request.form.get("tenant_id")
     new_provider = request.form.get("voice_ai_provider")
 
-    if new_provider not in ("elevenlabs", "openai"):
+    if new_provider not in ("elevenlabs", "openai", "azure"):
         return redirect(url_for("admin_voice_provider", tenant_id=tenant_id or ""))
 
     try:

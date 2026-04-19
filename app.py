@@ -21,7 +21,7 @@ from tasks.analyze_knowledge import analyze_knowledge_file
 from tasks.scrape_url import scrape_url_to_markdown
 from tasks.sync_speako_data import sync_speako_data
 from tasks.publish_elevenlabs_agent import publish_elevenlabs_agent
-from tasks.publish_openai_agent import publish_openai_agent
+from tasks.publish_native_agent import publish_native_agent
 from tasks.create_ai_agent import create_conversation_ai_agent
 from tasks.purchase_twilio_number import replenish_twilio_numbers
 from tasks.update_twilio_friendly_name import update_twilio_friendly_name
@@ -2424,13 +2424,14 @@ def api_publish_elevenlabs_agent():
         return jsonify({'error': 'Internal server error', 'message': str(e)}), 500
 
 
-@app.route('/api/agent/publish/openai', methods=['POST'])
+@app.route('/api/agent/publish/native', methods=['POST'])
+@app.route('/api/agent/publish/openai', methods=['POST'])  # backward compat alias
 @require_api_key
-def api_publish_openai_agent():
+def api_publish_native_agent():
     """
-    [aiagent] Publish OpenAI Realtime agent config.
+    [aiagent] Publish native agent config (OpenAI Realtime / Azure Voice Live).
 
-    Composes the openai_agent_config JSON blob and writes it to the
+    Composes the native_agent_config JSON blob and writes it to the
     locations table.  Same payload shape as /api/agent/publish/update.
 
     Expected JSON payload:
@@ -2439,7 +2440,8 @@ def api_publish_openai_agent():
       "location_id": "123",
       "publish_job_id": "42",
       "speako_task_id": "550e8400-...",
-      "tenantIntegrationParam": {...}
+      "tenantIntegrationParam": {...},
+      "provider": "openai"  // or "azure" — defaults to "openai"
     }
 
     Returns 202 with celery_task_id for polling at /api/task/<task_id>.
@@ -2458,22 +2460,24 @@ def api_publish_openai_agent():
         publish_job_id = data.get('publish_job_id')
         speako_task_id = data.get('speako_task_id')
         tenant_integration_param = data.get('tenantIntegrationParam')
+        provider = data.get('provider', 'openai')
 
         missing = [k for k in ['tenant_id', 'location_id', 'publish_job_id'] if not data.get(k)]
         if missing:
             return jsonify({'error': 'Missing required fields', 'missing_fields': missing}), 400
 
-        task = publish_openai_agent.delay(
+        task = publish_native_agent.delay(
             tenant_id=tenant_id,
             location_id=location_id,
             publish_job_id=publish_job_id,
             speako_task_id=speako_task_id,
             tenant_integration_param=tenant_integration_param,
+            provider=provider,
         )
 
         return jsonify({
             'success': True,
-            'message': 'OpenAI agent publish task started',
+            'message': f'Native agent publish task started (provider={provider})',
             'data': {
                 'analysis': {
                     'status': 'queued',
@@ -2483,7 +2487,8 @@ def api_publish_openai_agent():
                 'tenant_id': tenant_id,
                 'location_id': location_id,
                 'publish_job_id': publish_job_id,
-                'source': 'publish_openai_agent',
+                'source': 'publish_native_agent',
+                'provider': provider,
                 **({'speako_task_id': speako_task_id} if speako_task_id else {})
             }
         }), 202

@@ -1,8 +1,8 @@
 """
-Publish OpenAI Realtime Agent Config Task
+Publish Native Agent Config Task
 
-Composes a self-contained JSON blob for the OpenAI Realtime path and writes it
-to locations.openai_agent_config.
+Composes a self-contained JSON blob for native providers (OpenAI Realtime,
+Azure Voice Live) and writes it to locations.native_agent_config.
 
 INDEPENDENCE GUARANTEE: This task reads ONLY from the shared source-of-truth DB
 tables (tenant_integration_params, ai_tool_types, prompt_fragments, etc.) and
@@ -54,7 +54,7 @@ OPENAI_VOICES = frozenset(
 
 # ── Tool schema registry ────────────────────────────────────────────
 # Maps tool param_code (from ai_tool_types.key) to OpenAI function-tool
-# schema.  Only tools listed here can appear in openai_agent_config.
+# schema.  Only tools listed here can appear in native_agent_config.
 #
 # This is the ONLY place that knows the OpenAI function schema for each
 # tool.  If a new tool is added, its schema MUST be registered here.
@@ -380,15 +380,18 @@ def _deterministic_hash(obj) -> str:
     return f"sha256:{hashlib.sha256(raw.encode()).hexdigest()}"
 
 
-def _extract_voice_id(voice_dict_params: list) -> str:
-    """Extract OpenAI voice from voice_dict_params, falling back to default."""
+def _extract_voice_id(voice_dict_params: list, provider: str = "openai") -> str:
+    """Extract voice ID from voice_dict_params, falling back to default per provider."""
     for p in voice_dict_params:
         if p.get("param_code") == "voice_id" and p.get("value_text"):
             v = p["value_text"].strip()
+            if provider == "azure":
+                # Azure voices are like "zh-HK-HiuMaan:DragonHDOmniLatestNeural"
+                return v
             if v in OPENAI_VOICES:
                 return v
             logger.warning(
-                f"[publish_openai] voice_id '{v}' is not an OpenAI voice, using default"
+                f"[publish_native] voice_id '{v}' is not a valid {provider} voice, using default"
             )
     return DEFAULT_OPENAI_VOICE
 
@@ -519,7 +522,7 @@ def _build_enabled_tools(tool_params: list) -> list:
     return tools, enabled_keys
 
 
-def _collect_openai_agent_params(tenant_id: str, location_id: str) -> dict:
+def _collect_native_agent_params(tenant_id: str, location_id: str) -> dict:
     """
     Collect all parameters needed for OpenAI agent publishing.
 
@@ -578,7 +581,7 @@ def _collect_openai_agent_params(tenant_id: str, location_id: str) -> dict:
                         (provider = 'speako' AND service = 'greetings') OR
                         (service IN ('agents', 'turn', 'conversation', 'tts')) OR
                         (service = 'agents' AND provider = 'elevenlabs') OR
-                        (service = 'agents' AND provider = 'openai') OR
+                        (service = 'agents' AND provider IN ('openai', 'azure')) OR
                         (service = 'tool' AND provider = 'speako') OR
                         (service = 'dictionary')
                       )
@@ -599,10 +602,10 @@ def _collect_openai_agent_params(tenant_id: str, location_id: str) -> dict:
                         result["greetings_params"].append(row_dict)
                     elif (
                         service == "agents"
-                        and provider == "openai"
+                        and provider in ("openai", "azure")
                         and param_code == "voice_id"
                     ):
-                        # OpenAI voice_id goes to voice_dict_params
+                        # Native provider voice_id goes to voice_dict_params
                         result["voice_dict_params"].append(row_dict)
                     elif (
                         service == "agents"
@@ -1105,21 +1108,22 @@ def _upload_knowledge_to_vector_store(
     return vector_store_id
 
 
-def _compose_openai_agent_config(
+def _compose_native_agent_config(
     tenant_id: str,
     location_id: str,
     celery_task_id: str,
     config_version: int,
+    provider: str = "openai",
 ) -> dict:
     """
-    Compose the complete openai_agent_config JSON blob.
+    Compose the complete native_agent_config JSON blob.
 
     Reads everything from raw DB source tables. Fully independent of the
     ElevenLabs publish path — does not read tenant_ai_prompts composed rows,
     does not call any external API.
     """
     # ── 1. Collect all params (OpenAI-independent, no elevenlabs_agent_id required) ──
-    all_params = _collect_openai_agent_params(str(tenant_id), str(location_id))
+    all_params = _collect_native_agent_params(str(tenant_id), str(location_id))
 
     # ── 2. Extract individual param groups ──
     voice_dict_params = all_params.get("voice_dict_params", [])
@@ -1136,7 +1140,7 @@ def _compose_openai_agent_config(
     )
 
     # ── 4. Extract voice/speed/temperature ──
-    voice = _extract_voice_id(voice_dict_params)
+    voice = _extract_voice_id(voice_dict_params, provider=provider)
     speed = _extract_speed(voice_dict_params)
     temperature = composed_temperature if composed_temperature is not None else _extract_temperature(personality_params)
     greetings = _extract_greetings(greetings_params)
@@ -1193,10 +1197,10 @@ def _compose_openai_agent_config(
         # ── metadata ──
         "schema_version": 1,
         "config_version": config_version,
-        "agent_id": f"openai:tenant_{tenant_id}:location_{location_id}",
+        "agent_id": f"{provider}:tenant_{tenant_id}:location_{location_id}",
         "tenant_id": int(tenant_id),
         "location_id": int(location_id),
-        "provider": "openai",
+        "provider": provider,
         "composed_at": now,
         "composed_by_task_id": celery_task_id,
         "source_hash": source_hash,
@@ -1283,7 +1287,7 @@ def _get_current_config_version(tenant_id: str, location_id: str) -> int:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
                     """
-                    SELECT openai_agent_config->>'config_version' AS cv
+                    SELECT native_agent_config->>'config_version' AS cv
                     FROM locations
                     WHERE tenant_id = %s AND location_id = %s
                     """,
@@ -1298,7 +1302,7 @@ def _get_current_config_version(tenant_id: str, location_id: str) -> int:
 
 
 def _write_config_to_db(tenant_id: str, location_id: str, config: dict):
-    """Write the composed config to locations.openai_agent_config."""
+    """Write the composed config to locations.native_agent_config."""
     import psycopg2
     from psycopg2.extras import Json
 
@@ -1309,7 +1313,7 @@ def _write_config_to_db(tenant_id: str, location_id: str, config: dict):
                 cur.execute(
                     """
                     UPDATE locations
-                    SET openai_agent_config = %s,
+                    SET native_agent_config = %s,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE tenant_id = %s AND location_id = %s
                     """,
@@ -1322,7 +1326,7 @@ def _write_config_to_db(tenant_id: str, location_id: str, config: dict):
                     )
         logger.info(
             f"[publish_openai] Wrote config v{config.get('config_version')} "
-            f"to locations.openai_agent_config"
+            f"to locations.native_agent_config"
         )
     finally:
         conn.close()
@@ -1339,7 +1343,7 @@ def _read_current_source_hash(tenant_id: str, location_id: str) -> str | None:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
                     """
-                    SELECT openai_agent_config->>'source_hash' AS sh
+                    SELECT native_agent_config->>'source_hash' AS sh
                     FROM locations
                     WHERE tenant_id = %s AND location_id = %s
                     """,
@@ -1354,25 +1358,27 @@ def _read_current_source_hash(tenant_id: str, location_id: str) -> str | None:
 # ── Celery task ──────────────────────────────────────────────────────
 
 
-@app.task(bind=True, name="tasks.publish_openai_agent")
-def publish_openai_agent(
+@app.task(bind=True, name="tasks.publish_native_agent")
+def publish_native_agent(
     self,
     tenant_id: str,
     location_id: str,
     publish_job_id: str,
     speako_task_id: str = None,
     tenant_integration_param: dict = None,
+    provider: str = "openai",
 ):
     """
-    Compose and store the OpenAI Realtime agent config for a location.
+    Compose and store the native agent config for a location.
 
+    Supports both OpenAI Realtime and Azure Voice Live providers.
     Reads all config from the same DB rows the ElevenLabs publish task uses.
-    Does NOT call any external API.
+    Does NOT call any external API (except OpenAI vector store for large knowledge).
     """
     celery_task_id = self.request.id
 
     logger.info(
-        f"[publish_openai_agent] Started — "
+        f"[publish_native_agent] Started — "
         f"tenant_id={tenant_id}, location_id={location_id}, "
         f"publish_job_id={publish_job_id}, speako_task_id={speako_task_id}, "
         f"celery_task_id={celery_task_id}"
@@ -1384,18 +1390,19 @@ def publish_openai_agent(
 
         # ── Compose ──
         config_version = _get_current_config_version(tenant_id, location_id)
-        config = _compose_openai_agent_config(
+        config = _compose_native_agent_config(
             tenant_id=tenant_id,
             location_id=location_id,
             celery_task_id=celery_task_id,
             config_version=config_version,
+            provider=provider,
         )
 
         # ── Idempotency check ──
         current_hash = _read_current_source_hash(tenant_id, location_id)
         if current_hash == config["source_hash"]:
             logger.info(
-                f"[publish_openai_agent] No changes detected (hash={current_hash}), "
+                f"[publish_native_agent] No changes detected (hash={current_hash}), "
                 f"skipping write"
             )
             if speako_task_id:
@@ -1428,7 +1435,7 @@ def publish_openai_agent(
             )
 
         logger.info(
-            f"[publish_openai_agent] Success — config_version={config_version}, "
+            f"[publish_native_agent] Success — config_version={config_version}, "
             f"tools={len(config['session']['tools'])}, "
             f"prompt_len={len(config['session']['instructions'])}"
         )
@@ -1440,7 +1447,7 @@ def publish_openai_agent(
         }
 
     except Exception as exc:
-        logger.exception(f"[publish_openai_agent] Failed: {exc}")
+        logger.exception(f"[publish_native_agent] Failed: {exc}")
         if speako_task_id:
             mark_task_failed(
                 task_id=speako_task_id,
