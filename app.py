@@ -3333,26 +3333,8 @@ def openai_post_conversation_webhook():
                 except Exception:
                     call_accepted_time = None
 
-            # Convert UTC timestamps to location timezone (ElevenLabs stores
-            # in location tz already; OpenAI/Azure send UTC)
-            from zoneinfo import ZoneInfo
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT timezone FROM locations WHERE tenant_id = %s AND location_id = %s LIMIT 1",
-                    (tenant_id, location_id),
-                )
-                tz_row = cur.fetchone()
-                location_tz = tz_row[0] if tz_row else "UTC"
-
-            if location_tz and location_tz != "UTC":
-                try:
-                    tz = ZoneInfo(location_tz)
-                    if call_start_time:
-                        call_start_time = call_start_time.replace(tzinfo=ZoneInfo("UTC")).astimezone(tz).replace(tzinfo=None)
-                    if call_accepted_time:
-                        call_accepted_time = call_accepted_time.replace(tzinfo=ZoneInfo("UTC")).astimezone(tz).replace(tzinfo=None)
-                except Exception as e:
-                    print(f"⚠️  Timezone conversion failed ({location_tz}): {e}")
+            # Timestamps are stored in UTC (consistent with ElevenLabs sync).
+            # Frontend converts to location timezone when displaying.
 
             location_conversation_id = None
             with conn.cursor() as cur:
