@@ -1255,6 +1255,14 @@ def _compose_native_agent_config(
         primary_hint = lang_hints.get(primary_lang, {}).get("hint")
         language_block["primary_has_style_hint"] = bool(primary_hint)
 
+        # Build language→voice mapping for runtime voice switching
+        primary_voice_id = language_config_raw.get("primary_voice_id", "")
+        voices_map = {primary_lang: primary_voice_id} if primary_voice_id else {}
+        for lang, cfg in presets.items():
+            if cfg.get("enabled") and cfg.get("voice_id") and lang != primary_lang:
+                voices_map[lang] = cfg["voice_id"]
+        language_block["voices"] = voices_map
+
         # Build human-readable language name for primary
         primary_name = lang_hints.get(primary_lang, {}).get("name", primary_lang)
 
@@ -1266,8 +1274,12 @@ def _compose_native_agent_config(
                 for l in enabled_langs
             ]
             lang_lines.append(f"You also support: {', '.join(secondary_names)}.")
-            lang_lines.append("If the caller switches to one of these supported languages, follow their lead.")
-        lang_lines.append("Do NOT respond in any language not listed above.")
+            lang_lines.append(
+                "When the caller speaks a different supported language or explicitly asks to switch, "
+                "call the switch_language tool immediately. Do NOT attempt to speak the other language yourself — "
+                "the call will be transferred to an assistant with the correct voice for that language."
+            )
+        lang_lines.append("If the caller requests a language not listed above, tell them which languages are available.")
 
         # Append speaking style hints for all supported languages that have one
         for lang_code in supported:
