@@ -1275,9 +1275,11 @@ def _compose_native_agent_config(
             ]
             lang_lines.append(f"You also support: {', '.join(secondary_names)}.")
             lang_lines.append(
-                "When the caller speaks a different supported language or explicitly asks to switch, "
-                "call the switch_language tool immediately. Do NOT attempt to speak the other language yourself — "
-                "the call will be transferred to an assistant with the correct voice for that language."
+                "CRITICAL: If the caller speaks ANY utterance in a different supported language, "
+                "you MUST call switch_language immediately — even if it sounds like a question about "
+                "language capability. Do NOT respond in your current language first. Do NOT ask for "
+                "confirmation. Do NOT explain which languages you support. Just call the tool. "
+                "The caller may not understand your current language at all."
             )
         lang_lines.append("If the caller requests a language not listed above, tell them which languages are available.")
 
