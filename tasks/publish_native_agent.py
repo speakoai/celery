@@ -1219,6 +1219,8 @@ def _compose_native_agent_config(
         detection_enabled = language_config_raw.get("language_detection_enabled", False)
         presets = language_config_raw.get("language_presets", {})
         enabled_langs = [lang for lang, cfg in presets.items() if cfg.get("enabled")]
+        # Deduplicate: primary language should not also appear in enabled secondary languages
+        enabled_langs = [l for l in enabled_langs if l != primary_lang]
         supported = [primary_lang] + enabled_langs
 
         language_block = {
