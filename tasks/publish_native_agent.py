@@ -70,6 +70,32 @@ _GENERIC_DATETIME_PROPS = {
     },
 }
 
+# Hardcoded booking-rules suffix appended to every published system prompt.
+# Mirrored byte-for-byte in speako-web/src/lib/publish/native/compose.ts
+# (BOOKING_RULES_SUFFIX) and speako-voice-ai/app_azure.py
+# (BOOKING_RULES_SUPPLEMENT). Any drift across those three constants
+# will surface in the TS↔celery parity check.
+_BOOKING_RULES_SUPPLEMENT = (
+    "\n\n# Booking rules\n"
+    "- Before calling check_availabilities, check_availabilities_service, "
+    "make_booking, or make_booking_service, you MUST have the caller's "
+    "name AND the caller's explicit confirmation that this name should "
+    "be used for the booking.\n"
+    "- If the caller's name is NOT already known: ask for it (e.g., "
+    "\"Could I have your name for the booking?\") and use the name they "
+    "give you.\n"
+    "- If the caller's name IS already known (e.g., it appears in your "
+    "context as \"Known caller first name: <name>\" or the caller "
+    "mentioned it earlier in this conversation): you MUST still briefly "
+    "confirm before booking — for example, \"I'll put this booking under "
+    "<name> — does that sound right, or would you prefer a different "
+    "name?\" Wait for an affirmative reply. If the caller wants a "
+    "different name, use the new one.\n"
+    "- Never call those tools with a missing, blank, placeholder, or "
+    "fabricated CustomerName. Do not pass values like \"None\", \"null\", "
+    "\"guest\", \"customer\", or \"unknown\"."
+)
+
 
 def _tool_schema_registry():
     """Return the full registry of tool_key → OpenAI function schema."""
@@ -243,9 +269,14 @@ def _tool_schema_registry():
                     },
                     "CustomerName": {
                         "type": "string",
-                        "description": "Caller name if shared during the booking flow.",
+                        "description": (
+                            "Caller's full name. Ask the caller for it if not "
+                            "already known — never pass a placeholder like "
+                            "\"None\", \"guest\", or \"unknown\"."
+                        ),
                     },
                 },
+                "required": ["CustomerName"],
                 "additionalProperties": True,
             },
         },
@@ -266,9 +297,14 @@ def _tool_schema_registry():
                     },
                     "CustomerName": {
                         "type": "string",
-                        "description": "Caller name if provided.",
+                        "description": (
+                            "Caller's full name. Ask the caller for it if not "
+                            "already known — never pass a placeholder like "
+                            "\"None\", \"guest\", or \"unknown\"."
+                        ),
                     },
                 },
+                "required": ["CustomerName"],
                 "additionalProperties": True,
             },
         },
@@ -300,7 +336,11 @@ def _tool_schema_registry():
                     **_GENERIC_DATETIME_PROPS,
                     "CustomerName": {
                         "type": "string",
-                        "description": "Caller name if shared during the booking flow.",
+                        "description": (
+                            "Caller's full name. Ask the caller for it if not "
+                            "already known — never pass a placeholder like "
+                            "\"None\", \"guest\", or \"unknown\"."
+                        ),
                     },
                     "staffName": {
                         "type": "string",
@@ -311,6 +351,7 @@ def _tool_schema_registry():
                         "description": "Requested service name.",
                     },
                 },
+                "required": ["CustomerName"],
                 "additionalProperties": True,
             },
         },
@@ -327,7 +368,11 @@ def _tool_schema_registry():
                     **_GENERIC_DATETIME_PROPS,
                     "CustomerName": {
                         "type": "string",
-                        "description": "Caller name if provided.",
+                        "description": (
+                            "Caller's full name. Ask the caller for it if not "
+                            "already known — never pass a placeholder like "
+                            "\"None\", \"guest\", or \"unknown\"."
+                        ),
                     },
                     "staffName": {
                         "type": "string",
@@ -338,6 +383,7 @@ def _tool_schema_registry():
                         "description": "Service name if selected.",
                     },
                 },
+                "required": ["CustomerName"],
                 "additionalProperties": True,
             },
         },
@@ -1157,6 +1203,12 @@ def _compose_native_agent_config(
     system_prompt, composed_temperature, knowledge_sections, knowledge_total_size = _ensure_fragments_and_compose(
         str(tenant_id), str(location_id), all_params
     )
+
+    # Append the hardcoded booking-rules suffix BEFORE both `instructions`
+    # is assigned and hash_inputs is built, so source_hash changes when
+    # this constant is updated and re-publishes are not skipped by the
+    # idempotency check.
+    system_prompt = system_prompt + _BOOKING_RULES_SUPPLEMENT
 
     # ── 4. Extract voice/speed/temperature/azure-specific settings ──
     voice = _extract_voice_id(voice_dict_params, provider=provider)
