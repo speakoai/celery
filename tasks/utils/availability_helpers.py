@@ -3,6 +3,63 @@
 from datetime import datetime
 import copy
 
+
+def _to_seconds(time_str):
+    """Convert 'HH:MM' or 'HH:MM:SS' to seconds-since-midnight."""
+    parts = time_str.split(':')
+    h = int(parts[0])
+    m = int(parts[1]) if len(parts) > 1 else 0
+    s = int(parts[2]) if len(parts) > 2 else 0
+    return h * 3600 + m * 60 + s
+
+
+def _from_seconds(secs):
+    h = secs // 3600
+    m = (secs % 3600) // 60
+    s = secs % 60
+    return f"{h:02d}:{m:02d}:{s:02d}"
+
+
+def intersect_slots_with_open_hours(staff_dict, open_hours):
+    """Clamp each staff member's slots to the union of the location's open_hours.
+
+    `open_hours` is the list emitted in the cache: [{'start': 'HH:MM', 'end': 'HH:MM'}, ...].
+    Any slot piece that falls outside open hours is dropped. A staff whose
+    slots are entirely outside open hours is removed from the dict so the
+    cache never advertises bookable windows the location can't honour.
+
+    Mutates and returns a deep-copied dict to match the convention of
+    reconstruct_staff_availability.
+    """
+    if not open_hours:
+        # Location closed for the day — emit no staff slots regardless of overrides
+        return {}
+
+    open_intervals = sorted(
+        ((_to_seconds(oh['start']), _to_seconds(oh['end'])) for oh in open_hours),
+        key=lambda x: x[0],
+    )
+
+    updated = copy.deepcopy(staff_dict)
+    for sid in list(updated.keys()):
+        clamped = []
+        for slot in updated[sid].get('slots', []):
+            slot_s = _to_seconds(slot['start'])
+            slot_e = _to_seconds(slot['end'])
+            for oh_s, oh_e in open_intervals:
+                start = max(slot_s, oh_s)
+                end = min(slot_e, oh_e)
+                if start < end:
+                    clamped.append({
+                        'start': _from_seconds(start),
+                        'end': _from_seconds(end),
+                    })
+        if not clamped:
+            del updated[sid]
+        else:
+            updated[sid]['slots'] = clamped
+    return updated
+
 def parse_time(dt_str):
     return datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
 
