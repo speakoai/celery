@@ -58,7 +58,7 @@ COUNTRY_CONFIG = {
             'VIC': 'Victoria', 'TAS': 'Tasmania', 'QLD': 'Queensland',
             'SA': 'South Australia', 'WA': 'Western Australia', 'NT': 'Northern Territory',
         },
-        'targets_prod': {'NSW': 3, 'ACT': 1, 'VIC': 2, 'TAS': 1, 'QLD': 2, 'SA': 1, 'WA': 1, 'NT': 1},
+        'targets_prod': {'NSW': 1, 'ACT': 1, 'VIC': 1, 'TAS': 1, 'QLD': 1, 'SA': 1, 'WA': 1, 'NT': 1},
         'targets_dev': {'_national': 1},
     },
     'US': {
@@ -66,7 +66,7 @@ COUNTRY_CONFIG = {
         'address_sid': None,
         'bundle_sid': None,
         'region_names': {},
-        'targets_prod': {'_national': 5},
+        'targets_prod': {'_national': 2},
         'targets_dev': {'_national': 1},
     },
     'GB': {
@@ -74,7 +74,7 @@ COUNTRY_CONFIG = {
         'address_sid': 'AD5d5da1b021517e2d70e934454841369b',
         'bundle_sid': 'BUd7b12a2492f6c4a975e5ddf912b1fa73',
         'region_names': {},
-        'targets_prod': {'_national': 5},
+        'targets_prod': {'_national': 2},
         'targets_dev': {'_national': 1},
     },
     'CA': {
@@ -82,7 +82,7 @@ COUNTRY_CONFIG = {
         'address_sid': None,
         'bundle_sid': None,
         'region_names': {},
-        'targets_prod': {'_national': 5},
+        'targets_prod': {'_national': 2},
         'targets_dev': {'_national': 1},
     },
     'NZ': {
@@ -90,7 +90,7 @@ COUNTRY_CONFIG = {
         'address_sid': 'AD5d5da1b021517e2d70e934454841369b',
         'bundle_sid': 'BU6e85bba34da82a04ec00cde6e7d944fb',
         'region_names': {},
-        'targets_prod': {'_national': 5},
+        'targets_prod': {'_national': 2},
         'targets_dev': {'_national': 1},
     },
 }
