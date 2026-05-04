@@ -533,9 +533,12 @@ def maintain_phone_number_availability(dry_run: bool = True) -> dict:
                     print(f"    Location: {locality}, {display_region}")
                 else:
                     try:
+                        # Tag replenished pool numbers with "Pending DEV"/"Pending PROD"
+                        # so they're easy to identify in the Twilio console and so cleanup
+                        # tooling can recognize them as safe-to-release pool numbers.
                         result = purchase_number(
                             phone_number=phone,
-                            friendly_name=None,
+                            friendly_name=f'Pending {TWILIO_NUMBER_MODE}',
                             area_code=num_info.get('locality'),
                             region=num_info.get('region') or search_region,
                             country_code=country_code,
