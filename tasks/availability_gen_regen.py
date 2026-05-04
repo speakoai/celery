@@ -3,7 +3,11 @@ load_dotenv()
 
 from tasks.celery_app import app
 from celery.utils.log import get_task_logger
-from tasks.utils.availability_helpers import reconstruct_staff_availability, reconstruct_venue_availability
+from tasks.utils.availability_helpers import (
+    reconstruct_staff_availability,
+    reconstruct_venue_availability,
+    intersect_slots_with_open_hours,
+)
 from tasks.utils.task_db import mark_task_running, mark_task_failed, mark_task_succeeded
 
 import os
@@ -170,7 +174,7 @@ def gen_availability(self, tenant_id, location_id, location_tz, affected_date=No
                     "open_hours": []
                 }
 
-                # Step 1: Get one-time availability entries for this specific date
+                # Step 1: Get one-time availability entries at THIS location for the date
                 cur.execute("""
                     SELECT s.staff_id, s.name, sa.start_time, sa.end_time, sa.is_closed
                     FROM staff s
@@ -179,30 +183,29 @@ def gen_availability(self, tenant_id, location_id, location_tz, affected_date=No
                     AND sa.specific_date = %s AND sa.is_active = TRUE AND s.is_active = TRUE
                 """, (tenant_id, location_id, current_date_str))
                 one_time_staff_rows = cur.fetchall()
-                
-                # Get staff IDs that have one-time entries
-                staff_with_one_time = {row[0] for row in one_time_staff_rows}
-                
-                # Step 2: Get recurring availability for staff who don't have one-time entries
-                if staff_with_one_time:
-                    cur.execute("""
-                        SELECT s.staff_id, s.name, sa.start_time, sa.end_time
-                        FROM staff s
-                        JOIN staff_availability sa ON s.tenant_id = sa.tenant_id AND s.staff_id = sa.staff_id
-                        WHERE s.tenant_id = %s AND sa.location_id = %s AND sa.type = 'recurring'
-                        AND sa.day_of_week = %s AND (sa.specific_date IS NULL OR sa.specific_date <> %s)
-                        AND sa.is_active = TRUE AND s.is_active = TRUE
-                        AND s.staff_id NOT IN %s
-                    """, (tenant_id, location_id, db_day, current_date_str, tuple(staff_with_one_time)))
-                else:
-                    cur.execute("""
-                        SELECT s.staff_id, s.name, sa.start_time, sa.end_time
-                        FROM staff s
-                        JOIN staff_availability sa ON s.tenant_id = sa.tenant_id AND s.staff_id = sa.staff_id
-                        WHERE s.tenant_id = %s AND sa.location_id = %s AND sa.type = 'recurring'
-                        AND sa.day_of_week = %s AND (sa.specific_date IS NULL OR sa.specific_date <> %s)
-                        AND sa.is_active = TRUE AND s.is_active = TRUE
-                    """, (tenant_id, location_id, db_day, current_date_str))
+
+                # Step 2: Recurring availability for staff who do NOT have a one-time
+                # entry on this date at ANY location in the tenant. The one-time row is
+                # treated as the tenant-wide source of truth: if a staff has a one-time
+                # at location B on this date, they are "pinned" to B and must not be
+                # emitted from any other location's recurring schedule.
+                cur.execute("""
+                    SELECT s.staff_id, s.name, sa.start_time, sa.end_time
+                    FROM staff s
+                    JOIN staff_availability sa ON s.tenant_id = sa.tenant_id AND s.staff_id = sa.staff_id
+                    WHERE s.tenant_id = %s AND sa.location_id = %s AND sa.type = 'recurring'
+                    AND sa.day_of_week = %s AND (sa.specific_date IS NULL OR sa.specific_date <> %s)
+                    AND sa.is_active = TRUE AND s.is_active = TRUE
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM staff_availability sa2
+                        WHERE sa2.tenant_id = s.tenant_id
+                          AND sa2.staff_id = s.staff_id
+                          AND sa2.type = 'one_time'
+                          AND sa2.specific_date = %s
+                          AND sa2.is_active = TRUE
+                    )
+                """, (tenant_id, location_id, db_day, current_date_str, current_date_str))
                 recurring_staff_rows = cur.fetchall()
 
                 cur.execute("""
@@ -238,8 +241,10 @@ def gen_availability(self, tenant_id, location_id, location_tz, affected_date=No
                     })["slots"].append({"start": str(start), "end": str(end)})
 
                 updated_staff_dict = reconstruct_staff_availability(bookings, staff_dict)
-                availability["staff"] = list(updated_staff_dict.values())
 
+                # Resolve location open hours BEFORE finalising staff[] so we can
+                # clamp staff slots to the opening window. A holiday closure or
+                # absent open_hours collapses staff[] to an empty list.
                 cur.execute("""
                     SELECT COUNT(*)
                     FROM location_availability
@@ -262,6 +267,15 @@ def gen_availability(self, tenant_id, location_id, location_tz, affected_date=No
                         availability["open_hours"].append({"start": s.strftime("%H:%M"), "end": e.strftime("%H:%M")})
                     if not availability["open_hours"]:
                         availability["is_open"] = False
+
+                if availability["is_open"]:
+                    clamped_staff_dict = intersect_slots_with_open_hours(
+                        updated_staff_dict, availability["open_hours"]
+                    )
+                    availability["staff"] = list(clamped_staff_dict.values())
+                else:
+                    # Holiday or no open hours — never advertise staff slots
+                    availability["staff"] = []
 
                 response["availabilities"].append(availability)
 
