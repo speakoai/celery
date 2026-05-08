@@ -1220,6 +1220,8 @@ def _compose_native_agent_config(
     # Azure-specific: VAD, pitch, volume
     vad_threshold = 0.7
     vad_silence_duration_ms = 1000
+    vad_type = "server"
+    vad_speech_duration_ms = 200
     pitch = "+0%"
     volume = "+0%"
     for p in voice_dict_params:
@@ -1228,6 +1230,10 @@ def _compose_native_agent_config(
             vad_threshold = float(p["value_numeric"])
         elif pc == "vad_silence_duration_ms" and p.get("value_numeric") is not None:
             vad_silence_duration_ms = int(p["value_numeric"])
+        elif pc == "vad_type" and p.get("value_text") in ("server", "semantic"):
+            vad_type = p["value_text"]
+        elif pc == "vad_speech_duration_ms" and p.get("value_numeric") is not None:
+            vad_speech_duration_ms = int(p["value_numeric"])
         elif pc == "pitch" and p.get("value_text"):
             pitch = p["value_text"]
         elif pc == "volume" and p.get("value_text"):
@@ -1401,6 +1407,8 @@ def _compose_native_agent_config(
             "vad": {
                 "threshold": vad_threshold,
                 "silence_duration_ms": vad_silence_duration_ms,
+                "type": vad_type,
+                **({"speech_duration_ms": vad_speech_duration_ms} if vad_type == "semantic" else {}),
             },
             "tools": tools,
             "tool_choice": "auto",
