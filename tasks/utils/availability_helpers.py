@@ -1,7 +1,39 @@
 # tasks/utils/availability_helpers.py
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import copy
+
+
+DEFAULT_SLOT_INTERVAL_MINUTES = 15
+
+
+def annotate_bookable_starts(venue_dict, slot_interval_minutes=DEFAULT_SLOT_INTERVAL_MINUTES):
+    """Add bookable_starts (list of "HH:MM") to each slot in a venue_dict.
+
+    A start is bookable when start + service_duration <= slot_end. Walks each
+    slot at slot_interval_minutes ticks. Empty list means the slot exists as a
+    leftover gap but cannot fit a booking — voice-ai consumers can rely on
+    this without re-doing the fitness math.
+
+    Mutates and returns venue_dict; caller already owns a fresh copy from
+    reconstruct_venue_availability so in-place mutation is safe.
+    """
+    interval = timedelta(minutes=int(slot_interval_minutes or DEFAULT_SLOT_INTERVAL_MINUTES))
+    for venue in venue_dict.values():
+        for slot in venue.get('slots', []):
+            slot_start = datetime.strptime(slot['start'], "%H:%M:%S")
+            slot_end = datetime.strptime(slot['end'], "%H:%M:%S")
+            duration_raw = slot.get('service_duration')
+            duration = int(duration_raw) if duration_raw is not None else 0
+            latest = slot_end - timedelta(minutes=duration)
+            starts = []
+            if duration > 0 and latest >= slot_start:
+                t = slot_start
+                while t <= latest:
+                    starts.append(t.strftime("%H:%M"))
+                    t += interval
+            slot['bookable_starts'] = starts
+    return venue_dict
 
 
 def _to_seconds(time_str):

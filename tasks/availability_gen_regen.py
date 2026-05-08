@@ -7,6 +7,7 @@ from tasks.utils.availability_helpers import (
     reconstruct_staff_availability,
     reconstruct_venue_availability,
     intersect_slots_with_open_hours,
+    annotate_bookable_starts,
 )
 from tasks.utils.task_db import mark_task_running, mark_task_failed, mark_task_succeeded
 
@@ -569,6 +570,11 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
                     })["slots"].append({"start": str(start), "end": str(end), "service_duration": str(service_duration)})
 
                 updated_venue_dict = reconstruct_venue_availability(bookings, venue_dict)
+                # Pre-compute the bookable start times per slot so voice-ai
+                # consumers don't have to re-derive fitness from slot width
+                # at request time. Single source of truth for "what starts
+                # actually work" lives here.
+                updated_venue_dict = annotate_bookable_starts(updated_venue_dict)
                 venue_key_name = "tables" if is_dining_table else "venue_units"
                 availability[venue_key_name] = list(updated_venue_dict.values())
 
