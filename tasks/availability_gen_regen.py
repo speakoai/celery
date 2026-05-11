@@ -488,12 +488,14 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
                 }
 
                 # Step 1: Get one-time venue availability entries for this specific date
+                # Walk-in units are excluded from the cache — they're not bookable via voice-AI or the public page.
                 cur.execute("""
                     SELECT vu.venue_unit_id, vu.name, vu.venue_unit_type, vu.capacity, vu.min_capacity, va.service_duration, va.start_time, va.end_time, va.availability_id, va.is_closed, vu.zone_tag_ids
                     FROM venue_unit vu
                     JOIN venue_availability va ON vu.tenant_id = va.tenant_id AND vu.venue_unit_id = va.venue_unit_id
                     WHERE vu.tenant_id = %s AND va.location_id = %s AND va.type = 'one_time'
                     AND va.specific_date = %s AND va.is_active = TRUE AND vu.is_active = TRUE
+                    AND vu.is_walk_in = FALSE
                 """, (tenant_id, location_id, current_date_str))
                 one_time_venue_rows = cur.fetchall()
                 
@@ -509,6 +511,7 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
                         WHERE vu.tenant_id = %s AND va.location_id = %s AND va.type = 'recurring'
                         AND va.day_of_week = %s AND (va.specific_date IS NULL OR va.specific_date <> %s)
                         AND va.is_active = TRUE AND vu.is_active = TRUE
+                        AND vu.is_walk_in = FALSE
                         AND vu.venue_unit_id NOT IN %s
                     """, (tenant_id, location_id, db_day, current_date_str, tuple(venues_with_one_time)))
                 else:
@@ -519,6 +522,7 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
                         WHERE vu.tenant_id = %s AND va.location_id = %s AND va.type = 'recurring'
                         AND va.day_of_week = %s AND (va.specific_date IS NULL OR va.specific_date <> %s)
                         AND va.is_active = TRUE AND vu.is_active = TRUE
+                        AND vu.is_walk_in = FALSE
                     """, (tenant_id, location_id, db_day, current_date_str))
                 recurring_venue_rows = cur.fetchall()
 
