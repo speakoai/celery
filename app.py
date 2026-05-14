@@ -3354,20 +3354,27 @@ def openai_post_conversation_webhook():
             # Timestamps are stored in UTC (consistent with ElevenLabs sync).
             # Frontend converts to location timezone when displaying.
 
+            # telephony_provider describes HOW the call reached us (Twilio
+            # number vs Jambonz-bridged SIP from a customer's PBX). It's
+            # orthogonal to `provider`, which describes which AI engine
+            # served the call. Defaults to 'twilio' to match historical
+            # behaviour for any caller that doesn't supply the field.
+            telephony_provider = data.get('telephony_provider', 'twilio')
+
             location_conversation_id = None
             with conn.cursor() as cur:
                 cur.execute("""
                     INSERT INTO location_conversations (
-                        tenant_id, location_id, provider,
+                        tenant_id, location_id, provider, telephony_provider,
                         provider_conversation_id, provider_agent_id,
                         agent_name, call_start_time, call_accepted_time,
                         call_duration_secs, message_count, status,
                         call_successful, main_language,
                         transcript_summary, audio_r2_path, raw_metadata
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING location_conversation_id
                 """, (
-                    tenant_id, location_id, data.get('provider', 'openai'),
+                    tenant_id, location_id, data.get('provider', 'openai'), telephony_provider,
                     data.get('provider_conversation_id'), data.get('provider_agent_id'),
                     data.get('agent_name'), call_start_time, call_accepted_time,
                     data.get('call_duration_secs'), data.get('message_count', 0),
