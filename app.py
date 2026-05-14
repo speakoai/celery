@@ -3251,13 +3251,31 @@ def openai_post_conversation_webhook():
         conn = get_db_connection()
 
         try:
-            # Step 1: Download audio from Twilio → upload to R2
+            # Step 1: Resolve audio location.
+            #
+            # Two paths land here:
+            # 1. Twilio path: voice-ai sets recording_sid; celery downloads
+            #    the recording from Twilio and uploads it to R2 here.
+            # 2. SIP/Jambonz path: voice-ai (app_jambonz_azure.py) records
+            #    the call locally into a stereo WAV and uploads it to R2
+            #    BEFORE calling this webhook. It passes the resulting R2
+            #    object key as `audio_r2_path` in the payload. We just
+            #    need to assemble the full public URL.
             audio_r2_path = None
             recording_sid = data.get('recording_sid')
+            prerendered_r2_key = data.get('audio_r2_path')
 
             _audio_needs_retry = False
 
-            if recording_sid:
+            if prerendered_r2_key:
+                # SIP path — audio is already in R2, just build the URL.
+                if is_dev:
+                    public_base = os.getenv('R2_PUBLIC_BASE_URL_DEV', 'https://assets-dev.speako.ai')
+                else:
+                    public_base = os.getenv('R2_PUBLIC_BASE_URL', 'https://assets.speako.ai')
+                audio_r2_path = f"{public_base}/{prerendered_r2_key}"
+                print(f"\n[Step 1] Using pre-uploaded SIP audio: key={prerendered_r2_key} url={audio_r2_path}")
+            elif recording_sid:
                 print(f"\n[Step 1] Downloading audio from Twilio recording {recording_sid}")
                 try:
                     import requests as http_requests
@@ -3312,7 +3330,7 @@ def openai_post_conversation_webhook():
                 except Exception as audio_err:
                     print(f"⚠️  Audio download/upload failed: {audio_err}")
             else:
-                print(f"\n[Step 1] No recording_sid, skipping audio")
+                print(f"\n[Step 1] No recording_sid and no prerendered audio_r2_path — skipping audio")
 
             # Step 2: INSERT conversation row
             print(f"\n[Step 2] Inserting conversation")
@@ -3336,20 +3354,27 @@ def openai_post_conversation_webhook():
             # Timestamps are stored in UTC (consistent with ElevenLabs sync).
             # Frontend converts to location timezone when displaying.
 
+            # telephony_provider describes HOW the call reached us (Twilio
+            # number vs Jambonz-bridged SIP from a customer's PBX). It's
+            # orthogonal to `provider`, which describes which AI engine
+            # served the call. Defaults to 'twilio' to match historical
+            # behaviour for any caller that doesn't supply the field.
+            telephony_provider = data.get('telephony_provider', 'twilio')
+
             location_conversation_id = None
             with conn.cursor() as cur:
                 cur.execute("""
                     INSERT INTO location_conversations (
-                        tenant_id, location_id, provider,
+                        tenant_id, location_id, provider, telephony_provider,
                         provider_conversation_id, provider_agent_id,
                         agent_name, call_start_time, call_accepted_time,
                         call_duration_secs, message_count, status,
                         call_successful, main_language,
                         transcript_summary, audio_r2_path, raw_metadata
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING location_conversation_id
                 """, (
-                    tenant_id, location_id, data.get('provider', 'openai'),
+                    tenant_id, location_id, data.get('provider', 'openai'), telephony_provider,
                     data.get('provider_conversation_id'), data.get('provider_agent_id'),
                     data.get('agent_name'), call_start_time, call_accepted_time,
                     data.get('call_duration_secs'), data.get('message_count', 0),
