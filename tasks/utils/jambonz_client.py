@@ -104,19 +104,22 @@ def create_application(
     webhook_pass: str | None = None,
 ) -> dict:
     """
-    Speech vendor fields are intentionally null: we run Azure Voice Live on
-    our WebSocket side, so Jambonz never invokes a speech vendor itself.
+    Speech vendor fields are filled with harmless Jambonz defaults even
+    though Jambonz never invokes them — we run Azure Voice Live on our
+    WebSocket side, so all TTS/STT happens out-of-band. We set defaults
+    rather than null because some Jambonz installs reject null vendor on
+    CREATE (e.g. ours: `Column 'speech_synthesis_vendor' cannot be null`).
     """
     body: dict = {
         "account_sid": _account_sid(),
         "name": name,
         "call_hook": _hook(call_hook_url, webhook_user, webhook_pass),
         "call_status_hook": _hook(call_status_hook_url, webhook_user, webhook_pass),
-        "speech_synthesis_vendor": None,
-        "speech_synthesis_language": None,
-        "speech_synthesis_voice": None,
-        "speech_recognizer_vendor": None,
-        "speech_recognizer_language": None,
+        "speech_synthesis_vendor": "google",
+        "speech_synthesis_language": "en-US",
+        "speech_synthesis_voice": "en-US-Wavenet-C",
+        "speech_recognizer_vendor": "google",
+        "speech_recognizer_language": "en-US",
     }
     return _request("POST", "/v1/Applications", json_body=body)
 
