@@ -344,13 +344,17 @@ def update_phone_number(
     phone_number_sid: str,
     *,
     application_sid: str | None = None,
-    voip_carrier_sid: str | None = None,
+    voip_carrier_sid: str | None = None,  # accepted for API symmetry but never PUT
 ) -> None:
+    """Update a Jambonz PhoneNumber. Note: ``voip_carrier_sid`` is immutable
+    in Jambonz (PUT returns 400 ``voip_carrier_sid may not be modified``), so
+    we silently ignore it on update. To change a PhoneNumber's carrier, the
+    only path is delete + recreate.
+    """
+    _ = voip_carrier_sid  # explicitly unused
     body: dict = {}
     if application_sid is not None:
         body["application_sid"] = application_sid
-    if voip_carrier_sid is not None:
-        body["voip_carrier_sid"] = voip_carrier_sid
     if not body:
         return
     _request("PUT", f"/v1/PhoneNumbers/{phone_number_sid}", json_body=body)
