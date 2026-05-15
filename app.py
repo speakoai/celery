@@ -25,6 +25,7 @@ from tasks.publish_native_agent import publish_native_agent
 from tasks.create_ai_agent import create_conversation_ai_agent
 from tasks.purchase_twilio_number import replenish_twilio_numbers
 from tasks.update_twilio_friendly_name import update_twilio_friendly_name
+from tasks.provision_sip_location import provision_sip_location
 # Additional imports for R2 uploads
 import boto3
 from werkzeug.utils import secure_filename
@@ -2490,6 +2491,81 @@ def api_publish_native_agent():
                 'source': 'publish_native_agent',
                 'provider': provider,
                 **({'speako_task_id': speako_task_id} if speako_task_id else {})
+            }
+        }), 202
+
+    except Exception as e:
+        return jsonify({'error': 'Internal server error', 'message': str(e)}), 500
+
+
+# =============================================================================
+# SIP / JAMBONZ PROVISIONING API
+# =============================================================================
+
+@app.route('/api/sip/provision-location', methods=['POST'])
+@require_api_key
+def api_provision_sip_location():
+    """
+    Provision SIP/Jambonz objects for a single location.
+
+    Expected JSON payload:
+    {
+      "location_id": 35,
+      "mode": "softphone" | "pbx",
+      "action": "provision" | "rotate" | "disable",
+      "speako_task_id": "<uuid from speako-agent-admin tasks row>",
+      "pbx_params": {                       // required only for mode='pbx' provision/rotate
+        "sip_extension": "600",
+        "sip_register_username": "OzL6yB6HtG",
+        "sip_register_password": "w49UobuL15",
+        "sip_pbx_hostname": "dodeepaidang.3cx.com.au",
+        "sip_pbx_port": 5060,
+        "sip_transport": "UDP"
+      }
+    }
+
+    Returns 202 with celery_task_id for polling at /api/task/<task_id>.
+    """
+    try:
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({
+                'error': 'JSON payload required',
+                'message': 'Send a valid JSON body with Content-Type: application/json',
+            }), 400
+
+        location_id = data.get('location_id')
+        mode = data.get('mode')
+        action = data.get('action', 'provision')
+        pbx_params = data.get('pbx_params')
+        speako_task_id = data.get('speako_task_id')
+
+        if not location_id:
+            return jsonify({'error': 'location_id is required'}), 400
+        if mode not in ('softphone', 'pbx'):
+            return jsonify({'error': "mode must be 'softphone' or 'pbx'"}), 400
+        if action not in ('provision', 'rotate', 'disable'):
+            return jsonify({'error': "action must be 'provision', 'rotate', or 'disable'"}), 400
+        if mode == 'pbx' and action in ('provision', 'rotate') and not pbx_params:
+            return jsonify({'error': 'pbx_params required for mode=pbx provision/rotate'}), 400
+
+        task = provision_sip_location.delay(
+            location_id=int(location_id),
+            mode=mode,
+            action=action,
+            pbx_params=pbx_params,
+            speako_task_id=speako_task_id,
+        )
+
+        return jsonify({
+            'success': True,
+            'message': f'SIP provisioning task started (mode={mode}, action={action})',
+            'data': {
+                'celery_task_id': task.id,
+                'location_id': int(location_id),
+                'mode': mode,
+                'action': action,
+                **({'speako_task_id': speako_task_id} if speako_task_id else {}),
             }
         }), 202
 
