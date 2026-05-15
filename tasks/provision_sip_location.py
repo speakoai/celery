@@ -35,7 +35,7 @@ from celery.utils.log import get_task_logger
 
 from tasks.utils import jambonz_client as jb
 from tasks.utils.jambonz_client import JambonzAPIError
-from tasks.utils.sip_secrets import decrypt_sql, encrypt_sql, generate_password, get_passphrase
+from tasks.utils.sip_secrets import encrypt_sql, get_passphrase
 from tasks.utils.task_db import _get_conn, mark_task_failed, mark_task_running, mark_task_succeeded
 
 logger = get_task_logger(__name__)
@@ -86,6 +86,33 @@ def _slugify(text: str) -> str:
 
 def _object_name(location_name: str, location_id: int) -> str:
     return f"{_slugify(location_name)}-{location_id}-{_env_label()}"
+
+
+def _softphone_dial_prefix() -> str:
+    """Prefix on softphone dial codes so dev/prod don't collide on the
+    single shared Jambonz server. Dev locations dial 88<id>, prod 99<id>.
+    """
+    return "88" if _env_label() == "dev" else "99"
+
+
+def _softphone_dial_code(location_id: int) -> str:
+    """Numeric code testers dial from the shared Jambonz softphone account
+    to reach this location's voice agent.
+    """
+    return f"{_softphone_dial_prefix()}{location_id}"
+
+
+def _find_test_loopback_carrier_sid() -> str:
+    """Locate Jambonz's built-in 'Test Loopback' carrier. Softphone PhoneNumbers
+    are wired through it (it's the carrier that lets registered SIP clients
+    dial inbound to our applications without going via the PSTN)."""
+    for c in jb.list_voip_carriers():
+        if c.get("name") == "Test Loopback":
+            return c.get("voip_carrier_sid") or c.get("sid")
+    raise RuntimeError(
+        "Jambonz 'Test Loopback' carrier not found — it should ship with every "
+        "Jambonz install. Check the portal under Carriers."
+    )
 
 
 def _fetch_location(location_id: int) -> dict:
@@ -251,48 +278,34 @@ def _ensure_application(*, name: str, location_id: int, existing_sid: str | None
     return {"application_sid": sid, "name": name, "adopted": "created"}
 
 
-def _ensure_softphone_client(
+def _ensure_softphone_phone_number(
     *,
-    name: str,
-    existing_username: str | None,
-    rotate_password: bool,
-) -> dict:
-    """Find or create the Jambonz SIP Client for softphone testing.
+    dial_code: str,
+    application_sid: str,
+    voip_carrier_sid: str,
+) -> str:
+    """Find-or-create a Jambonz PhoneNumber for softphone testing.
 
-    Returns {client_sid, username, password (only if newly set), action}.
-    If an existing Client is adopted without rotation, password is None
-    (we never stored the plaintext on the Jambonz side, only in our DB).
+    Looks up by the dial code (e.g. '8835'); if it exists, refreshes its
+    application/carrier wiring; otherwise creates fresh. Returns the
+    phone_number_sid.
     """
-    username = existing_username or name
-    existing = jb.find_client_by_username(username)
-
+    existing = jb.find_phone_number_by_number(dial_code)
     if existing:
-        client_sid = existing.get("client_sid") or existing.get("sid")
-        if rotate_password:
-            new_pw = generate_password()
-            jb.update_client_password(client_sid, password=new_pw)
-            return {
-                "client_sid": client_sid,
-                "username": username,
-                "password": new_pw,
-                "action": "rotated",
-            }
-        return {
-            "client_sid": client_sid,
-            "username": username,
-            "password": None,
-            "action": "adopted",
-        }
+        pn_sid = existing.get("phone_number_sid") or existing.get("sid")
+        jb.update_phone_number(
+            pn_sid,
+            application_sid=application_sid,
+            voip_carrier_sid=voip_carrier_sid,
+        )
+        return pn_sid
 
-    # Create new.
-    new_pw = generate_password()
-    created = jb.create_client(username=username, password=new_pw, allow_direct_app_calling=True)
-    return {
-        "client_sid": created.get("client_sid") or created.get("sid"),
-        "username": username,
-        "password": new_pw,
-        "action": "created",
-    }
+    created = jb.create_phone_number(
+        number=dial_code,
+        application_sid=application_sid,
+        voip_carrier_sid=voip_carrier_sid,
+    )
+    return created.get("phone_number_sid") or created.get("sid")
 
 
 def _ensure_pbx_carrier(
@@ -460,48 +473,73 @@ def provision_sip_location(
 
 
 def _run_softphone(loc: dict, existing: dict, name: str, action: str) -> dict:
+    """
+    Softphone mode (revised):
+
+    Testers register Linphone/Zoiper against ONE shared Jambonz SIP user
+    (managed manually in the Jambonz portal — not by us). Each location gets
+    its own *PhoneNumber* with an env-prefixed dial code; the tester dials
+    that number from the shared softphone account to reach the location's
+    voice agent. Dial codes are `88<location_id>` in dev and `99<location_id>`
+    in prod so the two environments can coexist on a single Jambonz server
+    without colliding on overlapping location_ids.
+
+    Per-location Client / per-location password are no longer created.
+    `jambonz_client_username` is repurposed to store the dial code (e.g.
+    "8835") so the UI can detect provisioned state without an extra column.
+    """
     location_id = loc["location_id"]
     tenant_id = loc["tenant_id"]
+    dial_code = _softphone_dial_code(location_id)
 
     if action == "disable":
-        client_username = existing.get("jambonz_client_username")
-        client = jb.find_client_by_username(client_username) if client_username else None
-        if client:
-            jb.delete_client(client.get("client_sid") or client.get("sid"))
+        existing_pn = jb.find_phone_number_by_number(dial_code)
+        if existing_pn:
+            jb.delete_phone_number(
+                existing_pn.get("phone_number_sid") or existing_pn.get("sid")
+            )
         _upsert_sip_config(location_id, tenant_id, {
             "jambonz_client_username": None,
-            "jambonz_client_password_encrypted": None,
+            "jambonz_sip_realm": None,
         })
-        return {"softphone": "disabled"}
+        return {"softphone": "disabled", "dial_code_removed": dial_code}
 
-    # provision or rotate — both need the Application.
+    if action == "rotate":
+        # Nothing per-location to rotate — the shared SIP user lives in the
+        # Jambonz portal, rotated there manually if/when needed.
+        return {
+            "softphone": "noop",
+            "note": "Softphone uses shared Jambonz credentials; nothing per-location to rotate.",
+        }
+
+    # action == "provision"
     app_result = _ensure_application(
         name=name,
         location_id=location_id,
         existing_sid=existing.get("jambonz_application_sid"),
     )
 
-    client_result = _ensure_softphone_client(
-        name=name,
-        existing_username=existing.get("jambonz_client_username"),
-        rotate_password=(action == "rotate" or (action == "provision" and not existing.get("jambonz_client_username"))),
+    carrier_sid = _find_test_loopback_carrier_sid()
+
+    phone_number_sid = _ensure_softphone_phone_number(
+        dial_code=dial_code,
+        application_sid=app_result["application_sid"],
+        voip_carrier_sid=carrier_sid,
     )
 
-    update_fields: dict = {
+    _upsert_sip_config(location_id, tenant_id, {
         "enabled": True,
         "jambonz_application_sid": app_result["application_sid"],
-        "jambonz_client_username": client_result["username"],
+        "jambonz_client_username": dial_code,  # repurposed: the softphone dial code
         "jambonz_sip_realm": _sip_realm(),
-    }
-    if client_result["password"] is not None:
-        update_fields["jambonz_client_password"] = client_result["password"]
+    })
 
-    _upsert_sip_config(location_id, tenant_id, update_fields)
     return {
         "softphone": "ok",
         "application": app_result,
-        "client": {k: v for k, v in client_result.items() if k != "password"},
-        "password_set": client_result["password"] is not None,
+        "dial_code": dial_code,
+        "phone_number_sid": phone_number_sid,
+        "voip_carrier_sid": carrier_sid,
     }
 
 
