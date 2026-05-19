@@ -334,9 +334,16 @@ def _ensure_pbx_carrier(
     pbx_port: int,
     register_username: str,
     register_password: str,
+    register_from_user: str,
     existing_carrier_sid: str | None,
 ) -> dict:
-    """Create or refresh a VoipCarrier + SipGateway for a customer's PBX."""
+    """Create or refresh a VoipCarrier + SipGateway for a customer's PBX.
+
+    ``register_from_user`` is the extension number (e.g. ``"600"``) — used
+    as the user-part of the SIP From URI on REGISTER. 3CX requires this
+    to be the extension, distinct from ``register_username`` which is the
+    Authentication ID used in the auth challenge response.
+    """
     realm = pbx_hostname  # Jambonz uses the PBX hostname as the register realm.
 
     # 1. Carrier — try saved SID, then by name, else create.
@@ -350,6 +357,7 @@ def _ensure_pbx_carrier(
                 register_username=register_username,
                 register_password=register_password,
                 register_sip_realm=realm,
+                register_from_user=register_from_user,
             )
 
     if not carrier_sid:
@@ -361,6 +369,7 @@ def _ensure_pbx_carrier(
                 register_username=register_username,
                 register_password=register_password,
                 register_sip_realm=realm,
+                register_from_user=register_from_user,
             )
         else:
             created = jb.create_voip_carrier(
@@ -368,6 +377,7 @@ def _ensure_pbx_carrier(
                 register_username=register_username,
                 register_password=register_password,
                 register_sip_realm=realm,
+                register_from_user=register_from_user,
             )
             carrier_sid = created.get("voip_carrier_sid") or created.get("sid")
 
@@ -625,6 +635,7 @@ def _run_pbx(loc: dict, existing: dict, name: str, action: str, pbx_params: dict
         pbx_port=pbx_port,
         register_username=register_username,
         register_password=register_password,
+        register_from_user=extension,  # 3CX wants From URI = ext, not auth ID
         existing_carrier_sid=existing.get("jambonz_carrier_sid"),
     )
 
