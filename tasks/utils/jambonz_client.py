@@ -228,6 +228,11 @@ def create_voip_carrier(
     the customer's PBX. Inbound calls hitting that SIP user are routed via
     a PhoneNumber → Application.
     """
+    # NOTE: do NOT send `register_status` here. Some Jambonz versions store
+    # the field as a literal JS toString ("[object Object]") instead of JSON,
+    # which then makes every subsequent /v1/VoipCarriers LIST query 500 with
+    # `"[object Object]" is not valid JSON`. Jambonz manages register_status
+    # itself; we never need to set it.
     body = {
         "account_sid": _account_sid(),
         "name": name,
@@ -238,7 +243,6 @@ def create_voip_carrier(
         "register_sip_realm": register_sip_realm,
         "register_from_user": register_username,
         "register_from_domain": register_sip_realm,
-        "register_status": {"status": "unknown"},
     }
     return _request("POST", "/v1/VoipCarriers", json_body=body)
 
