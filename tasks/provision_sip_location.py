@@ -102,6 +102,25 @@ def _softphone_dial_code(location_id: int) -> str:
     return f"{_softphone_dial_prefix()}{location_id}"
 
 
+def _resolve_pbx_hostname(hostname: str) -> str:
+    """Resolve a PBX FQDN to an IPv4 address via DNS.
+
+    Jambonz's SipGateway.ipv4 field validates as an IPv4 string and rejects
+    FQDNs with HTTP 400. We resolve to the current A record at provisioning
+    time. If the customer's PBX ever changes IP, the admin can re-provision
+    to refresh.
+    """
+    import socket
+    try:
+        # If hostname is already an IP, gethostbyname returns it unchanged.
+        return socket.gethostbyname(hostname)
+    except socket.gaierror as e:
+        raise RuntimeError(
+            f"Could not resolve PBX hostname '{hostname}': {e}. "
+            "Verify the FQDN is correct and reachable from the celery worker."
+        )
+
+
 def _find_test_loopback_carrier_sid() -> str:
     """Locate Jambonz's built-in 'Test Loopback' carrier. Softphone PhoneNumbers
     are wired through it (it's the carrier that lets registered SIP clients
@@ -352,22 +371,28 @@ def _ensure_pbx_carrier(
             )
             carrier_sid = created.get("voip_carrier_sid") or created.get("sid")
 
-    # 2. SipGateway — make sure exactly one exists for (pbx_hostname, pbx_port).
+    # 2. SipGateway — Jambonz's ipv4 field validates as IPv4, so a FQDN like
+    # `dodeepaidang.3cx.com.au` gets rejected with HTTP 400. Resolve the
+    # hostname to its current A record at provisioning time and store the IP.
+    # The Carrier's register_sip_realm keeps the hostname (REGISTER needs the
+    # domain, not the IP). If the PBX ever changes IP, just re-provision.
+    pbx_ipv4 = _resolve_pbx_hostname(pbx_hostname)
+
     gateways = jb.list_sip_gateways(carrier_sid)
     match = next(
-        (g for g in gateways if g.get("ipv4") == pbx_hostname and int(g.get("port") or 0) == int(pbx_port)),
+        (g for g in gateways if g.get("ipv4") == pbx_ipv4 and int(g.get("port") or 0) == int(pbx_port)),
         None,
     )
     if not match:
         jb.create_sip_gateway(
             voip_carrier_sid=carrier_sid,
-            ipv4=pbx_hostname,
+            ipv4=pbx_ipv4,
             port=pbx_port,
             inbound=True,
             outbound=True,
         )
 
-    return {"voip_carrier_sid": carrier_sid}
+    return {"voip_carrier_sid": carrier_sid, "pbx_ipv4": pbx_ipv4}
 
 
 def _ensure_pbx_phone_number(
