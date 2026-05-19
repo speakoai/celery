@@ -228,17 +228,43 @@ def find_voip_carrier_by_name(name: str) -> dict | None:
     return None
 
 
+_SERVICE_PROVIDER_SID_CACHE: str | None = None
+
+
+def _service_provider_sid() -> str:
+    """Service provider sid for our account, fetched lazily and cached.
+
+    Carriers created via API need ``service_provider_sid`` set in addition to
+    ``account_sid``; otherwise the Jambonz portal won't render them in the
+    Carriers list (cosmetic — REST routing works either way).
+    """
+    global _SERVICE_PROVIDER_SID_CACHE
+    if _SERVICE_PROVIDER_SID_CACHE is None:
+        acc = _request("GET", f"/v1/Accounts/{_account_sid()}")
+        sid = acc.get("service_provider_sid") if isinstance(acc, dict) else None
+        if not sid:
+            raise JambonzAPIError("Account has no service_provider_sid")
+        _SERVICE_PROVIDER_SID_CACHE = sid
+    return _SERVICE_PROVIDER_SID_CACHE
+
+
 def create_voip_carrier(
     *,
     name: str,
     register_username: str,
     register_password: str,
     register_sip_realm: str,
+    register_from_user: str | None = None,
 ) -> dict:
     """
     Carrier in 'register mode': Jambonz acts as a SIP UAC and REGISTERs to
     the customer's PBX. Inbound calls hitting that SIP user are routed via
     a PhoneNumber → Application.
+
+    ``register_from_user`` controls the user-part of the From URI on the
+    REGISTER request. 3CX (and many PBXes) want this to be the *extension
+    number* even though the Authorization-header username is the auth ID.
+    Defaults to ``register_username`` for back-compat with non-3CX trunks.
     """
     # NOTE: do NOT send `register_status` here. Some Jambonz versions store
     # the field as a literal JS toString ("[object Object]") instead of JSON,
@@ -247,13 +273,14 @@ def create_voip_carrier(
     # itself; we never need to set it.
     body = {
         "account_sid": _account_sid(),
+        "service_provider_sid": _service_provider_sid(),
         "name": name,
         "is_active": True,
         "requires_register": True,
         "register_username": register_username,
         "register_password": register_password,
         "register_sip_realm": register_sip_realm,
-        "register_from_user": register_username,
+        "register_from_user": register_from_user or register_username,
         "register_from_domain": register_sip_realm,
     }
     return _request("POST", "/v1/VoipCarriers", json_body=body)
@@ -265,12 +292,18 @@ def update_voip_carrier(
     register_username: str,
     register_password: str,
     register_sip_realm: str,
+    register_from_user: str | None = None,
 ) -> None:
+    """Refresh register credentials on an existing carrier. Also sets
+    ``service_provider_sid`` (idempotent) so carriers created before that
+    field was wired in get backfilled on the next provision.
+    """
     body = {
+        "service_provider_sid": _service_provider_sid(),
         "register_username": register_username,
         "register_password": register_password,
         "register_sip_realm": register_sip_realm,
-        "register_from_user": register_username,
+        "register_from_user": register_from_user or register_username,
         "register_from_domain": register_sip_realm,
         "requires_register": True,
         "is_active": True,
