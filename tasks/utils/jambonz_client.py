@@ -205,14 +205,26 @@ def delete_client(client_sid: str) -> None:
 # =============================================================================
 
 def list_voip_carriers() -> list[dict]:
+    """Full account-scoped LIST. Avoid this if you can — Jambonz serializes
+    every row's register_status; if any one row is corrupted (e.g. stored
+    "[object Object]" from an old client bug), this whole call 500s.
+    Prefer ``find_voip_carrier_by_name`` which uses a server-side name filter
+    and only deserializes matching rows.
+    """
     data = _request("GET", f"/v1/VoipCarriers?account_sid={_account_sid()}")
     return data if isinstance(data, list) else []
 
 
 def find_voip_carrier_by_name(name: str) -> dict | None:
-    for c in list_voip_carriers():
-        if c.get("name") == name:
-            return c
+    """Server-side filter by name. Only deserializes rows whose name matches,
+    so corruption in *other* carriers won't break the lookup."""
+    from urllib.parse import quote
+    data = _request(
+        "GET",
+        f"/v1/VoipCarriers?account_sid={_account_sid()}&name={quote(name)}",
+    )
+    if isinstance(data, list) and data:
+        return data[0]
     return None
 
 
