@@ -622,6 +622,11 @@ def _run_pbx(loc: dict, existing: dict, name: str, action: str, pbx_params: dict
     pbx_hostname = str(pbx_params["sip_pbx_hostname"]).strip()
     pbx_port = int(pbx_params["sip_pbx_port"])
     transport = str(pbx_params.get("sip_transport", "UDP")).upper()
+    # Optional. If set, voice-ai routes transfer_to_human calls to
+    # sip:<transfer_extension>@<pbx_hostname> instead of dialing a PSTN
+    # number — typically a 3CX call group / hunt group extension.
+    raw_transfer_ext = pbx_params.get("transfer_extension")
+    transfer_extension = str(raw_transfer_ext).strip() if raw_transfer_ext else None
 
     app_result = _ensure_application(
         name=name,
@@ -657,6 +662,7 @@ def _run_pbx(loc: dict, existing: dict, name: str, action: str, pbx_params: dict
         "sip_transport": transport,
         "sip_register_username": register_username,
         "sip_register_password": register_password,
+        "transfer_extension": transfer_extension,
     })
 
     return {
@@ -666,4 +672,5 @@ def _run_pbx(loc: dict, existing: dict, name: str, action: str, pbx_params: dict
         "phone_number_sid": phone_number_sid,
         "extension": extension,
         "pbx_hostname": pbx_hostname,
+        "transfer_extension": transfer_extension,
     }
