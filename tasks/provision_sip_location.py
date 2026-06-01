@@ -35,7 +35,7 @@ from celery.utils.log import get_task_logger
 
 from tasks.utils import jambonz_client as jb
 from tasks.utils.jambonz_client import JambonzAPIError
-from tasks.utils.sip_secrets import encrypt_sql, get_passphrase
+from tasks.utils.sip_secrets import decrypt_sql, encrypt_sql, get_passphrase
 from tasks.utils.task_db import _get_conn, mark_task_failed, mark_task_running, mark_task_succeeded
 
 logger = get_task_logger(__name__)
@@ -132,6 +132,27 @@ def _find_test_loopback_carrier_sid() -> str:
         "Jambonz 'Test Loopback' carrier not found — it should ship with every "
         "Jambonz install. Check the portal under Carriers."
     )
+
+
+def _fetch_stored_register_password(location_id: int) -> str | None:
+    """Decrypt and return the existing sip_register_password for a location.
+
+    Used when the admin re-provisions PBX settings without retyping the
+    password — the form leaves the field blank, and we want to preserve
+    the stored credential. Returns None if no password is stored.
+    """
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {decrypt_sql('sip_register_password_encrypted')} "
+                f"FROM location_sip_config WHERE location_id = %s",
+                (get_passphrase(), location_id),
+            )
+            row = cur.fetchone()
+            return row[0] if row and row[0] else None
+    finally:
+        conn.close()
 
 
 def _fetch_location(location_id: int) -> dict:
@@ -610,7 +631,9 @@ def _run_pbx(loc: dict, existing: dict, name: str, action: str, pbx_params: dict
     if not pbx_params:
         raise ValueError("pbx_params required for mode=pbx action=provision/rotate")
 
-    required = ("sip_extension", "sip_register_username", "sip_register_password",
+    # sip_register_password is optional on re-provisioning when one is
+    # already stored — we'll fall back to the encrypted value in the DB.
+    required = ("sip_extension", "sip_register_username",
                 "sip_pbx_hostname", "sip_pbx_port")
     missing = [k for k in required if not pbx_params.get(k)]
     if missing:
@@ -618,7 +641,16 @@ def _run_pbx(loc: dict, existing: dict, name: str, action: str, pbx_params: dict
 
     extension = str(pbx_params["sip_extension"]).strip()
     register_username = str(pbx_params["sip_register_username"]).strip()
-    register_password = str(pbx_params["sip_register_password"])
+    raw_password = pbx_params.get("sip_register_password")
+    if raw_password:
+        register_password = str(raw_password)
+    else:
+        stored = _fetch_stored_register_password(location_id)
+        if not stored:
+            raise ValueError(
+                "sip_register_password required — no stored password to fall back to"
+            )
+        register_password = stored
     pbx_hostname = str(pbx_params["sip_pbx_hostname"]).strip()
     pbx_port = int(pbx_params["sip_pbx_port"])
     transport = str(pbx_params.get("sip_transport", "UDP")).upper()
