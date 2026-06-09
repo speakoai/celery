@@ -117,8 +117,6 @@ projects:
         sync: false
       - key: API_SECRET_KEY
         sync: false
-      - key: CELERY_RESULT_BACKEND
-        sync: false
       - key: CELERY_BROKER_URL
         sync: false
       region: virginia
@@ -133,8 +131,6 @@ projects:
       branch: dev
       plan: free
       envVars:
-      - key: CELERY_RESULT_BACKEND
-        sync: false
       - key: CELERY_BROKER_URL
         sync: false
       region: virginia
@@ -187,8 +183,6 @@ projects:
       - key: API_SECRET_KEY
         sync: false
       - key: TINYURL_API_TOKEN
-        sync: false
-      - key: CELERY_RESULT_BACKEND
         sync: false
       - key: TWILIO_SEND_SMS_NUMBER
         sync: false
@@ -385,8 +379,6 @@ projects:
         sync: false
       - key: API_SECRET_KEY
         sync: false
-      - key: CELERY_RESULT_BACKEND
-        sync: false
       - key: CELERY_BROKER_URL
         sync: false
       region: virginia
@@ -401,8 +393,6 @@ projects:
       branch: master
       plan: free
       envVars:
-      - key: CELERY_RESULT_BACKEND
-        sync: false
       - key: CELERY_BROKER_URL
         sync: false
       region: virginia
@@ -455,8 +445,6 @@ projects:
       - key: API_SECRET_KEY
         sync: false
       - key: TINYURL_API_TOKEN
-        sync: false
-      - key: CELERY_RESULT_BACKEND
         sync: false
       - key: TWILIO_SEND_SMS_NUMBER
         sync: false
