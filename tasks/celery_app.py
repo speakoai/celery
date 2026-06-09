@@ -7,12 +7,12 @@ load_dotenv()
 app = Celery('myapp', broker=os.getenv('CELERY_BROKER_URL'))
 
 # Uncomment the lines below to add result backend and persistence configuration
-# app = Celery('myapp', 
+# app = Celery('myapp',
 #             broker=os.getenv('CELERY_BROKER_URL'),
-#             backend=os.getenv('CELERY_RESULT_BACKEND', os.getenv('CELERY_BROKER_URL')))
+#             backend=os.getenv('CELERY_BROKER_URL'))
 
 # Enable a result backend so task states (e.g., STARTED) are persisted
-_result_backend = os.getenv('CELERY_RESULT_BACKEND', os.getenv('CELERY_BROKER_URL'))
+_result_backend = os.getenv('CELERY_BROKER_URL')
 if _result_backend:
 	app.conf.update(result_backend=_result_backend)
 
