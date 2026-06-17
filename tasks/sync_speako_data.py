@@ -2145,7 +2145,18 @@ def sync_speako_data(self, *,
             except Exception as save_e:
                 logger.error(f"❌ [sync_speako_data] Database save failed: {save_e}")
                 raise
-        
+
+        # RAG: chunk + embed markdown into knowledge_chunks (best-effort)
+        if json_output is not None and markdown_output:
+            try:
+                from .utils.knowledge_utils import chunk_and_embed_knowledge, NON_CONTENT_PARAM_CODES
+                _pc = (tenant_integration_param or {}).get('param_code') or knowledge_type
+                if location_id is not None and _pc not in NON_CONTENT_PARAM_CODES:
+                    _n = chunk_and_embed_knowledge(tenant_id, location_id, _pc, markdown_output)
+                    logger.info(f"🧩 [sync_speako_data] Embedded {_n} knowledge chunks for {_pc}")
+            except Exception as kc_e:
+                logger.warning(f"[sync_speako_data] knowledge_chunks embed failed: {kc_e}")
+
         # Mark succeeded
         if speako_task_id:
             try:
