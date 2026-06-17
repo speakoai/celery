@@ -1605,19 +1605,12 @@ def publish_native_agent(
         # ── Write to DB ──
         _write_config_to_db(tenant_id, location_id, config)
 
-        # ── Refresh the tenant's aggregate chat vector store (text chat) ──
-        # The text chat (Messenger, etc.) does RAG over ONE per-tenant vector store
-        # (OpenAI file_search caps at 2 stores/request). Rebuild it here so chat
-        # knowledge stays in sync with this publish. Best-effort — never fail the
-        # publish over it. NOTE: this uses celery's OPENAI_API_KEY, which MUST be
-        # the same OpenAI project as the text-chat brain (app_text.py) or the brain
-        # won't find the store.
-        try:
-            from tasks.build_chat_vector_store import build_tenant_chat_vector_store
-            vs_id = build_tenant_chat_vector_store(tenant_id)
-            logger.info("[publish_native_agent] chat vector store refreshed: %s", vs_id)
-        except Exception as cve:
-            logger.warning("[publish_native_agent] chat vector store refresh failed: %s", cve)
+        # RAG Phase 1: text chat (Messenger/IG/widget) now retrieves knowledge from
+        # self-hosted pgvector (knowledge_chunks), populated by the analyze_knowledge /
+        # sync_speako_data ingest hooks — NOT from an OpenAI aggregate chat vector store.
+        # The old build_tenant_chat_vector_store refresh is intentionally removed here.
+        # Voice agents still use their per-location OpenAI vector store (built by
+        # _upload_knowledge_to_vector_store above).
 
         if speako_task_id:
             mark_task_succeeded(
