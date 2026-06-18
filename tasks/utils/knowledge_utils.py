@@ -204,6 +204,7 @@ def preprocess_for_model(file_bytes: bytes, filename: str, content_type: str) ->
     Supported:
     - PDF (.pdf) => mode=file
     - CSV (.csv) => mode=text (raw text)
+    - Markdown/Text (.md/.txt) => mode=text (raw text)
     - JSON (.json) => mode=text (raw text)
     - Excel (.xlsx/.xls) => mode=text (CSV text of sheets)
     - Word (.docx) => mode=text (paragraph text)
@@ -218,6 +219,10 @@ def preprocess_for_model(file_bytes: bytes, filename: str, content_type: str) ->
     # CSV: treat as plain text
     if ext == '.csv' or content_type in ('text/csv',):
         return { 'mode': 'text', 'text': _bytes_to_text(file_bytes), 'note': 'csv-as-text' }
+
+    # Markdown / plain text: treat as raw text (already model-friendly)
+    if ext in ('.md', '.txt') or content_type in ('text/markdown', 'text/plain'):
+        return { 'mode': 'text', 'text': _bytes_to_text(file_bytes), 'note': 'markdown-as-text' }
 
     # JSON: treat as plain text (preserve structure)
     if ext == '.json' or content_type in ('application/json',):
