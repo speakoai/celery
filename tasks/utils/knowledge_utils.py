@@ -204,6 +204,7 @@ def preprocess_for_model(file_bytes: bytes, filename: str, content_type: str) ->
     Supported:
     - PDF (.pdf) => mode=file
     - CSV (.csv) => mode=text (raw text)
+    - Markdown/Text (.md/.txt) => mode=text (raw text)
     - JSON (.json) => mode=text (raw text)
     - Excel (.xlsx/.xls) => mode=text (CSV text of sheets)
     - Word (.docx) => mode=text (paragraph text)
@@ -218,6 +219,10 @@ def preprocess_for_model(file_bytes: bytes, filename: str, content_type: str) ->
     # CSV: treat as plain text
     if ext == '.csv' or content_type in ('text/csv',):
         return { 'mode': 'text', 'text': _bytes_to_text(file_bytes), 'note': 'csv-as-text' }
+
+    # Markdown / plain text: treat as raw text (already model-friendly)
+    if ext in ('.md', '.txt') or content_type in ('text/markdown', 'text/plain'):
+        return { 'mode': 'text', 'text': _bytes_to_text(file_bytes), 'note': 'markdown-as-text' }
 
     # JSON: treat as plain text (preserve structure)
     if ext == '.json' or content_type in ('application/json',):
@@ -280,4 +285,97 @@ def build_scrape_artifact_paths(tenant_id: str, location_id: str, url: str) -> d
         'base': base,
         'digest': h,
     }
+
+
+# --------------------------------------------------------------------------- #
+# pgvector RAG: chunk + embed knowledge markdown into the knowledge_chunks table.
+# Used by analyze_knowledge / sync_speako_data (ingest hooks) and the
+# rebuild_knowledge_chunks backfill task. The text-chat brain (app_text2.py)
+# retrieves from knowledge_chunks per turn; the OpenAI vector store path is
+# unchanged (built at publish, still used by voice).
+# --------------------------------------------------------------------------- #
+# param_codes that are not knowledge content and must never be embedded.
+NON_CONTENT_PARAM_CODES = {"id"}
+EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
+
+
+def _chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list:
+    """Split text into overlapping fixed-size word-window chunks (default 500 words, 50 overlap)."""
+    words = text.split()
+    if not words:
+        return []
+    step = max(chunk_size - overlap, 1)
+    chunks = []
+    for i in range(0, len(words), step):
+        chunk = " ".join(words[i:i + chunk_size])
+        if chunk.strip():
+            chunks.append(chunk)
+        if i + chunk_size >= len(words):
+            break
+    return chunks
+
+
+def _vector_literal(embedding) -> str:
+    """Format a float list as a pgvector text literal '[0.1,0.2,...]' for a %s::vector bind."""
+    return "[" + ",".join(repr(float(x)) for x in embedding) + "]"
+
+
+def chunk_and_embed_knowledge(tenant_id, location_id, param_code, markdown_text,
+                              openai_client=None, db_conn=None) -> int:
+    """Chunk, embed (text-embedding-3-small), and persist knowledge to knowledge_chunks
+    via delete-then-reinsert for (tenant_id, location_id, param_code). Returns chunk count.
+
+    Skips empty text and NULL location_id. The caller still guards NON_CONTENT_PARAM_CODES.
+    openai_client / db_conn are optional — if omitted they are created from env / task_db
+    (a shared client+conn should be passed when looping many rows, e.g. the backfill task).
+    """
+    if not markdown_text or not markdown_text.strip() or location_id is None:
+        return 0
+    chunks = _chunk_text(markdown_text)
+    if not chunks:
+        return 0
+
+    if openai_client is None:
+        try:
+            from openai import OpenAI
+        except ImportError:
+            logger.warning("⚠️ [knowledge_chunks] OpenAI library unavailable; skipping embed")
+            return 0
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            logger.warning("⚠️ [knowledge_chunks] OPENAI_API_KEY not set; skipping embed")
+            return 0
+        openai_client = OpenAI(api_key=api_key)
+
+    resp = openai_client.embeddings.create(model=EMBEDDING_MODEL, input=chunks)
+    embeddings = [d.embedding for d in sorted(resp.data, key=lambda d: d.index)]
+
+    own_conn = False
+    if db_conn is None:
+        from .task_db import _get_conn
+        db_conn = _get_conn()
+        own_conn = True
+    try:
+        from psycopg2.extras import execute_values
+        with db_conn:  # transaction scope (commit/rollback); does NOT close the conn
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM public.knowledge_chunks "
+                    "WHERE tenant_id = %s AND location_id = %s AND param_code = %s",
+                    (tenant_id, location_id, param_code),
+                )
+                rows = [(tenant_id, location_id, param_code, i, chunks[i],
+                         _vector_literal(embeddings[i])) for i in range(len(chunks))]
+                execute_values(
+                    cur,
+                    "INSERT INTO public.knowledge_chunks "
+                    "(tenant_id, location_id, param_code, chunk_index, content, embedding) VALUES %s",
+                    rows, template="(%s,%s,%s,%s,%s,%s::vector)",
+                )
+        logger.info("🧩 [knowledge_chunks] %d chunks (tenant=%s loc=%s param=%s)",
+                    len(chunks), tenant_id, location_id, param_code)
+        return len(chunks)
+    finally:
+        if own_conn:
+            db_conn.close()
 

@@ -651,10 +651,10 @@ def record_call_billing(conn, tenant_id: int, location_conversation_id: int, cal
 
 
 def allowed_knowledge_file(filename: str) -> bool:
-    """Return True if filename has an allowed knowledge extension (doc/x, xls/x, pdf, csv, txt)."""
+    """Return True if filename has an allowed knowledge extension (doc/x, xls/x, pdf, csv, txt, md)."""
     if not filename:
         return False
-    allowed_ext = {'.doc', '.docx', '.xls', '.xlsx', '.pdf', '.csv', '.txt'}
+    allowed_ext = {'.doc', '.docx', '.xls', '.xlsx', '.pdf', '.csv', '.txt', '.md'}
     ext = os.path.splitext(filename.lower())[1]
     return ext in allowed_ext
 
@@ -1549,8 +1549,8 @@ def api_upload_knowledge_file():
     - Optional: tenantIntegrationParam (object) for integration metadata
 
     Constraints for file uploads:
-    - Allowed types: .doc/.docx, .xls/.xlsx, .pdf, .csv, .txt
-    - Max size: 5MB
+    - Allowed types: .doc/.docx, .xls/.xlsx, .pdf, .csv, .txt, .md
+    - Max size: 30MB
 
     Upload path in bucket: knowledges/{tenant_id}/{location_id}/
     """
@@ -1592,7 +1592,7 @@ def api_upload_knowledge_file():
 
             # Optional: enforce allowed extensions when present in URL
             if ext and not allowed_knowledge_file(f"dummy{ext}"):
-                return jsonify({'error': 'Unsupported file type', 'message': 'Allowed: .doc, .docx, .xls, .xlsx, .pdf, .csv, .txt', 'provided_ext': ext}), 400
+                return jsonify({'error': 'Unsupported file type', 'message': 'Allowed: .doc, .docx, .xls, .xlsx, .pdf, .csv, .txt, .md', 'provided_ext': ext}), 400
 
             # Guess content type and extension when missing
             guessed_ct, _ = mimetypes.guess_type(parsed.path)
@@ -1664,9 +1664,9 @@ def api_upload_knowledge_file():
 
         # Validate extension
         if not allowed_knowledge_file(file.filename):
-            return jsonify({'error': 'Unsupported file type', 'message': 'Allowed: .doc, .docx, .xls, .xlsx, .pdf, .csv, .txt'}), 400
+            return jsonify({'error': 'Unsupported file type', 'message': 'Allowed: .doc, .docx, .xls, .xlsx, .pdf, .csv, .txt, .md'}), 400
 
-        # Enforce 5MB limit
+        # Enforce 30MB limit
         try:
             file.stream.seek(0, os.SEEK_END)
             size = file.stream.tell()
@@ -1676,8 +1676,8 @@ def api_upload_knowledge_file():
             data_peek = file.read()
             size = len(data_peek)
             file.stream.seek(0)
-        if size > 5 * 1024 * 1024:
-            return jsonify({'error': 'File too large', 'message': 'File size must be less than or equal to 5MB'}), 400
+        if size > 30 * 1024 * 1024:
+            return jsonify({'error': 'File too large', 'message': 'File size must be less than or equal to 30MB'}), 400
 
         # Prepare upload
         file_extension = os.path.splitext(secure_filename(file.filename))[1].lower()

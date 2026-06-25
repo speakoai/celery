@@ -425,7 +425,18 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
                     logger.warning(f"⚠️ [analyze_knowledge_file] Failed to update tenant_integration_param - no param_id returned")
             except Exception as tip_e:
                 logger.warning(f"[tasks] upsert_tenant_integration_param failed: {tip_e}")
-            
+
+            # RAG: chunk + embed markdown into knowledge_chunks (best-effort, never fails the save)
+            try:
+                from .utils.knowledge_utils import chunk_and_embed_knowledge, NON_CONTENT_PARAM_CODES
+                _pc = (tenant_integration_param or {}).get('param_code') or knowledge_type
+                if markdown_text and location_id is not None and _pc not in NON_CONTENT_PARAM_CODES:
+                    _n = chunk_and_embed_knowledge(tenant_id, location_id, _pc, markdown_text,
+                                                   openai_client=oa_client)
+                    logger.info(f"🧩 [analyze_knowledge_file] Embedded {_n} knowledge chunks for {_pc}")
+            except Exception as kc_e:
+                logger.warning(f"[analyze_knowledge_file] knowledge_chunks embed failed: {kc_e}")
+
             try:
                 mark_task_succeeded(
                     task_id=str(speako_task_id),

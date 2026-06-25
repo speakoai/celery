@@ -75,6 +75,18 @@ _GENERIC_DATETIME_PROPS = {
 # (BOOKING_RULES_SUFFIX) and speako-voice-ai/app_azure.py
 # (BOOKING_RULES_SUPPLEMENT). Any drift across those three constants
 # will surface in the TS↔celery parity check.
+_DURATION_MINUTES_PROP = {
+    "duration_minutes": {
+        "type": "integer",
+        "description": (
+            "For flexible-duration services only: the customer's chosen booking "
+            "length in minutes. Must be within the service's allowed min-max range "
+            "and a multiple of its increment. Omit for fixed-duration services."
+        ),
+    },
+}
+
+
 _BOOKING_RULES_SUPPLEMENT = (
     "\n\n# Booking rules\n"
     "- Before calling check_availabilities, check_availabilities_service, "
@@ -93,7 +105,15 @@ _BOOKING_RULES_SUPPLEMENT = (
     "different name, use the new one.\n"
     "- Never call those tools with a missing, blank, placeholder, or "
     "fabricated CustomerName. Do not pass values like \"None\", \"null\", "
-    "\"guest\", \"customer\", or \"unknown\"."
+    "\"guest\", \"customer\", or \"unknown\".\n"
+    "- For flexible-duration services (where the customer chooses how long to "
+    "book), ask the customer for the length and pass it as duration_minutes (an "
+    "integer number of minutes) on check_availabilities / make_booking and the "
+    "_service variants. Keep it within the service's allowed range and step "
+    "(shown in your service knowledge). For fixed-duration services, do NOT send "
+    "duration_minutes. If the chosen length is invalid or does not fit the "
+    "requested time, the system will return a clear message — relay it and offer "
+    "a valid alternative."
 )
 
 
@@ -263,6 +283,7 @@ def _tool_schema_registry():
                 "type": "object",
                 "properties": {
                     **_GENERIC_DATETIME_PROPS,
+                    **_DURATION_MINUTES_PROP,
                     "partyNum": {
                         "type": "integer",
                         "description": "Number of diners in the party.",
@@ -291,6 +312,7 @@ def _tool_schema_registry():
                 "type": "object",
                 "properties": {
                     **_GENERIC_DATETIME_PROPS,
+                    **_DURATION_MINUTES_PROP,
                     "partySize": {
                         "type": "integer",
                         "description": "Number of diners for the final booking.",
@@ -334,6 +356,7 @@ def _tool_schema_registry():
                 "type": "object",
                 "properties": {
                     **_GENERIC_DATETIME_PROPS,
+                    **_DURATION_MINUTES_PROP,
                     "CustomerName": {
                         "type": "string",
                         "description": (
@@ -366,6 +389,7 @@ def _tool_schema_registry():
                 "type": "object",
                 "properties": {
                     **_GENERIC_DATETIME_PROPS,
+                    **_DURATION_MINUTES_PROP,
                     "CustomerName": {
                         "type": "string",
                         "description": (
@@ -1604,6 +1628,13 @@ def publish_native_agent(
 
         # ── Write to DB ──
         _write_config_to_db(tenant_id, location_id, config)
+
+        # RAG Phase 1: text chat (Messenger/IG/widget) now retrieves knowledge from
+        # self-hosted pgvector (knowledge_chunks), populated by the analyze_knowledge /
+        # sync_speako_data ingest hooks — NOT from an OpenAI aggregate chat vector store.
+        # The old build_tenant_chat_vector_store refresh is intentionally removed here.
+        # Voice agents still use their per-location OpenAI vector store (built by
+        # _upload_knowledge_to_vector_store above).
 
         if speako_task_id:
             mark_task_succeeded(

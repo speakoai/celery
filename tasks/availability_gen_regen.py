@@ -128,21 +128,31 @@ def gen_availability(self, tenant_id, location_id, location_tz, affected_date=No
             days_range = 60
             logger.info(f"[FULL] Generating full availability starting from {start_date.date().isoformat()}")
 
-        # Preload services once
+        # Preload services once.
+        # Flexible-duration columns (Phase 2) are loaded additively. For the
+        # service-business (staff) path the staff slots are open windows with no
+        # baked-in duration, so the only change needed is to expose each flexible
+        # service's bounds here; the consumer validates a chosen (start, duration)
+        # against the staff window at request time. Fixed services keep the exact
+        # {id,name,duration} shape.
         services = []
         cur.execute("""
-            SELECT s.service_id, s.name, EXTRACT(EPOCH FROM s.duration)/60
+            SELECT s.service_id, s.name, EXTRACT(EPOCH FROM s.duration)/60,
+                   s.is_flexible_duration, s.min_duration_minutes,
+                   s.max_duration_minutes, s.duration_increment_minutes
             FROM location_services ls
             JOIN services s ON ls.tenant_id = s.tenant_id AND ls.service_id = s.service_id
             WHERE ls.tenant_id = %s AND ls.location_id = %s AND s.is_active = TRUE
             ORDER BY s.service_id
         """, (tenant_id, location_id))
         for row in cur.fetchall():
-            services.append({
-                "id": row[0],
-                "name": row[1],
-                "duration": int(row[2])
-            })
+            svc = {"id": row[0], "name": row[1], "duration": int(row[2])}
+            if row[3] and row[4] is not None and row[5] is not None and row[6] is not None:
+                svc["is_flexible_duration"] = True
+                svc["min_duration_minutes"] = int(row[4])
+                svc["max_duration_minutes"] = int(row[5])
+                svc["duration_increment_minutes"] = int(row[6])
+            services.append(svc)
 
         staff_services, location_services = {}, set()
         # Preload services on first day
@@ -423,20 +433,39 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
             logger.info(f"[FULL] Generating full availability starting from {start_date.date().isoformat()}")
 
         # Preload services
+        # Flexible-duration columns (Phase 2) are loaded additively: a service
+        # only carries is_flexible_duration + min/max/increment when it opted in
+        # AND has complete bounds. Fixed services keep the exact {id,name,duration}
+        # shape, so the cache is byte-identical for non-flexible tenants.
         services = []
         cur.execute("""
-            SELECT s.service_id, s.name, EXTRACT(EPOCH FROM s.duration)/60
+            SELECT s.service_id, s.name, EXTRACT(EPOCH FROM s.duration)/60,
+                   s.is_flexible_duration, s.min_duration_minutes,
+                   s.max_duration_minutes, s.duration_increment_minutes
             FROM location_services ls
             JOIN services s ON ls.tenant_id = s.tenant_id AND ls.service_id = s.service_id
             WHERE ls.tenant_id = %s AND ls.location_id = %s AND s.is_active = TRUE
             ORDER BY s.service_id
         """, (tenant_id, location_id))
         for row in cur.fetchall():
-            services.append({
-                "id": row[0],
-                "name": row[1],
-                "duration": int(row[2])
-            })
+            svc = {"id": row[0], "name": row[1], "duration": int(row[2])}
+            if row[3] and row[4] is not None and row[5] is not None and row[6] is not None:
+                svc["is_flexible_duration"] = True
+                svc["min_duration_minutes"] = int(row[4])
+                svc["max_duration_minutes"] = int(row[5])
+                svc["duration_increment_minutes"] = int(row[6])
+            services.append(svc)
+
+        # Bounds lookups for marking flexible venue units below.
+        service_bounds_by_id = {
+            s["id"]: {
+                "min": s["min_duration_minutes"],
+                "max": s["max_duration_minutes"],
+                "increment": s["duration_increment_minutes"],
+            }
+            for s in services if s.get("is_flexible_duration")
+        }
+        flexible_service_ids = set(service_bounds_by_id.keys())
 
         # Preload service mappings
         venue_unit_services = {}
@@ -572,6 +601,20 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
                         "zone_tag_ids": zone_tag_ids or [],
                         "slots": []
                     })["slots"].append({"start": str(start), "end": str(end), "service_duration": str(service_duration)})
+
+                # Mark flexible venue units (Phase 2): a unit is flexible when any
+                # of its linked services is flexible. Bounds live at the venue
+                # level (they survive reconstruct's deepcopy); annotate_bookable_starts
+                # reads them to compute starts + expose bounds on each slot. Units
+                # with no flexible service are untouched (fixed behavior preserved).
+                for v in venue_dict.values():
+                    flex = next(
+                        (service_bounds_by_id[s] for s in v.get("service", []) if s in flexible_service_ids),
+                        None,
+                    )
+                    if flex:
+                        v["is_flexible"] = True
+                        v["duration_bounds"] = flex
 
                 updated_venue_dict = reconstruct_venue_availability(bookings, venue_dict)
                 # Pre-compute the bookable start times per slot so voice-ai

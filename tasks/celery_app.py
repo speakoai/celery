@@ -61,3 +61,5 @@ import tasks.refresh_annual_minutes
 import tasks.publish_native_agent
 import tasks.retry_audio_upload
 import tasks.provision_sip_location
+import tasks.rebuild_knowledge_chunks
+import tasks.summarize_chat_sessions

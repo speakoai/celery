@@ -10,29 +10,59 @@ DEFAULT_SLOT_INTERVAL_MINUTES = 15
 def annotate_bookable_starts(venue_dict, slot_interval_minutes=DEFAULT_SLOT_INTERVAL_MINUTES):
     """Add bookable_starts (list of "HH:MM") to each slot in a venue_dict.
 
-    A start is bookable when start + service_duration <= slot_end. Walks each
-    slot at slot_interval_minutes ticks. Empty list means the slot exists as a
-    leftover gap but cannot fit a booking — voice-ai consumers can rely on
-    this without re-doing the fitness math.
+    Fixed venues (the default): a start is bookable when
+    start + service_duration <= slot_end, walked at slot_interval_minutes ticks.
+    Empty list means the slot exists as a leftover gap but cannot fit a booking.
+
+    Flexible venues (Phase 2 — venue marked ``is_flexible`` with
+    ``duration_bounds``): the booking length is customer-chosen, so a start is
+    bookable when at least the MINIMUM duration fits
+    (start + min_duration <= slot_end). The slot additionally carries the bounds
+    (``flexible``/``min_duration``/``max_duration``/``increment``) so consumers
+    can validate a chosen ``(start, duration)`` at request time; start ticks stay
+    on the same slot_interval grid as fixed bookings. The
+    ``no_double_booking_venue_unit`` EXCLUDE constraint remains the final
+    backstop.
+
+    Additive: fixed venues produce the exact same output as before — the
+    flexible branch only runs for venues that opted in.
 
     Mutates and returns venue_dict; caller already owns a fresh copy from
     reconstruct_venue_availability so in-place mutation is safe.
     """
     interval = timedelta(minutes=int(slot_interval_minutes or DEFAULT_SLOT_INTERVAL_MINUTES))
     for venue in venue_dict.values():
+        bounds = venue.get('duration_bounds') if venue.get('is_flexible') else None
         for slot in venue.get('slots', []):
             slot_start = datetime.strptime(slot['start'], "%H:%M:%S")
             slot_end = datetime.strptime(slot['end'], "%H:%M:%S")
-            duration_raw = slot.get('service_duration')
-            duration = int(duration_raw) if duration_raw is not None else 0
-            latest = slot_end - timedelta(minutes=duration)
-            starts = []
-            if duration > 0 and latest >= slot_start:
-                t = slot_start
-                while t <= latest:
-                    starts.append(t.strftime("%H:%M"))
-                    t += interval
-            slot['bookable_starts'] = starts
+            if bounds:
+                # Flexible: fit the minimum; expose bounds for request-time validation.
+                min_d = int(bounds['min'])
+                latest = slot_end - timedelta(minutes=min_d)
+                starts = []
+                if min_d > 0 and latest >= slot_start:
+                    t = slot_start
+                    while t <= latest:
+                        starts.append(t.strftime("%H:%M"))
+                        t += interval
+                slot['flexible'] = True
+                slot['min_duration'] = min_d
+                slot['max_duration'] = int(bounds['max'])
+                slot['increment'] = int(bounds['increment'])
+                slot['bookable_starts'] = starts
+            else:
+                # Fixed: unchanged behavior.
+                duration_raw = slot.get('service_duration')
+                duration = int(duration_raw) if duration_raw is not None else 0
+                latest = slot_end - timedelta(minutes=duration)
+                starts = []
+                if duration > 0 and latest >= slot_start:
+                    t = slot_start
+                    while t <= latest:
+                        starts.append(t.strftime("%H:%M"))
+                        t += interval
+                slot['bookable_starts'] = starts
     return venue_dict
 
 
