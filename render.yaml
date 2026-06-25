@@ -338,6 +338,34 @@ projects:
       schedule: 0 3 * * *
       autoDeployTrigger: commit
     - type: cron
+      name: summarize-chat-sessions
+      runtime: python
+      repo: https://github.com/speakoai/celery
+      branch: master
+      plan: starter
+      envVars:
+      - key: PYTHON_VERSION
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: CELERY_BROKER_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_SUMMARY_MODEL
+        sync: false
+      - key: OPENAI_EMBEDDING_MODEL
+        sync: false
+      - key: CHAT_IDLE_TIMEOUT_SECONDS
+        sync: false
+      region: virginia
+      buildCommand: pip install -r requirements.txt
+      startCommand: PYTHONPATH=. python dispatch/summarize_chat_sessions_dispatch.py
+      schedule: '*/30 * * * *'
+      autoDeployTrigger: commit
+    - type: cron
       name: replenish-twilio-numbers
       runtime: python
       repo: https://github.com/speakoai/celery
