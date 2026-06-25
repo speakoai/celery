@@ -22,6 +22,7 @@ from celery.utils.log import get_task_logger
 from tasks.celery_app import app
 from .utils.task_db import mark_task_running, mark_task_succeeded, mark_task_failed
 from .utils.publish_db import (
+    build_flexible_activity_prompt_line,
     collect_full_agent_params,
     collect_tool_params,
     get_business_name,
@@ -1233,6 +1234,13 @@ def _compose_native_agent_config(
     # this constant is updated and re-publishes are not skipped by the
     # idempotency check.
     system_prompt = system_prompt + _BOOKING_RULES_SUPPLEMENT
+
+    # Option B — append the auto-derived per-location flexible-duration line for a
+    # flexible `rest` location (None otherwise). Added here, before `instructions`
+    # and hash_inputs, so it flows into source_hash and a config change re-publishes.
+    _flex_line = build_flexible_activity_prompt_line(tenant_id, location_id)
+    if _flex_line:
+        system_prompt = system_prompt + _flex_line
 
     # ── 4. Extract voice/speed/temperature/azure-specific settings ──
     voice = _extract_voice_id(voice_dict_params, provider=provider)
