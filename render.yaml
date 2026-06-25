@@ -352,14 +352,6 @@ projects:
         sync: false
       - key: CELERY_BROKER_URL
         sync: false
-      - key: OPENAI_API_KEY
-        sync: false
-      - key: OPENAI_SUMMARY_MODEL
-        sync: false
-      - key: OPENAI_EMBEDDING_MODEL
-        sync: false
-      - key: CHAT_IDLE_TIMEOUT_SECONDS
-        sync: false
       region: virginia
       buildCommand: pip install -r requirements.txt
       startCommand: PYTHONPATH=. python dispatch/summarize_chat_sessions_dispatch.py
