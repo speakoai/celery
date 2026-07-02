@@ -2018,6 +2018,70 @@ def compose_prompts_by_sort_order(tenant_id: str, location_id: str) -> str:
             pass
 
 
+def build_flexible_activity_prompt_line(tenant_id, location_id) -> Optional[str]:
+    """Auto-derived per-location flexible-duration instruction for a flexible
+    `rest` location (Option B), or None.
+
+    Returns None — leaving every other prompt byte-identical — unless the
+    location is a `rest` location with ``flexible_booking_enabled`` AND valid
+    location-level bounds (``min<=max``, ``increment>0``, both divisible by the
+    increment). The text is derived from the config (label + bounds) so it can
+    never drift from the real allowed range. An optional human addendum stored
+    in ``location_info.ai_prompt`` is layered AFTER the generated baseline
+    (``ai_prompt`` is not otherwise composed into the prompt today).
+
+    Pure DB read; no external calls. Callers append the returned string to the
+    composed system prompt BEFORE building source-hash/idempotency inputs, so a
+    config change re-publishes rather than being skipped.
+    """
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT l.location_type, l.flexible_booking_enabled,
+                           l.flexible_activity_label, l.flexible_min_duration_minutes,
+                           l.flexible_max_duration_minutes, l.flexible_duration_increment_minutes,
+                           li.ai_prompt
+                    FROM locations l
+                    LEFT JOIN location_info li
+                      ON li.tenant_id = l.tenant_id AND li.location_id = l.location_id
+                    WHERE l.tenant_id = %s AND l.location_id = %s
+                    """,
+                    (tenant_id, location_id),
+                )
+                row = cur.fetchone()
+    finally:
+        conn.close()
+
+    if not row:
+        return None
+    location_type, enabled, label, mn, mx, inc, override = row
+    if location_type != "rest" or not enabled:
+        return None
+    if (mn is None or mx is None or inc is None or inc <= 0
+            or mn > mx or mn % inc != 0 or mx % inc != 0):
+        logger.warning(
+            "[FlexiblePrompt] flexible_booking_enabled true for tenant_id=%s "
+            "location_id=%s but bounds invalid (min=%s max=%s inc=%s); no line added.",
+            tenant_id, location_id, mn, mx, inc,
+        )
+        return None
+
+    activity = (label or "").strip() or "this activity"
+    line = (
+        "\n\n# Booking — flexible duration\n"
+        f"At this location you take bookings for {activity}. The customer chooses "
+        f"how long to book, from {int(mn)} to {int(mx)} minutes in {int(inc)}-minute "
+        "steps. On booking, ask how long they'd like, then pass it as duration_minutes."
+    )
+    addendum = (override or "").strip()
+    if addendum:
+        line = line + "\n" + addendum
+    return line
+
+
 def compose_and_publish_system_prompt(tenant_id: str, location_id: str) -> Dict[str, Any]:
     """
     Compose all prompts and publish to ElevenLabs as system prompt.
@@ -2083,6 +2147,15 @@ def compose_and_publish_system_prompt(tenant_id: str, location_id: str) -> Dict[
             'system_prompt_id': None
         }
     
+    # Option B — append the auto-derived per-location flexible-duration line for a
+    # flexible `rest` location (None otherwise, so all other agents are unchanged).
+    # Added to composed_text BEFORE it is sent to ElevenLabs and saved to
+    # tenant_ai_prompts, so the published prompt + stored record both carry it.
+    _flex_line = build_flexible_activity_prompt_line(tenant_id, location_id)
+    if _flex_line:
+        composed_text = composed_text + _flex_line
+        logger.info(f"[SystemPrompt] Appended flexible-duration line ({len(_flex_line)} chars)")
+
     prompt_count = composed_text.count('\n\n') + 1  # Approximate count
     character_count = len(composed_text)
     

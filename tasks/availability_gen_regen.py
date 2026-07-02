@@ -26,6 +26,26 @@ print(f"[DEBUG] REDIS_URL: {os.getenv('REDIS_URL')}")
 load_dotenv()
 logger = get_task_logger(__name__)
 
+
+def resolve_location_flex_bounds(enabled, min_minutes, max_minutes, increment_minutes):
+    """Option B: validate a restaurant's location-level flexible-duration config
+    and return ``{"min","max","increment"}`` (ints) or ``None``.
+
+    Returns None unless ``enabled`` is truthy AND all three bounds are present,
+    ``increment > 0``, ``min <= max`` and both bounds are divisible by the
+    increment. Pure/no-IO so the gen path's flexible decision is unit-testable.
+    """
+    if not enabled:
+        return None
+    if min_minutes is None or max_minutes is None or increment_minutes is None:
+        return None
+    if (increment_minutes <= 0 or min_minutes > max_minutes
+            or min_minutes % increment_minutes != 0
+            or max_minutes % increment_minutes != 0):
+        return None
+    return {"min": int(min_minutes), "max": int(max_minutes), "increment": int(increment_minutes)}
+
+
 def resolve_tag_names(zone_tag_ids, venue_tags_lookup):
     """Convert zone_tag_ids array to comma-separated tag names"""
     if not zone_tag_ids:
@@ -467,6 +487,35 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
         }
         flexible_service_ids = set(service_bounds_by_id.keys())
 
+        # Option B — restaurant venue-wide flexible duration. A `rest` location can
+        # be flexible as a whole via locations.flexible_booking_enabled + four
+        # location-level bound columns (one activity per location, v1). When the
+        # flag is on AND the bounds are valid, EVERY venue unit is marked flexible
+        # with these bounds (takes precedence over the per-service-link logic). This
+        # is the only function that serves rest venues, so no location_type gate is
+        # needed. Dark-by-default: disabled, or enabled-with-invalid-bounds, leaves
+        # location_flex_bounds = None and the legacy per-link path runs unchanged.
+        cur.execute(
+            """
+            SELECT flexible_booking_enabled, flexible_min_duration_minutes,
+                   flexible_max_duration_minutes, flexible_duration_increment_minutes
+            FROM locations WHERE tenant_id = %s AND location_id = %s
+            """,
+            (tenant_id, location_id),
+        )
+        _loc_flex_row = cur.fetchone()
+        location_flex_bounds = None
+        if _loc_flex_row and _loc_flex_row[0]:
+            _mn, _mx, _inc = _loc_flex_row[1], _loc_flex_row[2], _loc_flex_row[3]
+            location_flex_bounds = resolve_location_flex_bounds(True, _mn, _mx, _inc)
+            if location_flex_bounds is None:
+                logger.warning(
+                    "[gen_availability_venue] flexible_booking_enabled is true for "
+                    "tenant_id=%s location_id=%s but location-level bounds are invalid "
+                    "(min=%s max=%s increment=%s); treating venue as fixed.",
+                    tenant_id, location_id, _mn, _mx, _inc,
+                )
+
         # Preload service mappings
         venue_unit_services = {}
         location_services = set()
@@ -608,6 +657,11 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
                 # reads them to compute starts + expose bounds on each slot. Units
                 # with no flexible service are untouched (fixed behavior preserved).
                 for v in venue_dict.values():
+                    if location_flex_bounds is not None:
+                        # Venue-wide flexible (Option B): every unit, location bounds.
+                        v["is_flexible"] = True
+                        v["duration_bounds"] = location_flex_bounds
+                        continue
                     flex = next(
                         (service_bounds_by_id[s] for s in v.get("service", []) if s in flexible_service_ids),
                         None,
