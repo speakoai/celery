@@ -63,8 +63,19 @@ def send_sms_confirmation_new(booking_id: int):
         conn = psycopg2.connect(os.getenv("DATABASE_URL"))
         cur = conn.cursor()
 
+        # Booking Guarantee (Phase 3): pending bookings get a "secure your
+        # reservation" SMS with a payment link instead of a confirmation.
+        cur.execute(
+            "SELECT status, guarantee_amount, location_id FROM bookings WHERE booking_id = %s",
+            (booking_id,),
+        )
+        _grow = cur.fetchone()
+        _bk_status = _grow[0] if _grow else None
+        _guarantee_amount = _grow[1] if _grow else None
+        _guarantee_location_id = _grow[2] if _grow else None
+
         cur.execute("""
-            SELECT 
+            SELECT
                 b.tenant_id,
                 b.customer_name,
                 b.start_time,
@@ -133,6 +144,45 @@ def send_sms_confirmation_new(booking_id: int):
                 manage_booking_url = f"{os.getenv('BOOKING_LINK_BASE_URL', 'https://speako.ai')}/customer/booking/{booking_page_alias.strip()}/view"
         
         clean_ref = booking_ref[3:] if booking_ref.startswith("REF") else booking_ref
+
+        # Booking Guarantee (Phase 3): a pending booking gets a "secure your
+        # reservation" SMS with a payment link, not a confirmation. The real
+        # Stripe SetupIntent link is Phase 5; this references a placeholder URL.
+        if _bk_status == "pending_guarantee":
+            payment_link = f"{os.getenv('BOOKING_LINK_BASE_URL', 'https://speako.ai')}/guarantee/{clean_ref}"
+            hold_minutes = 30
+            try:
+                cur.execute(
+                    """
+                    SELECT (value_json->'properties'->>'guarantee_hold_minutes')
+                    FROM tenant_integration_params
+                    WHERE tenant_id = %s AND location_id = %s
+                      AND param_code = %s AND service = 'tool' AND provider = 'speako'
+                    LIMIT 1
+                    """,
+                    (tenant_id, _guarantee_location_id, f"booking_manager_{location_type}"),
+                )
+                _hr = cur.fetchone()
+                if _hr and _hr[0]:
+                    hold_minutes = int(_hr[0])
+            except Exception:
+                pass
+            amount_str = f" of {_guarantee_amount}" if _guarantee_amount is not None else ""
+            pending_message = (
+                f"Hi {customer_name}, your booking (Ref: {clean_ref}) at {location_name} on "
+                f"{start_time.strftime('%Y-%m-%d %H:%M')} is pending. Secure your reservation by adding a "
+                f"payment card{amount_str} here: {payment_link} Your card will not be charged unless you "
+                f"fail to arrive. Complete within {hold_minutes} minutes or the booking will be cancelled. "
+                f"[Speako AI]"
+            )
+            client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
+            client.messages.create(
+                body=pending_message,
+                from_=os.getenv("TWILIO_SEND_SMS_NUMBER"),
+                to=customer_phone,
+            )
+            print(f"[SMS] Sent pending-guarantee SMS to {customer_phone}: {pending_message}")
+            return
 
         if location_type == "rest":
             message = (
