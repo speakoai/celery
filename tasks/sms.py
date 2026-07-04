@@ -145,11 +145,13 @@ def send_sms_confirmation_new(booking_id: int):
         
         clean_ref = booking_ref[3:] if booking_ref.startswith("REF") else booking_ref
 
-        # Booking Guarantee (Phase 3): a pending booking gets a "secure your
-        # reservation" SMS with a payment link, not a confirmation. The real
-        # Stripe SetupIntent link is Phase 5; this references a placeholder URL.
+        # Booking Guarantee: a pending booking gets a "secure your reservation"
+        # SMS with a payment link (Phase 5 public card-save page at
+        # /guarantee/<token>, using the booking's view access token). Falls back
+        # to the booking ref if no token was issued.
         if _bk_status == "pending_guarantee":
-            payment_link = f"{os.getenv('BOOKING_LINK_BASE_URL', 'https://speako.ai')}/guarantee/{clean_ref}"
+            _guarantee_token = booking_access_token if booking_access_token and booking_access_token.strip() else clean_ref
+            payment_link = f"{os.getenv('BOOKING_LINK_BASE_URL', 'https://speako.ai')}/guarantee/{_guarantee_token}"
             hold_minutes = 30
             try:
                 cur.execute(
@@ -220,6 +222,53 @@ def send_sms_confirmation_new(booking_id: int):
         if 'cur' in locals():
             cur.close()
         if 'conn' in locals():
+            conn.close()
+
+
+@app.task
+def send_sms_guarantee_cancelled(booking_id: int):
+    """Notify a customer that their pending booking was auto-cancelled because the
+    booking guarantee was not secured within the hold window (Phase 5). Enqueued
+    by dispatch/cancel_unpaid_guarantees_dispatch.py."""
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT b.customer_name, b.booking_ref, b.start_time, b.customer_phone, l.name
+            FROM bookings b
+            JOIN locations l
+              ON b.tenant_id = l.tenant_id AND b.location_id = l.location_id
+            WHERE b.booking_id = %s
+        """, (booking_id,))
+        row = cur.fetchone()
+        if not row:
+            print(f"[SMS] Booking {booking_id} not found (guarantee cancel).")
+            return
+
+        customer_name, booking_ref, start_time, customer_phone, location_name = row
+        clean_ref = booking_ref[3:] if booking_ref and booking_ref.startswith("REF") else booking_ref
+        message = (
+            f"Hi {customer_name}, your booking (Ref: {clean_ref}) at {location_name} on "
+            f"{start_time.strftime('%Y-%m-%d %H:%M')} has been cancelled because the booking "
+            f"guarantee was not secured in time. You're welcome to book again anytime. [Speako AI]"
+        )
+
+        client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
+        client.messages.create(
+            body=message,
+            from_=os.getenv("TWILIO_SEND_SMS_NUMBER"),
+            to=customer_phone,
+        )
+        print(f"[SMS] Sent guarantee-cancelled SMS to {customer_phone}: {message}")
+
+    except Exception as e:
+        print(f"[SMS] Error (guarantee cancel): {e}")
+    finally:
+        if cur is not None:
+            cur.close()
+        if conn is not None:
             conn.close()
 
 
