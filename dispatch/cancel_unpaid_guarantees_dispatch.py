@@ -35,6 +35,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from tasks.celery_app import app
+
 
 CANCEL_UNPAID_GUARANTEES_SQL = """
     UPDATE bookings b
@@ -93,6 +95,11 @@ def cancel_unpaid_guarantees():
                 f"  - booking_id={booking_id} ref={booking_ref} "
                 f"tenant={tenant_id} location={location_id}"
             )
+            # Notify the customer their booking was cancelled (unpaid guarantee).
+            try:
+                app.send_task("tasks.sms.send_sms_guarantee_cancelled", args=[booking_id])
+            except Exception as e:
+                print(f"    [WARN] Failed to enqueue cancellation SMS for {booking_id}: {e}")
     except Exception as e:
         if conn is not None:
             conn.rollback()
