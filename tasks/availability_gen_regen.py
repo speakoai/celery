@@ -244,7 +244,7 @@ def gen_availability(self, tenant_id, location_id, location_tz, affected_date=No
                     FROM bookings
                     WHERE tenant_id = %s AND location_id = %s
                     AND start_time >= %s AND start_time < %s::date + INTERVAL '1 day'
-                    AND status = 'confirmed'
+                    AND status IN ('confirmed', 'pending_guarantee')
                 """, (tenant_id, location_id, current_date_str, current_date_str))
                 booking_rows = cur.fetchall()
                 bookings = [{"staff_id": r[0], "customer_id": r[1], "start_time": r[2].strftime("%Y-%m-%d %H:%M:%S"), "end_time": r[3].strftime("%Y-%m-%d %H:%M:%S")} for r in booking_rows]
@@ -609,7 +609,7 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
                     FROM bookings
                     WHERE tenant_id = %s AND location_id = %s
                     AND start_time >= %s AND start_time < %s::date + INTERVAL '1 day'
-                    AND status = 'confirmed'
+                    AND status IN ('confirmed', 'pending_guarantee')
                 """, (tenant_id, location_id, current_date_str, current_date_str))
                 booking_rows = cur.fetchall()
                 bookings = [{"venue_unit_id": r[0], "customer_id": r[1], "start_time": r[2].strftime("%Y-%m-%d %H:%M:%S"), "end_time": r[3].strftime("%Y-%m-%d %H:%M:%S")} for r in booking_rows]
