@@ -313,7 +313,18 @@ def _build_business_info_markdown(json_data: dict) -> str:
             if exceptions:
                 sections.append("\n\n**Special Hours & Closures:**\n")
                 sections.append(_format_exceptions_markdown(exceptions))
-    
+
+    # Phase 2: multi-location branch pointer. For tenants with >1 active location,
+    # append ONE line naming the other branches. Single-location tenants (empty
+    # list) get nothing. Sibling details are served on demand by find_other_locations.
+    other_branches = [b for b in data.get('other_branches', []) if b]
+    if other_branches:
+        branch_list = ", ".join(other_branches)
+        sections.append(
+            f"\n## Other Branches\n\nWe also have branches in {branch_list} — "
+            f"I can transfer you or provide their contact details."
+        )
+
     return "\n".join(sections)
 
 
@@ -446,12 +457,28 @@ def _query_business_info(tenant_id: str, location_id: str) -> dict:
                 'recurring_hours': recurring_for_loc,
                 'onetime_hours': onetime_for_loc
             })
-        
+
+        # Phase 2: multi-location branch pointer. Fetch the names of the tenant's
+        # OTHER active locations (excluding this agent's own). Used to append a
+        # single "we also have branches in X, Y" line to the markdown for
+        # multi-location tenants. Single-location tenants get an empty list.
+        query_other_branches = """
+            SELECT name
+            FROM locations
+            WHERE tenant_id = %s
+              AND is_active = true
+              AND location_id <> %s
+            ORDER BY location_id
+        """
+        cursor.execute(query_other_branches, (tenant_id, location_id))
+        other_branch_names = [row['name'] for row in cursor.fetchall() if row.get('name')]
+
         return {
             'business_data': dict(business_data),
-            'locations': locations_data
+            'locations': locations_data,
+            'other_branch_names': other_branch_names
         }
-        
+
     finally:
         cursor.close()
         conn.close()
@@ -522,7 +549,10 @@ def _format_business_info(raw_data: dict) -> tuple[dict, str]:
                 "logo_url": '',  # Not in schema yet
                 "primary_color": business_data.get('primary_color') or ''
             },
-            "locations": locations_formatted
+            "locations": locations_formatted,
+            # Phase 2: names of the tenant's OTHER active branches (empty for
+            # single-location tenants). Drives the one-line branch pointer.
+            "other_branches": raw_data.get('other_branch_names', [])
         }
     }
     
@@ -2061,53 +2091,20 @@ def sync_speako_data(self, *,
                 logger.warning(f"⚠️ [sync_speako_data] Failed to generate AI description: {desc_e}")
         
         elif knowledge_type == 'locations':
-            logger.info(f"📍 [sync_speako_data] Syncing locations for tenant={tenant_id}, location={location_id}")
-            
-            # Query database
-            try:
-                raw_data = _query_locations(tenant_id, location_id)
-                num_locations = len(raw_data.get('locations', []))
-                num_services = len(raw_data.get('services_names', {}))
-                logger.info(f"✅ [sync_speako_data] Retrieved location data: {num_locations} locations, {num_services} services available")
-            except Exception as query_e:
-                logger.error(f"❌ [sync_speako_data] Database query failed: {query_e}")
-                raise
-            
-            # Format into JSON + Markdown (location-centric)
-            try:
-                json_output, markdown_output = _format_locations(raw_data, int(location_id))
-                
-                # Count services per location
-                primary_loc = json_output['data'].get('primary_location', {})
-                primary_name = primary_loc.get('name', 'Primary Location')
-                primary_services_count = len(primary_loc.get('services_available', []))
-                other_locs = json_output['data'].get('other_locations', [])
-                other_loc_count = len(other_locs)
-                
-                logger.info(f"✅ [sync_speako_data] Formatted locations: primary_location='{primary_name}' has {primary_services_count} services, {other_loc_count} other locations, {len(json.dumps(json_output))} bytes JSON, {len(markdown_output)} bytes Markdown")
-            except Exception as format_e:
-                logger.error(f"❌ [sync_speako_data] Data formatting failed: {format_e}")
-                raise
-            
-            # Generate AI description
-            try:
-                primary_loc = json_output['data'].get('primary_location', {})
-                primary_name = primary_loc.get('name', 'Primary Location')
-                primary_services_count = len(primary_loc.get('services_available', []))
-                other_locs = json_output['data'].get('other_locations', [])
-                num_other_locs = len(other_locs)
-                
-                service_plural = 'service' if primary_services_count == 1 else 'services'
-                if num_other_locs > 0:
-                    loc_plural = 'location' if num_other_locs == 1 else 'locations'
-                    ai_description = f"Location details for {primary_name} ({primary_services_count} {service_plural}) and {num_other_locs} other {loc_plural}"
-                else:
-                    ai_description = f"Location details for {primary_name} with {primary_services_count} {service_plural}"
-                
-                logger.info(f"📝 [sync_speako_data] Generated AI description: {ai_description}")
-            except Exception as desc_e:
-                logger.warning(f"⚠️ [sync_speako_data] Failed to generate AI description: {desc_e}")
-        
+            # DEPRECATED (Phase 2, knowledge-architecture rework): the standalone
+            # `locations` knowledge doc is no longer generated. The current
+            # location's details live in the scoped `business_info` doc (Phase 1),
+            # and a one-line multi-location branch pointer is appended there
+            # (Change 3). Sibling-branch details are served on demand by the
+            # `find_other_locations` tool (Phase 3). This branch is intentionally a
+            # NO-OP: json_output/markdown_output stay None so nothing is written.
+            # `_query_locations`/`_format_locations` are retained for record only.
+            logger.info(
+                f"⏭️ [sync_speako_data] locations knowledge is DEPRECATED (Phase 2) — "
+                f"no-op for tenant={tenant_id}, location={location_id}; not generated/saved."
+            )
+            # json_output / markdown_output remain None → save + RAG blocks skip.
+
         elif knowledge_type in ['staff']:
             logger.info(f"📋 [sync_speako_data] Querying staff data for tenant_id={tenant_id}")
             staff_data = _query_staff(tenant_id, location_id)
