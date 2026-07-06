@@ -319,14 +319,19 @@ def _build_business_info_markdown(json_data: dict) -> str:
 
 def _query_business_info(tenant_id: str, location_id: str) -> dict:
     """
-    Query business info from database including ALL locations' hours for the tenant.
-    
-    Note: location_id parameter represents dashboard context but we query ALL locations.
-    
+    Query business info from database scoped to the AGENT'S OWN location only.
+
+    Phase 1 (knowledge-architecture rework): business_info is scoped to the single
+    location_id assigned to this agent — its hours/address only, NOT every location
+    of the tenant. Special (one-time) hours are future-only and capped at a 90-day
+    horizon to keep the prompt lean and non-stale. Business identity (tagline,
+    description, contact, social) is tenant-level and unchanged.
+
     Returns:
         dict with keys:
         - 'business_data': dict from tenants + tenant_info
         - 'locations': list of dicts with location_id, name, recurring_hours, onetime_hours
+          (contains at most the single current location)
     """
     conn = _get_db_connection()
     cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -357,41 +362,45 @@ def _query_business_info(tenant_id: str, location_id: str) -> dict:
         if not business_data:
             raise ValueError(f"No tenant found with tenant_id={tenant_id}")
         
-        # Query 2: Get ALL locations for this tenant
+        # Query 2: Get THIS agent's location only (Phase 1: scoped, not all tenant locations)
         query_locations = """
             SELECT location_id, name
             FROM locations
             WHERE tenant_id = %s
+              AND location_id = %s
             ORDER BY location_id
         """
-        cursor.execute(query_locations, (tenant_id,))
+        cursor.execute(query_locations, (tenant_id, location_id))
         locations_list = cursor.fetchall()
-        
+
         if not locations_list:
-            logger.warning(f"No locations found for tenant_id={tenant_id}")
+            logger.warning(f"No location found for tenant_id={tenant_id}, location_id={location_id}")
             locations_list = []
-        
-        # Query 3: Get recurring hours for ALL locations
+
+        # Query 3: Get recurring hours for THIS location only
         query_recurring = """
-            SELECT 
+            SELECT
                 location_id,
                 day_of_week,
                 start_time,
                 end_time,
                 slot_name
             FROM location_availability
-            WHERE tenant_id = %s 
+            WHERE tenant_id = %s
+              AND location_id = %s
               AND type = 'recurring'
               AND is_active = true
               AND is_closed = false
             ORDER BY location_id, day_of_week, start_time
         """
-        cursor.execute(query_recurring, (tenant_id,))
+        cursor.execute(query_recurring, (tenant_id, location_id))
         all_recurring_hours = cursor.fetchall()
-        
-        # Query 4: Get one-time availability for ALL locations with public holiday info
+
+        # Query 4: Get one-time availability for THIS location only, with public holiday info.
+        # Future-only (>= CURRENT_DATE) AND capped at a 90-day horizon (Phase 1: prune stale
+        # + far-future special-hours so they don't bloat / stale the prompt).
         query_onetime = """
-            SELECT 
+            SELECT
                 la.location_id,
                 la.specific_date,
                 la.start_time,
@@ -402,13 +411,15 @@ def _query_business_info(tenant_id: str, location_id: str) -> dict:
                 ph.name as holiday_name
             FROM location_availability la
             LEFT JOIN public_holidays ph ON la.holiday_id = ph.holiday_id
-            WHERE la.tenant_id = %s 
+            WHERE la.tenant_id = %s
+              AND la.location_id = %s
               AND la.type = 'one_time'
               AND la.is_active = true
               AND la.specific_date >= CURRENT_DATE
+              AND la.specific_date <= CURRENT_DATE + INTERVAL '90 days'
             ORDER BY la.location_id, la.specific_date, la.start_time
         """
-        cursor.execute(query_onetime, (tenant_id,))
+        cursor.execute(query_onetime, (tenant_id, location_id))
         all_onetime_hours = cursor.fetchall()
         
         # Group hours by location_id
