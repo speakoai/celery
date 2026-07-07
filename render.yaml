@@ -585,3 +585,21 @@ projects:
       startCommand: PYTHONPATH=. python dispatch/refresh_annual_minutes_dispatch.py
       schedule: 15 0 * * *
       autoDeployTrigger: commit
+    - type: cron
+      name: cancel-unpaid-guarantees
+      runtime: python
+      repo: https://github.com/speakoai/celery
+      branch: master
+      plan: starter
+      envVars:
+      - key: PYTHON_VERSION
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: CELERY_BROKER_URL
+        sync: false
+      region: virginia
+      buildCommand: pip install -r requirements.txt
+      startCommand: PYTHONPATH=. python dispatch/cancel_unpaid_guarantees_dispatch.py
+      schedule: '*/5 * * * *'
+      autoDeployTrigger: commit
