@@ -313,20 +313,36 @@ def _build_business_info_markdown(json_data: dict) -> str:
             if exceptions:
                 sections.append("\n\n**Special Hours & Closures:**\n")
                 sections.append(_format_exceptions_markdown(exceptions))
-    
+
+    # Phase 2: multi-location branch pointer. For tenants with >1 active location,
+    # append ONE line naming the other branches. Single-location tenants (empty
+    # list) get nothing. Sibling details are served on demand by find_other_locations.
+    other_branches = [b for b in data.get('other_branches', []) if b]
+    if other_branches:
+        branch_list = ", ".join(other_branches)
+        sections.append(
+            f"\n## Other Branches\n\nWe also have branches in {branch_list} — "
+            f"I can transfer you or provide their contact details."
+        )
+
     return "\n".join(sections)
 
 
 def _query_business_info(tenant_id: str, location_id: str) -> dict:
     """
-    Query business info from database including ALL locations' hours for the tenant.
-    
-    Note: location_id parameter represents dashboard context but we query ALL locations.
-    
+    Query business info from database scoped to the AGENT'S OWN location only.
+
+    Phase 1 (knowledge-architecture rework): business_info is scoped to the single
+    location_id assigned to this agent — its hours/address only, NOT every location
+    of the tenant. Special (one-time) hours are future-only and capped at a 90-day
+    horizon to keep the prompt lean and non-stale. Business identity (tagline,
+    description, contact, social) is tenant-level and unchanged.
+
     Returns:
         dict with keys:
         - 'business_data': dict from tenants + tenant_info
         - 'locations': list of dicts with location_id, name, recurring_hours, onetime_hours
+          (contains at most the single current location)
     """
     conn = _get_db_connection()
     cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -357,41 +373,45 @@ def _query_business_info(tenant_id: str, location_id: str) -> dict:
         if not business_data:
             raise ValueError(f"No tenant found with tenant_id={tenant_id}")
         
-        # Query 2: Get ALL locations for this tenant
+        # Query 2: Get THIS agent's location only (Phase 1: scoped, not all tenant locations)
         query_locations = """
             SELECT location_id, name
             FROM locations
             WHERE tenant_id = %s
+              AND location_id = %s
             ORDER BY location_id
         """
-        cursor.execute(query_locations, (tenant_id,))
+        cursor.execute(query_locations, (tenant_id, location_id))
         locations_list = cursor.fetchall()
-        
+
         if not locations_list:
-            logger.warning(f"No locations found for tenant_id={tenant_id}")
+            logger.warning(f"No location found for tenant_id={tenant_id}, location_id={location_id}")
             locations_list = []
-        
-        # Query 3: Get recurring hours for ALL locations
+
+        # Query 3: Get recurring hours for THIS location only
         query_recurring = """
-            SELECT 
+            SELECT
                 location_id,
                 day_of_week,
                 start_time,
                 end_time,
                 slot_name
             FROM location_availability
-            WHERE tenant_id = %s 
+            WHERE tenant_id = %s
+              AND location_id = %s
               AND type = 'recurring'
               AND is_active = true
               AND is_closed = false
             ORDER BY location_id, day_of_week, start_time
         """
-        cursor.execute(query_recurring, (tenant_id,))
+        cursor.execute(query_recurring, (tenant_id, location_id))
         all_recurring_hours = cursor.fetchall()
-        
-        # Query 4: Get one-time availability for ALL locations with public holiday info
+
+        # Query 4: Get one-time availability for THIS location only, with public holiday info.
+        # Future-only (>= CURRENT_DATE) AND capped at a 90-day horizon (Phase 1: prune stale
+        # + far-future special-hours so they don't bloat / stale the prompt).
         query_onetime = """
-            SELECT 
+            SELECT
                 la.location_id,
                 la.specific_date,
                 la.start_time,
@@ -402,13 +422,15 @@ def _query_business_info(tenant_id: str, location_id: str) -> dict:
                 ph.name as holiday_name
             FROM location_availability la
             LEFT JOIN public_holidays ph ON la.holiday_id = ph.holiday_id
-            WHERE la.tenant_id = %s 
+            WHERE la.tenant_id = %s
+              AND la.location_id = %s
               AND la.type = 'one_time'
               AND la.is_active = true
               AND la.specific_date >= CURRENT_DATE
+              AND la.specific_date <= CURRENT_DATE + INTERVAL '90 days'
             ORDER BY la.location_id, la.specific_date, la.start_time
         """
-        cursor.execute(query_onetime, (tenant_id,))
+        cursor.execute(query_onetime, (tenant_id, location_id))
         all_onetime_hours = cursor.fetchall()
         
         # Group hours by location_id
@@ -435,12 +457,28 @@ def _query_business_info(tenant_id: str, location_id: str) -> dict:
                 'recurring_hours': recurring_for_loc,
                 'onetime_hours': onetime_for_loc
             })
-        
+
+        # Phase 2: multi-location branch pointer. Fetch the names of the tenant's
+        # OTHER active locations (excluding this agent's own). Used to append a
+        # single "we also have branches in X, Y" line to the markdown for
+        # multi-location tenants. Single-location tenants get an empty list.
+        query_other_branches = """
+            SELECT name
+            FROM locations
+            WHERE tenant_id = %s
+              AND is_active = true
+              AND location_id <> %s
+            ORDER BY location_id
+        """
+        cursor.execute(query_other_branches, (tenant_id, location_id))
+        other_branch_names = [row['name'] for row in cursor.fetchall() if row.get('name')]
+
         return {
             'business_data': dict(business_data),
-            'locations': locations_data
+            'locations': locations_data,
+            'other_branch_names': other_branch_names
         }
-        
+
     finally:
         cursor.close()
         conn.close()
@@ -511,7 +549,10 @@ def _format_business_info(raw_data: dict) -> tuple[dict, str]:
                 "logo_url": '',  # Not in schema yet
                 "primary_color": business_data.get('primary_color') or ''
             },
-            "locations": locations_formatted
+            "locations": locations_formatted,
+            # Phase 2: names of the tenant's OTHER active branches (empty for
+            # single-location tenants). Drives the one-line branch pointer.
+            "other_branches": raw_data.get('other_branch_names', [])
         }
     }
     
@@ -527,18 +568,25 @@ def _format_business_info(raw_data: dict) -> tuple[dict, str]:
 
 def _query_service_menu(tenant_id: str, location_id: str) -> dict:
     """
-    Fetch service categories, services, locations, and service-modifier links for tenant.
-    
+    Fetch service categories, services, and service-modifier links for the tenant,
+    scoped to the AGENT'S OWN location.
+
+    Phase 5 (knowledge-architecture rework): service_menu is scoped to the single
+    location_id — only this location's location_services are fetched, so the output
+    contains only this location's services (no sibling-location enumeration).
+    Category tags, services, and modifiers remain tenant-level lookups (no location
+    dimension); they are filtered downstream to this location's service_ids.
+
     Args:
         tenant_id: The tenant identifier
-        location_id: Primary location identifier (for location-centric output)
-    
+        location_id: The agent's location — the ONLY location included in the output
+
     Returns:
         dict with:
         - categories: List[dict] - Category tags from location_tag (category_id=4)
-        - locations: List[dict] - All locations for tenant
-        - services: List[dict] - All active services
-        - location_services: Dict[int, List[int]] - location_id → [service_ids]
+        - locations: List[dict] - just this location
+        - services: List[dict] - All active services (filtered downstream by location)
+        - location_services: Dict[int, List[int]] - this location → [service_ids]
         - service_modifiers: Dict[int, List[dict]] - service_id → list of modifiers
     """
     conn = _get_db_connection()
@@ -556,21 +604,23 @@ def _query_service_menu(tenant_id: str, location_id: str) -> dict:
         """, (tenant_id,))
         categories = cursor.fetchall()
         
-        # Query 2: Fetch all locations for tenant
+        # Query 2: Fetch THIS location only (Phase 5: scoped, not all tenant locations)
         cursor.execute("""
             SELECT location_id, name
             FROM locations
             WHERE tenant_id = %s
+              AND location_id = %s
             ORDER BY name
-        """, (tenant_id,))
+        """, (tenant_id, location_id))
         locations = cursor.fetchall()
-        
-        # Query 3: Fetch location-service relationships
+
+        # Query 3: Fetch location-service relationships for THIS location only
         cursor.execute("""
             SELECT location_id, service_id
             FROM location_services
             WHERE tenant_id = %s
-        """, (tenant_id,))
+              AND location_id = %s
+        """, (tenant_id, location_id))
         location_service_links = cursor.fetchall()
         
         # Build location_services map: location_id → [service_ids]
@@ -1421,12 +1471,19 @@ def _format_locations(raw_data: dict, primary_location_id: int) -> tuple[dict, s
 
 def _query_staff(tenant_id: str, location_id: str) -> dict:
     """
-    Fetch staff members, their titles, services, and availability for tenant.
-    
+    Fetch staff members, their titles, services, and availability, scoped to the
+    AGENT'S OWN location.
+
+    Phase 5 (knowledge-architecture rework): scoped to the single location_id —
+    only staff BASED at this location (default_location_id) and their availability
+    AT this location are fetched, so the output contains only this location's team
+    (no sibling-location enumeration). Title tags, services, and staff-service links
+    remain tenant-level lookups (no location dimension).
+
     Args:
         tenant_id: The tenant identifier
-        location_id: Location identifier (for location context)
-    
+        location_id: The agent's location — the ONLY location included in the output
+
     Returns:
         dict with:
         - staff_list: List of staff records
@@ -1441,14 +1498,16 @@ def _query_staff(tenant_id: str, location_id: str) -> dict:
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
     try:
-        # Query 1: Get all active staff for tenant
+        # Query 1: Get active staff BASED AT this location (Phase 5: scoped by
+        # default_location_id — matches how the formatter assigns "primary" staff).
         cursor.execute("""
             SELECT staff_id, name, title_tag_ids, default_location_id,
                    staff_img_url, phone_number, bio, email
             FROM staff
             WHERE tenant_id = %s AND is_active = true
+              AND default_location_id = %s
             ORDER BY name
-        """, (tenant_id,))
+        """, (tenant_id, location_id))
         staff_list = cursor.fetchall()
         
         # Query 2: Get staff title tags (category_id = 3)
@@ -1460,22 +1519,24 @@ def _query_staff(tenant_id: str, location_id: str) -> dict:
         title_tags_list = cursor.fetchall()
         title_tags = {tag['tag_id']: dict(tag) for tag in title_tags_list}
         
-        # Query 3: Get staff recurring availability
+        # Query 3: Get staff recurring availability for THIS location only (Phase 5)
         cursor.execute("""
             SELECT staff_id, location_id, day_of_week, start_time, end_time, is_closed
             FROM staff_availability
-            WHERE tenant_id = %s AND type = 'recurring' AND is_active = true AND is_closed = false
+            WHERE tenant_id = %s AND location_id = %s
+              AND type = 'recurring' AND is_active = true AND is_closed = false
             ORDER BY staff_id, location_id, day_of_week, start_time
-        """, (tenant_id,))
+        """, (tenant_id, location_id))
         recurring_availability = cursor.fetchall()
-        
-        # Query 4: Get staff one-time availability
+
+        # Query 4: Get staff one-time availability for THIS location only (Phase 5)
         cursor.execute("""
             SELECT staff_id, location_id, specific_date, start_time, end_time, is_closed
             FROM staff_availability
-            WHERE tenant_id = %s AND type = 'one_time' AND is_active = true
+            WHERE tenant_id = %s AND location_id = %s
+              AND type = 'one_time' AND is_active = true
             ORDER BY staff_id, location_id, specific_date, start_time
-        """, (tenant_id,))
+        """, (tenant_id, location_id))
         onetime_availability = cursor.fetchall()
         
         # Query 5: Get staff-service relationships
@@ -1504,12 +1565,13 @@ def _query_staff(tenant_id: str, location_id: str) -> dict:
         services_list = cursor.fetchall()
         services = {svc['service_id']: dict(svc) for svc in services_list}
         
-        # Query 7: Get location names
+        # Query 7: Get THIS location's name only (Phase 5: scoped)
         cursor.execute("""
             SELECT location_id, name
             FROM locations
             WHERE tenant_id = %s AND is_active = true
-        """, (tenant_id,))
+              AND location_id = %s
+        """, (tenant_id, location_id))
         locations_list = cursor.fetchall()
         locations = {loc['location_id']: loc['name'] for loc in locations_list}
         
@@ -2050,53 +2112,20 @@ def sync_speako_data(self, *,
                 logger.warning(f"⚠️ [sync_speako_data] Failed to generate AI description: {desc_e}")
         
         elif knowledge_type == 'locations':
-            logger.info(f"📍 [sync_speako_data] Syncing locations for tenant={tenant_id}, location={location_id}")
-            
-            # Query database
-            try:
-                raw_data = _query_locations(tenant_id, location_id)
-                num_locations = len(raw_data.get('locations', []))
-                num_services = len(raw_data.get('services_names', {}))
-                logger.info(f"✅ [sync_speako_data] Retrieved location data: {num_locations} locations, {num_services} services available")
-            except Exception as query_e:
-                logger.error(f"❌ [sync_speako_data] Database query failed: {query_e}")
-                raise
-            
-            # Format into JSON + Markdown (location-centric)
-            try:
-                json_output, markdown_output = _format_locations(raw_data, int(location_id))
-                
-                # Count services per location
-                primary_loc = json_output['data'].get('primary_location', {})
-                primary_name = primary_loc.get('name', 'Primary Location')
-                primary_services_count = len(primary_loc.get('services_available', []))
-                other_locs = json_output['data'].get('other_locations', [])
-                other_loc_count = len(other_locs)
-                
-                logger.info(f"✅ [sync_speako_data] Formatted locations: primary_location='{primary_name}' has {primary_services_count} services, {other_loc_count} other locations, {len(json.dumps(json_output))} bytes JSON, {len(markdown_output)} bytes Markdown")
-            except Exception as format_e:
-                logger.error(f"❌ [sync_speako_data] Data formatting failed: {format_e}")
-                raise
-            
-            # Generate AI description
-            try:
-                primary_loc = json_output['data'].get('primary_location', {})
-                primary_name = primary_loc.get('name', 'Primary Location')
-                primary_services_count = len(primary_loc.get('services_available', []))
-                other_locs = json_output['data'].get('other_locations', [])
-                num_other_locs = len(other_locs)
-                
-                service_plural = 'service' if primary_services_count == 1 else 'services'
-                if num_other_locs > 0:
-                    loc_plural = 'location' if num_other_locs == 1 else 'locations'
-                    ai_description = f"Location details for {primary_name} ({primary_services_count} {service_plural}) and {num_other_locs} other {loc_plural}"
-                else:
-                    ai_description = f"Location details for {primary_name} with {primary_services_count} {service_plural}"
-                
-                logger.info(f"📝 [sync_speako_data] Generated AI description: {ai_description}")
-            except Exception as desc_e:
-                logger.warning(f"⚠️ [sync_speako_data] Failed to generate AI description: {desc_e}")
-        
+            # DEPRECATED (Phase 2, knowledge-architecture rework): the standalone
+            # `locations` knowledge doc is no longer generated. The current
+            # location's details live in the scoped `business_info` doc (Phase 1),
+            # and a one-line multi-location branch pointer is appended there
+            # (Change 3). Sibling-branch details are served on demand by the
+            # `find_other_locations` tool (Phase 3). This branch is intentionally a
+            # NO-OP: json_output/markdown_output stay None so nothing is written.
+            # `_query_locations`/`_format_locations` are retained for record only.
+            logger.info(
+                f"⏭️ [sync_speako_data] locations knowledge is DEPRECATED (Phase 2) — "
+                f"no-op for tenant={tenant_id}, location={location_id}; not generated/saved."
+            )
+            # json_output / markdown_output remain None → save + RAG blocks skip.
+
         elif knowledge_type in ['staff']:
             logger.info(f"📋 [sync_speako_data] Querying staff data for tenant_id={tenant_id}")
             staff_data = _query_staff(tenant_id, location_id)
