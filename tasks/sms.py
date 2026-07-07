@@ -66,13 +66,26 @@ def send_sms_confirmation_new(booking_id: int):
         # Booking Guarantee (Phase 3): pending bookings get a "secure your
         # reservation" SMS with a payment link instead of a confirmation.
         cur.execute(
-            "SELECT status, guarantee_amount, location_id FROM bookings WHERE booking_id = %s",
+            "SELECT status, guarantee_amount, location_id, source FROM bookings WHERE booking_id = %s",
             (booking_id,),
         )
         _grow = cur.fetchone()
         _bk_status = _grow[0] if _grow else None
         _guarantee_amount = _grow[1] if _grow else None
         _guarantee_location_id = _grow[2] if _grow else None
+        _bk_source = _grow[3] if _grow else None
+
+        # Web-origin pending_guarantee bookings deliver the payment step via the
+        # compulsory in-page Stripe redirect (speako-web), so the SMS payment link
+        # would be a duplicate — skip it. All other sources send as normal.
+        if _bk_source == "web" and _bk_status == "pending_guarantee":
+            print(
+                f"[SMS] Skipping web-origin pending_guarantee SMS for booking "
+                f"{booking_id} (web redirect handles the card save)."
+            )
+            cur.close()
+            conn.close()
+            return
 
         cur.execute("""
             SELECT
