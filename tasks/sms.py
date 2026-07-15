@@ -56,6 +56,22 @@ def create_tiny_url(long_url: str) -> str:
         print(f"[TinyURL] Error creating short URL: {e}")
         return long_url
 
+# Chat channels whose bookings carry a platform user id (Messenger/Instagram PSID)
+# in customer_phone rather than a real phone — an SMS would target a nonsense
+# number. Those bookings are confirmed in-chat by the text brain instead.
+# Web-widget bookings DO carry a real phone (contact form) and send as normal.
+CHAT_SMS_SKIP_SOURCES = ("facebook", "instagram")
+
+def _skip_sms_for_source(cur, booking_id: int, task: str) -> bool:
+    cur.execute("SELECT source FROM bookings WHERE booking_id = %s", (booking_id,))
+    row = cur.fetchone()
+    source = row[0] if row else None
+    if source in CHAT_SMS_SKIP_SOURCES:
+        print(f"[SMS] Skipping {task} for booking {booking_id}: source={source} "
+              f"(chat channel — confirmed in-chat; phone field is a platform id)")
+        return True
+    return False
+
 @app.task
 def send_sms_confirmation_new(booking_id: int):
     try:
@@ -83,6 +99,14 @@ def send_sms_confirmation_new(booking_id: int):
                 f"[SMS] Skipping web-origin pending_guarantee SMS for booking "
                 f"{booking_id} (web redirect handles the card save)."
             )
+            cur.close()
+            conn.close()
+            return
+
+        # Messenger/IG bookings: no real phone (PSID proxy) — confirmed in-chat.
+        if _bk_source in CHAT_SMS_SKIP_SOURCES:
+            print(f"[SMS] Skipping send_sms_confirmation_new for booking {booking_id}: "
+                  f"source={_bk_source} (chat channel — confirmed in-chat)")
             cur.close()
             conn.close()
             return
@@ -248,6 +272,8 @@ def send_sms_guarantee_cancelled(booking_id: int):
     try:
         conn = psycopg2.connect(os.getenv("DATABASE_URL"))
         cur = conn.cursor()
+        if _skip_sms_for_source(cur, booking_id, "send_sms_guarantee_cancelled"):
+            return
         cur.execute("""
             SELECT b.customer_name, b.booking_ref, b.start_time, b.customer_phone, l.name
             FROM bookings b
@@ -291,6 +317,11 @@ def send_sms_confirmation_mod(booking_id: int):
         # Connect to database
         conn = psycopg2.connect(os.getenv("DATABASE_URL"))
         cur = conn.cursor()
+
+        if _skip_sms_for_source(cur, booking_id, "send_sms_confirmation_mod"):
+            cur.close()
+            conn.close()
+            return
 
         cur.execute("""
             SELECT 
@@ -407,6 +438,11 @@ def send_sms_confirmation_can(booking_id: int):
         # Connect to database
         conn = psycopg2.connect(os.getenv("DATABASE_URL"))
         cur = conn.cursor()
+
+        if _skip_sms_for_source(cur, booking_id, "send_sms_confirmation_can"):
+            cur.close()
+            conn.close()
+            return
 
         cur.execute("""
             SELECT 
