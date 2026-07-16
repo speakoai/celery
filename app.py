@@ -19,6 +19,7 @@ from tasks.sms import (
 from tasks.celery_app import app as celery_app
 from tasks.analyze_knowledge import analyze_knowledge_file
 from tasks.scrape_url import scrape_url_to_markdown
+from tasks.scrape_business_profile import scrape_business_profile
 from tasks.sync_speako_data import sync_speako_data
 from tasks.publish_elevenlabs_agent import publish_elevenlabs_agent
 from tasks.publish_native_agent import publish_native_agent
@@ -2203,6 +2204,96 @@ def api_scrape_url():
                 'source': 'scrape_url',
                 'pipeline': pipeline,
                 **({'speako_task_id': speako_task_id} if speako_task_id else {})
+            }
+        }), 202
+
+    except Exception as e:
+        return jsonify({'error': 'Internal server error', 'message': str(e)}), 500
+
+
+@app.route('/api/knowledge/scrape-business-profile', methods=['POST'])
+@require_api_key
+def api_scrape_business_profile():
+    """
+    [prospect scrape pilot] Crawl a business website via Firecrawl (<= page_limit
+    pages), fill tenant_info/location_info basics (fill-only-empty), write the
+    narrative to the custom_message knowledge, then republish the agent.
+    Plan: speako-workspace docs/plans/prospect-scrape-pilot.md
+
+    Expected JSON payload:
+    {
+      "tenant_id": "123",          // required
+      "location_id": "456",        // required
+      "url": "https://...",        // required
+      "page_limit": 10,             // optional (default 10)
+      "trigger_publish": true,      // optional (default true)
+      "speako_task_id": "abc-123"  // optional — created here when absent
+    }
+
+    Returns 202 with celery_task_id + speako_task_id (for tasks-row polling).
+    """
+    try:
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({
+                'error': 'JSON payload required',
+                'message': 'Send a valid JSON body with Content-Type: application/json',
+            }), 400
+
+        tenant_id = data.get('tenant_id')
+        location_id = data.get('location_id')
+        url = data.get('url')
+        missing = [k for k in ['tenant_id', 'location_id', 'url'] if not data.get(k)]
+        if missing:
+            return jsonify({'error': 'Missing required fields', 'missing_fields': missing}), 400
+        if not str(url).lower().startswith(('http://', 'https://')):
+            return jsonify({'error': 'Invalid url', 'message': 'url must start with http(s)://'}), 400
+
+        page_limit = int(data.get('page_limit') or 10)
+        trigger_publish = bool(data.get('trigger_publish', True))
+        speako_task_id = data.get('speako_task_id')
+
+        # Create the tasks row here when the caller didn't — keeps the endpoint
+        # self-serve for the admin re-run action and curl testing.
+        if not speako_task_id:
+            conn = get_db_connection()
+            try:
+                with conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """INSERT INTO tasks (tenant_id, location_id, kind, status, priority, input, created_at, updated_at)
+                               VALUES (%s, %s, 'ingest_url_knowledge', 'queued', 5, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                               RETURNING task_id""",
+                            (tenant_id, location_id, json.dumps({
+                                'source': 'scrape_business_profile',
+                                'url': url,
+                                'page_limit': page_limit,
+                            })),
+                        )
+                        speako_task_id = str(cur.fetchone()[0])
+            finally:
+                conn.close()
+
+        task = scrape_business_profile.delay(
+            tenant_id=str(tenant_id),
+            location_id=str(location_id),
+            url=url,
+            speako_task_id=str(speako_task_id),
+            page_limit=page_limit,
+            trigger_publish=trigger_publish,
+        )
+
+        return jsonify({
+            'success': True,
+            'message': 'Business profile scrape task started',
+            'data': {
+                'celery_task_id': task.id,
+                'speako_task_id': speako_task_id,
+                'tenant_id': tenant_id,
+                'location_id': location_id,
+                'url': url,
+                'page_limit': page_limit,
+                'source': 'scrape_business_profile',
             }
         }), 202
 
