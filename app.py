@@ -21,6 +21,7 @@ from tasks.analyze_knowledge import analyze_knowledge_file
 from tasks.scrape_url import scrape_url_to_markdown
 from tasks.scrape_business_profile import scrape_business_profile
 from tasks.sync_speako_data import sync_speako_data
+from tasks.embed_knowledge_param import embed_knowledge_param
 from tasks.publish_elevenlabs_agent import publish_elevenlabs_agent
 from tasks.publish_native_agent import publish_native_agent
 from tasks.create_ai_agent import create_conversation_ai_agent
@@ -2375,6 +2376,71 @@ def api_sync_with_speako():
                 'knowledge_type': knowledge_type,
                 'source': 'sync_speako_data',
                 **({'speako_task_id': speako_task_id} if speako_task_id else {})
+            }
+        }), 202
+
+    except Exception as e:
+        return jsonify({'error': 'Internal server error', 'message': str(e)}), 500
+
+
+@app.route('/api/knowledge/embed-param', methods=['POST'])
+@require_api_key
+def api_embed_knowledge_param():
+    """
+    [aiknowledges] (Re)embed a SINGLE saved knowledge param into the pgvector
+    knowledge_chunks table (the store the text-chat widget reads).
+
+    Embeds the saved value_text AS-IS — it does NOT regenerate or overwrite
+    tenant_integration_params (unlike /api/knowledge/sync-with-speako). Safe to
+    call after any knowledge save / remove / delete: the task purges stale chunks
+    when the row is removed/blanked, and re-embeds otherwise. Works for all
+    param_codes including custom ones.
+
+    Expected JSON payload:
+    {
+      "tenant_id": "123",             // required
+      "location_id": "456",           // required
+      "param_code": "business_info"   // required
+    }
+
+    Returns 202 with celery_task_id for polling at /api/task/<task_id>.
+    """
+    try:
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({
+                'error': 'JSON payload required',
+                'message': 'Send a valid JSON body with Content-Type: application/json',
+                'content_type': request.headers.get('Content-Type', None)
+            }), 400
+
+        tenant_id = data.get('tenant_id')
+        location_id = data.get('location_id')
+        param_code = data.get('param_code')
+
+        missing = [k for k in ['tenant_id', 'location_id', 'param_code'] if not data.get(k)]
+        if missing:
+            return jsonify({'error': 'Missing required fields', 'missing_fields': missing}), 400
+
+        task = embed_knowledge_param.delay(
+            tenant_id=tenant_id,
+            location_id=location_id,
+            param_code=param_code,
+        )
+
+        return jsonify({
+            'success': True,
+            'message': 'Knowledge embed task started',
+            'data': {
+                'analysis': {
+                    'status': 'queued',
+                    'mode': 'background',
+                    'celery_task_id': task.id
+                },
+                'tenant_id': tenant_id,
+                'location_id': location_id,
+                'param_code': param_code,
+                'source': 'embed_knowledge_param',
             }
         }), 202
 
