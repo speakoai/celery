@@ -260,28 +260,49 @@ def _build_business_info_markdown(json_data: dict) -> str:
         if philosophy:
             sections.append(f"\n{philosophy}")
     
-    # Contact Information Section
+    # Contact Information Section (Phase 1/FR1: now includes this location's address)
     contacts = data.get('contacts', {})
     email = contacts.get('email', '')
     phone = contacts.get('phone', '')
     website = data.get('website', '')
-    
-    if email or phone or website:
+    address = data.get('address', '')
+
+    if email or phone or website or address:
         sections.append("\n## Contact Information")
         contact_lines = []
-        if email:
-            contact_lines.append(f"- **Email**: {email}")
+        if address:
+            contact_lines.append(f"- **Address**: {address}")
         if phone:
             contact_lines.append(f"- **Phone**: {phone}")
+        if email:
+            contact_lines.append(f"- **Email**: {email}")
         if website:
             contact_lines.append(f"- **Website**: {website}")
         sections.append("\n" + "\n".join(contact_lines))
     
+    # Opening Hours (Phase 1/FR1a): business_info is scoped to ONE location, so inline
+    # that location's hours directly under the business header instead of a separate
+    # "Our Locations / ### name" wrapper (avoids business-name duplication + leaner prompt).
+    locations = data.get('locations', [])
+    if locations:
+        loc = locations[0]
+        hours = loc.get('hours', {})
+        recurring = hours.get('recurring', {})
+        exceptions = hours.get('exceptions', [])
+
+        if recurring:
+            sections.append("\n## Opening Hours\n")
+            sections.append(_format_week_schedule_markdown(recurring))
+
+        if exceptions:
+            sections.append("\n\n**Special Hours & Closures:**\n")
+            sections.append(_format_exceptions_markdown(exceptions))
+
     # Social Media Section
     social = data.get('social', {})
     instagram = social.get('instagram', '')
     facebook = social.get('facebook', '')
-    
+
     if instagram or facebook:
         sections.append("\n## Social Media")
         social_lines = []
@@ -290,29 +311,6 @@ def _build_business_info_markdown(json_data: dict) -> str:
         if facebook:
             social_lines.append(f"- **Facebook**: {facebook}")
         sections.append("\n" + "\n".join(social_lines))
-    
-    # Locations Section
-    locations = data.get('locations', [])
-    if locations:
-        sections.append("\n## Our Locations")
-        
-        for loc in locations:
-            loc_name = loc.get('location_name', 'Unknown Location')
-            sections.append(f"\n### {loc_name}")
-            
-            hours = loc.get('hours', {})
-            recurring = hours.get('recurring', {})
-            exceptions = hours.get('exceptions', [])
-            
-            # Regular Hours
-            if recurring:
-                sections.append("\n**Regular Hours:**\n")
-                sections.append(_format_week_schedule_markdown(recurring))
-            
-            # Special Hours & Closures
-            if exceptions:
-                sections.append("\n\n**Special Hours & Closures:**\n")
-                sections.append(_format_exceptions_markdown(exceptions))
 
     # Phase 2: multi-location branch pointer. For tenants with >1 active location,
     # append ONE line naming the other branches. Single-location tenants (empty
@@ -341,8 +339,10 @@ def _query_business_info(tenant_id: str, location_id: str) -> dict:
     Returns:
         dict with keys:
         - 'business_data': dict from tenants + tenant_info
-        - 'locations': list of dicts with location_id, name, recurring_hours, onetime_hours
+        - 'locations': list of dicts with location_id, name, address, contact
+          (phone/email/website), recurring_hours, onetime_hours
           (contains at most the single current location)
+        - 'other_branch_names': names of the tenant's other active locations
     """
     conn = _get_db_connection()
     cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -373,9 +373,10 @@ def _query_business_info(tenant_id: str, location_id: str) -> dict:
         if not business_data:
             raise ValueError(f"No tenant found with tenant_id={tenant_id}")
         
-        # Query 2: Get THIS agent's location only (Phase 1: scoped, not all tenant locations)
+        # Query 2: Get THIS agent's location only (Phase 1: scoped, not all tenant locations).
+        # human_phone_number is a fallback for the location's contact phone (FR2/D1).
         query_locations = """
-            SELECT location_id, name
+            SELECT location_id, name, human_phone_number
             FROM locations
             WHERE tenant_id = %s
               AND location_id = %s
@@ -387,6 +388,20 @@ def _query_business_info(tenant_id: str, location_id: str) -> dict:
         if not locations_list:
             logger.warning(f"No location found for tenant_id={tenant_id}, location_id={location_id}")
             locations_list = []
+
+        # Query 2b (Phase 1 / FR1 + FR2): THIS location's address + location-level
+        # contact from location_info. business_info previously carried NO address at
+        # all; this is the source of the "location address missing" gap. Scoped to the
+        # same single location_id.
+        query_location_info = """
+            SELECT location_id, address, phone_with_country_code, email, website_url
+            FROM location_info
+            WHERE tenant_id = %s
+              AND location_id = %s
+        """
+        cursor.execute(query_location_info, (tenant_id, location_id))
+        location_info_row = cursor.fetchone()
+        location_info = dict(location_info_row) if location_info_row else {}
 
         # Query 3: Get recurring hours for THIS location only
         query_recurring = """
@@ -447,13 +462,23 @@ def _query_business_info(tenant_id: str, location_id: str) -> dict:
             
             # Filter onetime hours for this location
             onetime_for_loc = [
-                dict(row) for row in all_onetime_hours 
+                dict(row) for row in all_onetime_hours
                 if str(row['location_id']) == loc_id
             ]
-            
+
+            # Phase 1 (FR1/FR2): this location's address + contact. Contact prefers
+            # location_info; phone falls back to locations.human_phone_number. Both
+            # location_info + locations rows are scoped to this same location_id.
+            li = location_info if str(location_info.get('location_id', loc_id)) == loc_id else {}
             locations_data.append({
                 'location_id': loc_id,
                 'location_name': loc_name,
+                'address': (li.get('address') or '').strip(),
+                'contact': {
+                    'phone': (li.get('phone_with_country_code') or loc.get('human_phone_number') or '').strip(),
+                    'email': (li.get('email') or '').strip(),
+                    'website': (li.get('website_url') or '').strip(),
+                },
                 'recurring_hours': recurring_for_loc,
                 'onetime_hours': onetime_for_loc
             })
@@ -509,21 +534,32 @@ def _format_business_info(raw_data: dict) -> tuple[dict, str]:
     }
     locale = locale_map.get(country_code, 'en-AU')
     
-    # Format hours for each location
+    # Format hours for each location (carry address + contact through — FR1/FR2)
     locations_formatted = []
     for loc in locations_raw:
         recurring_hours = _format_recurring_hours(loc['recurring_hours'])
         onetime_hours = _format_onetime_hours(loc['onetime_hours'])
-        
+
         locations_formatted.append({
             'location_id': loc['location_id'],
             'location_name': loc['location_name'],
+            'address': loc.get('address', ''),
+            'contact': loc.get('contact') or {'phone': '', 'email': '', 'website': ''},
             'hours': {
                 'recurring': recurring_hours,
                 'exceptions': onetime_hours
             }
         })
-    
+
+    # Phase 1 (D1/FR2): business_info is scoped to ONE location, so the business-level
+    # contact/website/address is that location's when set, falling back to tenant_info.
+    primary_loc = locations_formatted[0] if locations_formatted else {}
+    primary_contact = primary_loc.get('contact') or {}
+    contact_email = primary_contact.get('email') or business_data.get('contact_email') or ''
+    contact_phone = primary_contact.get('phone') or business_data.get('contact_phone') or ''
+    website = primary_contact.get('website') or business_data.get('website') or ''
+    address = primary_loc.get('address') or ''
+
     # Package formatted data
     json_output = {
         "version": 1,
@@ -537,10 +573,12 @@ def _format_business_info(raw_data: dict) -> tuple[dict, str]:
             "description": business_data.get('description') or '',
             "philosophy": business_data.get('philosophy') or '',
             "contacts": {
-                "email": business_data.get('contact_email') or '',
-                "phone": business_data.get('contact_phone') or ''
+                "email": contact_email,
+                "phone": contact_phone
             },
-            "website": business_data.get('website') or '',
+            "website": website,
+            # Phase 1 (FR1): this location's street address (was missing entirely).
+            "address": address,
             "social": {
                 "instagram": business_data.get('instagram') or '',
                 "facebook": business_data.get('facebook') or ''
