@@ -480,6 +480,33 @@ def scrape_business_profile(self, *, tenant_id: str, location_id: str, url: str,
     except Exception as e:
         return _fail("knowledge_write_failed", f"custom_message knowledge write failed: {e}")
 
+    # 4b. Phase 2 (FR7): regenerate business_info from the freshly-filled tenant_info +
+    # location_info (address/opening_hours/contact/social) BEFORE republishing, so the
+    # scraped details actually reach the agent. Run synchronously (.apply) so it completes
+    # before the publish below reads the knowledge. Best-effort / non-fatal — a scrape
+    # should still republish even if this regen fails.
+    try:
+        from tasks.sync_speako_data import sync_speako_data
+        bi_param = {
+            "tenant_id": int(tenant_id),
+            "location_id": int(location_id),
+            "provider": "speako",
+            "service": "knowledge",
+            "param_code": "business_info",
+            "param_kind": "json",
+        }
+        bi_existing = get_existing_knowledge_param_id(int(tenant_id), int(location_id), "business_info")
+        if bi_existing:
+            bi_param["param_id"] = bi_existing
+        sync_speako_data.apply(kwargs={
+            "tenant_id": str(tenant_id),
+            "location_id": str(location_id),
+            "knowledge_type": "business_info",
+            "tenant_integration_param": bi_param,
+        })
+    except Exception as e:
+        logger.warning(f"[scrape_business_profile] business_info regen failed (non-fatal): {e}")
+
     # 5. Chain republish so the agent knows the business on the next call
     publish_dispatched = False
     if trigger_publish:
