@@ -272,6 +272,9 @@ def fill_info_tables(tenant_id: int, location_id: int, url: str, basics: dict) -
         "tagline": basics.get("tagline"),
         "instagram": basics.get("instagram"),
         "facebook": basics.get("facebook"),
+        # Phase 4b: the business/HQ address (tenant_info.address) — same scraped street_address
+        # that fills location_info.address, keeping the two in sync (fill-only-empty).
+        "address": basics.get("street_address"),
     }
     location_values = {
         "website_url": url,

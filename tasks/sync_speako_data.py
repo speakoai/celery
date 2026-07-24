@@ -266,12 +266,19 @@ def _build_business_info_markdown(json_data: dict) -> str:
     phone = contacts.get('phone', '')
     website = data.get('website', '')
     address = data.get('address', '')
+    # Phase 4b: the business/head-office address (tenant_info.address). Rendered ONLY for
+    # multi-location tenants — for single-location the location's address above IS the business
+    # address. Distinct label so the agent doesn't confuse it with this branch's address.
+    business_address = data.get('business_address', '')
+    show_business_address = bool(business_address) and bool([b for b in data.get('other_branches', []) if b])
 
-    if email or phone or website or address:
+    if email or phone or website or address or show_business_address:
         sections.append("\n## Contact Information")
         contact_lines = []
         if address:
             contact_lines.append(f"- **Address**: {address}")
+        if show_business_address:
+            contact_lines.append(f"- **Business address**: {business_address}")
         if phone:
             contact_lines.append(f"- **Phone**: {phone}")
         if email:
@@ -362,6 +369,7 @@ def _query_business_info(tenant_id: str, location_id: str) -> dict:
                 ti.instagram,
                 ti.facebook,
                 ti.primary_color,
+                ti.address as business_address,
                 t.country_code
             FROM tenants t
             LEFT JOIN tenant_info ti ON t.tenant_id = ti.tenant_id
@@ -579,6 +587,9 @@ def _format_business_info(raw_data: dict) -> tuple[dict, str]:
             "website": website,
             # Phase 1 (FR1): this location's street address (was missing entirely).
             "address": address,
+            # Phase 4b: the tenant/business (HQ) address — distinct from this location's address.
+            # Rendered as "Business address" in MULTI-location docs only (markdown builder).
+            "business_address": business_data.get('business_address') or '',
             "social": {
                 "instagram": business_data.get('instagram') or '',
                 "facebook": business_data.get('facebook') or ''
