@@ -278,7 +278,7 @@ def _build_business_info_markdown(json_data: dict) -> str:
         if address:
             contact_lines.append(f"- **Address**: {address}")
         if show_business_address:
-            contact_lines.append(f"- **Business address**: {business_address}")
+            contact_lines.append(f"- **Head office address**: {business_address}")
         if phone:
             contact_lines.append(f"- **Phone**: {phone}")
         if email:
