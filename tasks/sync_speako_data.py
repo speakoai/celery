@@ -1993,10 +1993,157 @@ def _format_staff(raw_data: dict, primary_location_id: int) -> tuple[dict, str]:
     
     # Generate markdown from JSON data
     markdown_content = _build_staff_markdown(json_data)
-    
+
     return json_data, markdown_content
 
 
+# ============================================================================
+# OTHER LOCATIONS (tenant-wide directory) — Phase 3
+# A lean, CHAT-only directory of ALL the tenant's active locations (name + address +
+# phone + compact weekly hours). Stored ONCE per tenant as a location_id=NULL
+# tenant_integration_params doc + embedded into tenant_knowledge_chunks. Voice is
+# untouched (it uses the find_other_locations tool; a NULL-location doc never enters
+# native_agent_config). Deliberately does NOT reuse the fat _query_locations/
+# _format_locations helpers (those emit services/booking/exceptions/geo/notes).
+# ============================================================================
+
+def _get_tenantwide_param_id(tenant_id, param_code) -> int | None:
+    """param_id of the tenant-wide (location_id IS NULL) knowledge doc, or None."""
+    conn = _get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT param_id FROM public.tenant_integration_params
+            WHERE tenant_id = %s AND location_id IS NULL
+              AND provider = 'speako' AND service = 'knowledge' AND param_code = %s
+            LIMIT 1
+            """,
+            (tenant_id, param_code),
+        )
+        row = cursor.fetchone()
+        return int(row[0]) if row else None
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def _query_other_locations(tenant_id: str) -> dict:
+    """Fetch the LEAN directory data for ALL active locations of the tenant:
+    name + address + phone + recurring weekly hours only."""
+    conn = _get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cursor.execute(
+            """
+            SELECT location_id, name, human_phone_number
+            FROM locations
+            WHERE tenant_id = %s AND is_active = true
+            ORDER BY location_id
+            """,
+            (tenant_id,),
+        )
+        locations = cursor.fetchall()
+
+        cursor.execute(
+            """
+            SELECT location_id, address, phone_with_country_code
+            FROM location_info
+            WHERE tenant_id = %s
+            """,
+            (tenant_id,),
+        )
+        info = {row['location_id']: row for row in cursor.fetchall()}
+
+        cursor.execute(
+            """
+            SELECT location_id, day_of_week, start_time, end_time, slot_name
+            FROM location_availability
+            WHERE tenant_id = %s AND type = 'recurring'
+              AND is_active = true AND is_closed = false
+            ORDER BY location_id, day_of_week, start_time
+            """,
+            (tenant_id,),
+        )
+        recurring = {}
+        for row in cursor.fetchall():
+            recurring.setdefault(row['location_id'], []).append(dict(row))
+
+        out = []
+        for loc in locations:
+            lid = loc['location_id']
+            li = info.get(lid) or {}
+            out.append({
+                'location_id': str(lid),
+                'name': loc['name'],
+                'address': (li.get('address') or '').strip(),
+                'phone': (li.get('phone_with_country_code') or loc.get('human_phone_number') or '').strip(),
+                'recurring_hours': recurring.get(lid, []),
+            })
+        return {'locations': out}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def _format_other_locations(raw_data: dict) -> tuple[dict, str]:
+    """Lean tenant-wide "Other Locations" directory → (json, compact markdown).
+    Each location: name + address + phone + compact weekly hours."""
+    locations_out = []
+    sections = ["# Our Locations"]
+    for loc in raw_data.get('locations', []):
+        hours = _format_recurring_hours(loc['recurring_hours'])
+        locations_out.append({
+            'name': loc['name'],
+            'address': loc['address'],
+            'phone': loc['phone'],
+            'hours': hours,
+        })
+        sections.append(f"\n## {loc['name']}")
+        if loc['address']:
+            sections.append(f"- **Address**: {loc['address']}")
+        if loc['phone']:
+            sections.append(f"- **Phone**: {loc['phone']}")
+        sections.append("\n**Hours:**\n")
+        sections.append(_format_week_schedule_markdown(hours))
+
+    json_output = {
+        'version': 1,
+        'source': 'sync_speako_data',
+        'analysis_artifact_url': '',
+        'locale': 'en-AU',
+        'data': {'locations': locations_out},
+    }
+    return json_output, "\n".join(sections)
+
+
+def _purge_tenant_wide_locations(tenant_id) -> None:
+    """Remove the tenant-wide Other Locations doc + chunks — e.g. when a tenant drops to a
+    single active location. Best-effort: purges tenant_knowledge_chunks and marks the
+    location_id=NULL doc 'removed'."""
+    from .utils.task_db import _get_conn
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM public.tenant_knowledge_chunks WHERE tenant_id = %s AND param_code = 'locations'",
+                    (tenant_id,),
+                )
+                cur.execute(
+                    """
+                    UPDATE public.tenant_integration_params
+                    SET status = 'removed'::integration_status, updated_at = now()
+                    WHERE tenant_id = %s AND location_id IS NULL AND provider = 'speako'
+                      AND service = 'knowledge' AND param_code = 'locations'
+                    """,
+                    (tenant_id,),
+                )
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 @app.task(bind=True)
@@ -2150,19 +2297,50 @@ def sync_speako_data(self, *,
                 logger.warning(f"⚠️ [sync_speako_data] Failed to generate AI description: {desc_e}")
         
         elif knowledge_type == 'locations':
-            # DEPRECATED (Phase 2, knowledge-architecture rework): the standalone
-            # `locations` knowledge doc is no longer generated. The current
-            # location's details live in the scoped `business_info` doc (Phase 1),
-            # and a one-line multi-location branch pointer is appended there
-            # (Change 3). Sibling-branch details are served on demand by the
-            # `find_other_locations` tool (Phase 3). This branch is intentionally a
-            # NO-OP: json_output/markdown_output stay None so nothing is written.
-            # `_query_locations`/`_format_locations` are retained for record only.
-            logger.info(
-                f"⏭️ [sync_speako_data] locations knowledge is DEPRECATED (Phase 2) — "
-                f"no-op for tenant={tenant_id}, location={location_id}; not generated/saved."
-            )
-            # json_output / markdown_output remain None → save + RAG blocks skip.
+            # Phase 3: TENANT-WIDE "Other Locations" directory for the CHAT brain — lists ALL
+            # active locations (name + address + phone + compact weekly hours). Stored ONCE per
+            # tenant as a location_id=NULL doc + a tenant_knowledge_chunks embed; chat-RAG only
+            # (voice uses the find_other_locations tool; a NULL-location doc never enters
+            # native_agent_config). Single-location tenants get NO directory (stale doc/chunks
+            # purged). Self-contained: it saves the NULL-location doc + tenant embed here, so the
+            # generic per-location save/RAG blocks below are skipped for this knowledge_type.
+            logger.info(f"🗺️ [sync_speako_data] Building tenant-wide Other Locations directory for tenant={tenant_id}")
+            _ol_raw = _query_other_locations(tenant_id)
+            _ol_active = _ol_raw.get('locations', [])
+            if len(_ol_active) > 1:
+                json_output, markdown_output = _format_other_locations(_ol_raw)
+                ai_description = f"Directory of {len(_ol_active)} locations — name, address, phone and hours"
+                _ol_param = {
+                    'tenant_id': int(tenant_id),
+                    'location_id': None,
+                    'provider': 'speako',
+                    'service': 'knowledge',
+                    'param_code': 'locations',
+                    'param_kind': 'json',
+                }
+                _ol_existing = _get_tenantwide_param_id(tenant_id, 'locations')
+                if _ol_existing:
+                    _ol_param['param_id'] = _ol_existing
+                _ol_pid = upsert_tenant_integration_param(
+                    tenant_integration_param=_ol_param,
+                    analysis_result=json_output,
+                    value_text=markdown_output,
+                    ai_description=ai_description,
+                )
+                logger.info(f"✅ [sync_speako_data] Saved tenant-wide Other Locations doc (param_id={_ol_pid})")
+                try:
+                    from .utils.knowledge_utils import chunk_and_embed_tenant_knowledge
+                    _ol_n = chunk_and_embed_tenant_knowledge(int(tenant_id), 'locations', markdown_output)
+                    logger.info(f"🧩 [sync_speako_data] Embedded {_ol_n} tenant_knowledge_chunks for Other Locations")
+                except Exception as _ol_e:
+                    logger.warning(f"[sync_speako_data] tenant_knowledge_chunks embed failed: {_ol_e}")
+            else:
+                _purge_tenant_wide_locations(tenant_id)
+                logger.info(
+                    f"⏭️ [sync_speako_data] tenant={tenant_id} has {len(_ol_active)} active location(s) — "
+                    f"no Other Locations directory (purged any stale doc/chunks)."
+                )
+                # json_output stays None → generic save/RAG blocks skip.
 
         elif knowledge_type in ['staff']:
             logger.info(f"📋 [sync_speako_data] Querying staff data for tenant_id={tenant_id}")
@@ -2196,8 +2374,9 @@ def sync_speako_data(self, *,
         else:
             raise ValueError(f"Unsupported knowledge_type: {knowledge_type}")
         
-        # Save to database
-        if json_output is not None:
+        # Save to database. Skip 'locations' — its tenant-wide branch above already saved the
+        # location_id=NULL doc; the generic path would wrongly write a per-location row.
+        if json_output is not None and knowledge_type != 'locations':
             try:
                 param_id = upsert_tenant_integration_param(
                     tenant_integration_param=tenant_integration_param,
@@ -2213,8 +2392,9 @@ def sync_speako_data(self, *,
                 logger.error(f"❌ [sync_speako_data] Database save failed: {save_e}")
                 raise
 
-        # RAG: chunk + embed markdown into knowledge_chunks (best-effort)
-        if json_output is not None and markdown_output:
+        # RAG: chunk + embed markdown into knowledge_chunks (best-effort). Skip 'locations' —
+        # the tenant-wide branch embeds into tenant_knowledge_chunks instead.
+        if json_output is not None and markdown_output and knowledge_type != 'locations':
             try:
                 from .utils.knowledge_utils import chunk_and_embed_knowledge, NON_CONTENT_PARAM_CODES
                 _pc = (tenant_integration_param or {}).get('param_code') or knowledge_type
