@@ -379,3 +379,62 @@ def chunk_and_embed_knowledge(tenant_id, location_id, param_code, markdown_text,
         if own_conn:
             db_conn.close()
 
+
+def chunk_and_embed_tenant_knowledge(tenant_id, param_code, markdown_text,
+                                     openai_client=None, db_conn=None) -> int:
+    """Phase 3: TENANT-WIDE variant of chunk_and_embed_knowledge — persists to
+    tenant_knowledge_chunks via delete-then-reinsert for (tenant_id, param_code), with NO
+    location dimension. The chat brain retrieves this alongside per-location knowledge_chunks
+    so tenant-wide docs (e.g. the "Other Locations" directory) are available to every location's
+    chat context. Returns chunk count. Skips empty text; caller guards NON_CONTENT_PARAM_CODES.
+    """
+    if not markdown_text or not markdown_text.strip():
+        return 0
+    chunks = _chunk_text(markdown_text)
+    if not chunks:
+        return 0
+
+    if openai_client is None:
+        try:
+            from openai import OpenAI
+        except ImportError:
+            logger.warning("⚠️ [tenant_knowledge_chunks] OpenAI library unavailable; skipping embed")
+            return 0
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            logger.warning("⚠️ [tenant_knowledge_chunks] OPENAI_API_KEY not set; skipping embed")
+            return 0
+        openai_client = OpenAI(api_key=api_key)
+
+    resp = openai_client.embeddings.create(model=EMBEDDING_MODEL, input=chunks)
+    embeddings = [d.embedding for d in sorted(resp.data, key=lambda d: d.index)]
+
+    own_conn = False
+    if db_conn is None:
+        from .task_db import _get_conn
+        db_conn = _get_conn()
+        own_conn = True
+    try:
+        from psycopg2.extras import execute_values
+        with db_conn:  # transaction scope (commit/rollback); does NOT close the conn
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM public.tenant_knowledge_chunks "
+                    "WHERE tenant_id = %s AND param_code = %s",
+                    (tenant_id, param_code),
+                )
+                rows = [(tenant_id, param_code, i, chunks[i],
+                         _vector_literal(embeddings[i])) for i in range(len(chunks))]
+                execute_values(
+                    cur,
+                    "INSERT INTO public.tenant_knowledge_chunks "
+                    "(tenant_id, param_code, chunk_index, content, embedding) VALUES %s",
+                    rows, template="(%s,%s,%s,%s,%s::vector)",
+                )
+        logger.info("🧩 [tenant_knowledge_chunks] %d chunks (tenant=%s param=%s)",
+                    len(chunks), tenant_id, param_code)
+        return len(chunks)
+    finally:
+        if own_conn:
+            db_conn.close()
+
