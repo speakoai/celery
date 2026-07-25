@@ -5,14 +5,10 @@ from datetime import datetime
 from urllib.parse import urlparse
 
 import requests
-# No HTML parsing needed when using ScraperAPI Markdown output
 
 from celery.utils.log import get_task_logger
 from tasks.celery_app import app
 import boto3
-
-trafilatura = None
-Document = None
 
 try:
     from openai import OpenAI
@@ -31,9 +27,36 @@ from .utils.task_db import mark_task_running, mark_task_failed, mark_task_succee
 
 logger = get_task_logger(__name__)
 
-# Note: We are switching to ScraperAPI for fetching rendered content in Markdown.
-# Any Playwright-based rendering paths are no longer used.
-sync_playwright = None
+# ---------------------------------------------------------------------------
+# Firecrawl-backed, topic-aware "Add From URL" ingestion.
+#
+# Instead of scraping only the single pasted URL, we ask Firecrawl `/v1/map`
+# for the pages on that site most relevant to the target knowledge_type (a
+# per-type search term), scrape the top few via `/v1/scrape`, concatenate them
+# into one corpus, and hand that corpus to the EXISTING OpenAI analyze chain.
+# The pasted URL is always included. Discovery is best-effort: any map failure
+# gracefully falls back to scraping just the pasted URL.
+#
+# Reuses the Firecrawl config conventions from tasks/scrape_business_profile.py
+# (FIRECRAWL_BASE_URL + FIRECRAWL_API_KEY). Replaces the retired ScraperAPI /
+# ZenRows fetch path for this task.
+# ---------------------------------------------------------------------------
+
+FIRECRAWL_BASE = os.getenv("FIRECRAWL_BASE_URL", "https://api.firecrawl.dev")
+
+# Primary relevance search phrase per knowledge_type, fed to Firecrawl `/v1/map`
+# so it ranks the site's URLs by topical relevance. Types NOT in this map
+# (notably `custom_message`) skip discovery and scrape only the pasted URL.
+TOPIC_SEARCH_TERMS = {
+    "food_menu": "menu",
+    "service_menu": "services pricing",
+    "faq": "faq",
+    "service_policy": "policy cancellation",
+    "special_promotion": "promotions offers",
+    "staff": "team staff",
+    "business_info": "about contact",
+    "locations": "locations branches",
+}
 
 
 def _get_r2_client():
@@ -61,256 +84,172 @@ def _host_allowed(url: str) -> bool:
     return host in allowed_hosts
 
 
-def _get_scraper_strategy() -> tuple[str, bool]:
-    """Determine which scraper to use and whether fallback is enabled.
-    
-    Returns:
-        tuple: (primary_scraper, enable_fallback)
-            primary_scraper: 'scraperapi' or 'zenrows'
-            enable_fallback: True if fallback to alternate scraper is allowed
-    
-    Environment:
-        SCRAPER_PRIORITY controls behavior:
-            - "scraperapi" (default): Use ScraperAPI with ZenRows fallback
-            - "zenrows" or "zenrows-only": Use only ZenRows
-            - "scraperapi-only": Use only ScraperAPI, no fallback
-    """
-    priority = os.getenv('SCRAPER_PRIORITY', 'scraperapi').lower()
-    
-    if priority in ('zenrows', 'zenrows-only'):
-        return ('zenrows', False)
-    elif priority == 'scraperapi-only':
-        return ('scraperapi', False)
-    else:  # default: 'scraperapi' with fallback
-        return ('scraperapi', True)
+# ---------------------------------------------------------------------------
+# Firecrawl helpers
+# ---------------------------------------------------------------------------
 
-
-def _submit_async_job(url: str, *, render: bool = True, output_format: str | None = 'markdown', timeout_ms: int = 15000) -> tuple[str, str]:
-    """Submit an async job to ScraperAPI. Returns (job_id, status_url).
-
-    Uses the documented async payload shape with 'urls' and 'apiParams'.
-    """
-    api_key = os.getenv('SCRAPERAPI_KEY')
+def _firecrawl_headers() -> dict:
+    api_key = os.getenv("FIRECRAWL_API_KEY")
     if not api_key:
-        raise RuntimeError('SCRAPERAPI_KEY not configured')
-    timeout = max(1, timeout_ms // 1000)
-    api_params: dict = {}
-    if render:
-        api_params['render'] = 'true'
-    if output_format:
-        api_params['output_format'] = output_format
-    payload: dict = {
-        'apiKey': api_key,
-        'urls': [url],
-    }
-    if api_params:
-        payload['apiParams'] = api_params
-    resp = requests.post('https://async.scraperapi.com/jobs', json=payload, timeout=timeout)
+        raise RuntimeError("FIRECRAWL_API_KEY not set")
+    return {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+
+def firecrawl_map(url: str, search: str, limit: int, *, timeout: int = 60) -> list[str]:
+    """POST /v1/map with a relevance `search` term. Returns a relevance-ranked
+    list of URL strings. Firecrawl returns links as plain strings; older/newer
+    shapes may return objects with a `url` field, both are handled."""
+    resp = requests.post(
+        f"{FIRECRAWL_BASE}/v1/map",
+        headers=_firecrawl_headers(),
+        json={"url": url, "search": search, "limit": limit},
+        timeout=timeout,
+    )
     resp.raise_for_status()
     data = resp.json()
-    job_id = None
-    status_url = None
-    # Response may be a dict or a list of job objects when using 'urls'
-    if isinstance(data, dict):
-        job_id = data.get('id') or data.get('jobId')
-        status_url = data.get('statusUrl') or data.get('statusURL')
-    elif isinstance(data, list) and data:
-        first = data[0]
-        if isinstance(first, dict):
-            job_id = first.get('id') or first.get('jobId')
-            status_url = first.get('statusUrl') or first.get('statusURL')
-    if not job_id or not status_url:
-        raise RuntimeError(f'Invalid async job response shape: {data}')
-    return str(job_id), str(status_url)
+    links = data.get("links") or []
+    out: list[str] = []
+    for item in links:
+        if isinstance(item, str):
+            out.append(item)
+        elif isinstance(item, dict):
+            u = item.get("url") or item.get("href")
+            if u:
+                out.append(u)
+    return out
 
 
-def _poll_async_job(status_url: str, *, per_req_timeout_ms: int = 10000, total_timeout_ms: int = 180000) -> dict:
-    """Poll ScraperAPI async job status until finished or timeout.
-
-    Returns the final JSON payload which should contain a 'response' object with 'body'.
-    """
-    started = time.time()
-    attempt = 0
-    per_req_timeout = max(1, per_req_timeout_ms // 1000)
-    while True:
-        attempt += 1
-        resp = requests.get(status_url, timeout=per_req_timeout)
-        resp.raise_for_status()
-        data = resp.json()
-        status = data.get('status')
-        if status == 'finished':
-            return data
-        if status in ('failed', 'error'):
-            raise RuntimeError(f'Async job failed: {data}')
-        # backoff sleep
-        elapsed = time.time() - started
-        if elapsed * 1000 > total_timeout_ms:
-            raise TimeoutError(f'Async job timed out after {int(elapsed)}s: {status_url}')
-        sleep_s = min(5.0, 0.5 + attempt * 0.5)
-        time.sleep(sleep_s)
-
-
-def _fetch_via_zenrows(url: str, timeout_ms: int, output_format: str | None = 'markdown') -> tuple[str, dict]:
-    """Fetch content via ZenRows REST API service.
-    
-    Args:
-        url: Target URL to scrape
-        timeout_ms: Request timeout in milliseconds
-        output_format: 'markdown' for markdown output, None for HTML
-    
-    Returns:
-        tuple: (content, headers_dict)
-            content: Scraped markdown or HTML content
-            headers_dict: Metadata headers for tracking
-    
-    Environment:
-        ZENROWS_API_KEY: Required API key for ZenRows service
-    """
-    api_key = os.getenv('ZENROWS_API_KEY')
-    if not api_key:
-        raise RuntimeError('ZENROWS_API_KEY not configured')
-    
-    # JS instructions for comprehensive page interaction
-    js_instructions = [
-        {"wait_for": "main, article, #__next, #app, [role='main']"},
-        {"click": "[aria-label*='accept' i], .cookie-accept, .cc-accept, button[aria-label='Accept all']"},
-        {"wait_event": "networkalmostidle"},
-        {"scroll_y": 1200},
-        {"wait": 400},
-        {"scroll_y": 2400},
-        {"wait": 400},
-        {"evaluate": "window.scrollTo(0, document.body.scrollHeight);"},
-        {"wait_event": "networkidle"},
-        {"wait_for": ".content, .article, .rich-text, [itemprop='articleBody'], .services, .service, [data-testid='content'], [data-testid='main-content']"}
-    ]
-    
-    # Build API request parameters (requests library will handle URL encoding)
-    params = {
-        'apikey': api_key,
-        'url': url,
-        'js_render': 'true',
-        'js_instructions': json.dumps(js_instructions),
+def firecrawl_scrape(url: str, *, formats: list[str] | None = None,
+                     only_main_content: bool = True, timeout: int = 90) -> dict:
+    """POST /v1/scrape. Returns the Firecrawl `data` object, e.g.
+    {"markdown": "...", "metadata": {"sourceURL": ..., "title": ...}}."""
+    body = {
+        "url": url,
+        "formats": list(formats or ["markdown"]),
+        "onlyMainContent": only_main_content,
     }
-    
-    if output_format == 'markdown':
-        params['response_type'] = 'markdown'
-    
-    timeout_s = max(1, timeout_ms // 1000)
-    
-    # Make request to ZenRows REST API
-    logger.info(f"🔍 [_fetch_via_zenrows] Calling ZenRows API with url={url}, output_format={output_format}")
-    response = requests.get('https://api.zenrows.com/v1/', params=params, timeout=timeout_s)
-    logger.info(f"🔍 [_fetch_via_zenrows] ZenRows responded with status={response.status_code}, content_length={len(response.text)}")
-    response.raise_for_status()
-    
-    content = response.text
-    headers = {
-        'X-Scraper-Source': 'zenrows',
-        'X-ZenRows-StatusCode': str(response.status_code),
-        'X-ZenRows-ContentLength': str(len(content)),
-    }
-    
-    return content, headers
+    resp = requests.post(
+        f"{FIRECRAWL_BASE}/v1/scrape",
+        headers=_firecrawl_headers(),
+        json=body,
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return data.get("data") or {}
 
 
-def _fetch_html_via_zenrows(url: str, timeout_ms: int) -> tuple[str, dict]:
-    """Fetch raw HTML via ZenRows (for raw HTML saving)."""
-    return _fetch_via_zenrows(url, timeout_ms, output_format=None)
-
-def _fetch_html_via_scraperapi_async(url: str, timeout_ms: int, total_timeout_ms: int) -> tuple[str, dict]:
-    """Fetch raw HTML via ScraperAPI Async (rendered)."""
-    job_id, status_url = _submit_async_job(url, render=True, output_format=None, timeout_ms=timeout_ms)
-    final = _poll_async_job(status_url, per_req_timeout_ms=timeout_ms, total_timeout_ms=total_timeout_ms)
-    resp_info = _extract_async_response_info(final) or {}
-    body = resp_info.get('body', '') or ''
-    meta = {
-        'X-ScraperAPI-Async': 'true',
-        'X-ScraperAPI-StatusUrl': status_url,
-        'X-ScraperAPI-JobId': job_id,
-        'X-ScraperAPI-Output-Format': 'html',
-        'X-ScraperAPI-StatusCode': str(resp_info.get('statusCode')) if resp_info.get('statusCode') is not None else None,
-    }
-    return body, meta
+def _norm_url(u: str) -> str:
+    """Normalize a URL for dedup: lowercase + strip trailing slash/whitespace."""
+    return (u or "").strip().rstrip("/").lower()
 
 
-def _fetch_html_with_fallback(url: str, timeout_ms: int, total_timeout_ms: int) -> tuple[str, dict]:
-    """Fetch raw HTML using configured scraper with fallback support.
-    
-    Respects SCRAPER_PRIORITY environment variable to determine which scraper to use.
+def select_urls(pasted_url: str, ranked_links: list[str], max_pages: int) -> list[str]:
+    """Pick up to `max_pages` URLs to scrape. The pasted URL is ALWAYS included
+    (first), then the highest-ranked discovered links fill the remaining slots,
+    deduped by normalized form."""
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _add(u: str) -> None:
+        if not u:
+            return
+        key = _norm_url(u)
+        if key in seen:
+            return
+        seen.add(key)
+        out.append(u)
+
+    _add(pasted_url)
+    for link in ranked_links:
+        if len(out) >= max_pages:
+            break
+        _add(link)
+    return out[:max_pages]
+
+
+def compose_topic_corpus(pages: list[dict], max_bytes: int) -> str:
+    """Concatenate scraped pages into one corpus with clear per-page separators
+    (source URL heading), capped at `max_bytes` (utf-8)."""
+    parts: list[str] = []
+    total = 0
+    for p in pages:
+        header = f"\n\n===== SOURCE: {p['url']} =====\n"
+        if p.get("title"):
+            header += f"# {p['title']}\n"
+        header += "\n"
+        block = header + p["markdown"]
+        b = block.encode("utf-8", errors="ignore")
+        if total + len(b) >= max_bytes:
+            remaining = max(0, max_bytes - total)
+            if remaining:
+                parts.append(b[:remaining].decode("utf-8", errors="ignore"))
+            break
+        parts.append(block)
+        total += len(b)
+    return "".join(parts).strip()
+
+
+def build_topic_corpus(url: str, knowledge_type: str | None, *,
+                       max_pages: int, max_bytes: int) -> tuple[str, list[str], dict]:
+    """Firecrawl map -> select topic-relevant URLs -> scrape each -> corpus.
+
+    Returns (corpus_markdown, scraped_urls, discovery_meta).
+
+    Discovery is best-effort and NEVER hard-fails the task: if map errors or
+    returns nothing usable we fall back to scraping only the pasted URL. A hard
+    failure is raised ONLY if not a single page (including the pasted URL) could
+    be scraped.
     """
-    primary, enable_fallback = _get_scraper_strategy()
-    
-    if primary == 'zenrows':
-        logger.info(f"🎯 [_fetch_html_with_fallback] Using ZenRows for HTML (SCRAPER_PRIORITY={os.getenv('SCRAPER_PRIORITY', 'zenrows')})")
-        return _fetch_html_via_zenrows(url, timeout_ms)
-    else:
+    search_term = TOPIC_SEARCH_TERMS.get(knowledge_type or "")
+    discovery = {
+        "search_term": search_term,
+        "discovery_used": bool(search_term),
+        "discovery_fallback": False,
+        "discovered_urls": [],
+    }
+
+    selected = [url]
+    if search_term:
+        ranked: list[str] = []
         try:
-            return _fetch_html_via_scraperapi_async(url, timeout_ms, total_timeout_ms)
-        except Exception as e:
-            if enable_fallback:
-                logger.warning(f"⚠️ ScraperAPI HTML fetch failed: {e}, falling back to ZenRows")
-                return _fetch_html_via_zenrows(url, timeout_ms)
-            else:
-                raise
+            ranked = firecrawl_map(url, search_term, limit=max(max_pages * 2, max_pages))
+        except Exception as map_e:
+            logger.warning(f"⚠️ [scrape_url] Firecrawl map failed ({map_e}); falling back to pasted URL only")
+            discovery["discovery_fallback"] = True
+        discovery["discovered_urls"] = ranked[:10]
+        if ranked:
+            selected = select_urls(url, ranked, max_pages)
+        else:
+            # No usable discovery results -> pasted URL only (graceful)
+            discovery["discovery_fallback"] = True
 
+    pages: list[dict] = []
+    scraped_urls: list[str] = []
+    for u in selected:
+        try:
+            data = firecrawl_scrape(u)
+            md = (data.get("markdown") or "").strip()
+            if not md:
+                logger.warning(f"⚠️ [scrape_url] Firecrawl scrape returned empty markdown for {u}")
+                continue
+            meta = data.get("metadata") or {}
+            source_url = meta.get("sourceURL") or meta.get("url") or u
+            pages.append({
+                "url": source_url,
+                "title": meta.get("title") or "",
+                "markdown": md,
+            })
+            scraped_urls.append(source_url)
+        except Exception as scrape_e:
+            logger.warning(f"⚠️ [scrape_url] Firecrawl scrape failed for {u}: {scrape_e}")
+            continue
 
-def _extract_async_response_info(data: object) -> dict:
-    """Return a uniform response info dict from ScraperAPI async job result.
+    if not pages:
+        raise RuntimeError("Firecrawl returned no readable content for the selected URLs")
 
-    Handles shapes:
-    - { response: { body, statusCode, headers, ... } }
-    - { response: [ { body, ... }, ... ] }
-    - { results: [ { response: { ... } }, ... ] }
-    - [ { response: { ... } }, ... ]
-    Returns an empty dict if nothing matches.
-    """
-    try:
-        # Dict shapes
-        if isinstance(data, dict):
-            resp = data.get('response')  # type: ignore[attr-defined]
-            if isinstance(resp, dict):
-                return resp
-            if isinstance(resp, list) and resp:
-                first = resp[0]
-                if isinstance(first, dict):
-                    return first
-            results = data.get('results')  # type: ignore[attr-defined]
-            if isinstance(results, list) and results:
-                for item in results:
-                    if isinstance(item, dict) and isinstance(item.get('response'), dict):
-                        return item['response']
-                # fallback to first item if no response key found
-                first_item = results[0]
-                if isinstance(first_item, dict):
-                    maybe_resp = first_item.get('response')
-                    if isinstance(maybe_resp, dict):
-                        return maybe_resp
-                return {}
-        # List shape
-        if isinstance(data, list) and data:
-            first = data[0]
-            if isinstance(first, dict):
-                if isinstance(first.get('response'), dict):
-                    return first['response']
-                return first
-        return {}
-    except Exception:
-        return {}
-
-
-def _render_page_with_js(url: str, timeout_ms: int, user_agent: str | None = None) -> str:
-    """Deprecated: JS rendering is handled by ScraperAPI (render=true)."""
-    raise RuntimeError('playwright_render_deprecated')
-
-
-def _extract_main_html(html: str, base_url: str) -> tuple[str, str]:
-    """Deprecated: We now receive Markdown directly from ScraperAPI."""
-    return '', html
-
-
-def _html_to_markdown(title: str, html: str, base_url: str) -> str:
-    """Deprecated: ScraperAPI returns Markdown directly; passthrough."""
-    return html
+    corpus = compose_topic_corpus(pages, max_bytes)
+    return corpus, scraped_urls, discovery
 
 
 @app.task(bind=True)
@@ -382,48 +321,29 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
             logger.warning(f"mark_task_running failed: {db_e}")
 
     try:
-        timeout_ms = int(os.getenv('SCRAPE_TIMEOUT_MS', '15000'))
-        total_timeout_ms = int(os.getenv('SCRAPERAPI_POLL_TOTAL_TIMEOUT_MS', '180000'))
-        
-        # Determine scraper strategy
-        primary, enable_fallback = _get_scraper_strategy()
-        scraper_source = None
-        markdown = None
-        headers = None
-        
-        if primary == 'zenrows':
-            # Use ZenRows directly
-            logger.info(f"🎯 [scrape_url_to_markdown] Using ZenRows (SCRAPER_PRIORITY={os.getenv('SCRAPER_PRIORITY', 'zenrows')})")
-            markdown, headers = _fetch_via_zenrows(url, timeout_ms, output_format='markdown')
-            scraper_source = 'zenrows'
-        else:
-            # Try ScraperAPI first
-            try:
-                logger.info(f"🎯 [scrape_url_to_markdown] Using ScraperAPI (SCRAPER_PRIORITY={os.getenv('SCRAPER_PRIORITY', 'scraperapi')})")
-                job_id, status_url = _submit_async_job(url, render=True, output_format='markdown', timeout_ms=timeout_ms)
-                final = _poll_async_job(status_url, per_req_timeout_ms=timeout_ms, total_timeout_ms=total_timeout_ms)
-                resp_info = _extract_async_response_info(final) or {}
-                markdown = (resp_info.get('body') or '').strip()
-                scraper_source = 'scraperapi'
-                headers = {
-                    'X-ScraperAPI-Async': 'true',
-                    'X-ScraperAPI-StatusUrl': status_url,
-                    'X-ScraperAPI-JobId': job_id,
-                    'X-ScraperAPI-Output-Format': 'markdown',
-                    'X-ScraperAPI-StatusCode': str(resp_info.get('statusCode')) if resp_info.get('statusCode') is not None else None,
-                }
-            except Exception as scraper_error:
-                if enable_fallback:
-                    # Fallback to ZenRows
-                    logger.warning(f"⚠️ ScraperAPI failed: {scraper_error}, falling back to ZenRows")
-                    logger.info(f"🔄 [scrape_url_to_markdown] Attempting ZenRows fallback for URL: {url}")
-                    markdown, headers = _fetch_via_zenrows(url, timeout_ms, output_format='markdown')
-                    scraper_source = 'zenrows'
-                    logger.info(f"✅ [scrape_url_to_markdown] ZenRows fallback succeeded, retrieved {len(markdown)} chars of markdown")
-                else:
-                    # No fallback enabled, re-raise
-                    logger.error(f"❌ ScraperAPI failed and fallback disabled (SCRAPER_PRIORITY=scraperapi-only)")
-                    raise
+        max_pages = int(os.getenv('URL_SCRAPE_MAX_PAGES', '4'))
+        max_bytes = int(os.getenv('KNOWLEDGE_MAX_TEXT_BYTES', '200000'))
+
+        # Topic-aware Firecrawl fetch: discover relevant pages for this
+        # knowledge_type, scrape the top few (+ the pasted URL), build one corpus.
+        logger.info(
+            f"🎯 [scrape_url_to_markdown] Firecrawl fetch — url={url} "
+            f"knowledge_type={knowledge_type} max_pages={max_pages}"
+        )
+        markdown, scraped_urls, discovery = build_topic_corpus(
+            url, knowledge_type, max_pages=max_pages, max_bytes=max_bytes
+        )
+        scraper_source = 'firecrawl'
+        headers = {
+            'X-Scraper-Source': 'firecrawl',
+            'X-Firecrawl-Search-Term': discovery.get('search_term'),
+            'X-Firecrawl-Pages-Scraped': str(len(scraped_urls)),
+            'X-Firecrawl-Discovery-Fallback': str(discovery.get('discovery_fallback')),
+        }
+        logger.info(
+            f"✅ [scrape_url_to_markdown] Firecrawl corpus built — pages={len(scraped_urls)} "
+            f"chars={len(markdown)} urls={scraped_urls}"
+        )
 
         keys = build_scrape_artifact_paths(tenant_id, location_id, url)
         public_base = os.getenv('R2_PUBLIC_BASE_URL', 'https://assets.speako.ai')
@@ -463,8 +383,13 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
             'headers': headers,
             'content_length': len(md_bytes),
             'extractor': scraper_source,
-            'scraper_priority': os.getenv('SCRAPER_PRIORITY', 'scraperapi'),
-            'was_fallback': scraper_source == 'zenrows' and primary == 'scraperapi',
+            'source': 'firecrawl',
+            'knowledge_type': knowledge_type,
+            'search_term': discovery.get('search_term'),
+            'discovery_used': discovery.get('discovery_used'),
+            'discovery_fallback': discovery.get('discovery_fallback'),
+            'discovered_urls': discovery.get('discovered_urls'),
+            'scraped_urls': scraped_urls,
         }
         meta_bytes = _json.dumps(meta).encode('utf-8')
         put_meta = r2.put_object(
@@ -493,7 +418,8 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
 
         if save_raw_html or os.getenv('SCRAPE_SAVE_RAW_HTML', 'false').lower() == 'true':
             try:
-                raw_html, _raw_headers = _fetch_html_with_fallback(url, timeout_ms, total_timeout_ms)
+                raw_data = firecrawl_scrape(url, formats=['html'])
+                raw_html = raw_data.get('html') or raw_data.get('rawHtml') or ''
                 raw_bytes = raw_html.encode('utf-8', errors='ignore')
                 put_raw = r2.put_object(
                     Bucket=bucket,
@@ -519,7 +445,7 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
                     except Exception as db_e:
                         logger.warning(f"record_task_artifact(raw_html) failed: {db_e}")
             except Exception as _raw_e:
-                logger.warning(f"Saving raw HTML via ScraperAPI failed: {_raw_e}")
+                logger.warning(f"Saving raw HTML via Firecrawl failed: {_raw_e}")
 
         artifacts = {
             'markdown_key': keys['markdown_key'],
@@ -540,7 +466,6 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
                     client = OpenAI(api_key=api_key)
                     prompt = build_knowledge_prompt(knowledge_type)
                     # Guardrail: limit size
-                    max_bytes = int(os.getenv('KNOWLEDGE_MAX_TEXT_BYTES', '200000'))
                     md_text = markdown
                     if len(md_text.encode('utf-8', errors='ignore')) > max_bytes:
                         md_text = md_text.encode('utf-8', errors='ignore')[:max_bytes].decode('utf-8', errors='ignore')
@@ -562,10 +487,10 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
                         except Exception:
                             analysis_text = None
                     parsed, raw = parse_model_json_output(analysis_text)
-                    
+
                     # Extract json_data and markdown_data from the parsed response
                     json_payload, markdown_text = extract_dual_output(parsed)
-                    
+
                     payload = json_payload if json_payload is not None else {"raw": raw}
                     payload_bytes = _json.dumps(payload).encode('utf-8')
                     put_analysis = r2.put_object(
@@ -610,13 +535,13 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
                             logger.info(f"📝 [scrape_url_to_markdown] Generated AI description ({len(ai_description)} chars)")
                     except Exception as desc_e:
                         logger.warning(f"⚠️ [scrape_url_to_markdown] Failed to generate AI description: {desc_e}")
-                
+
                 # Update tenant_integration_params table to mark as configured
                 try:
                     # Check if analysis variables are available in locals()
                     analysis_to_save = payload if 'payload' in locals() and payload else None
                     markdown_to_save = markdown_text if 'markdown_text' in locals() and markdown_text else None
-                    
+
                     param_id = upsert_tenant_integration_param(
                         tenant_integration_param=tenant_integration_param,
                         analysis_result=analysis_to_save,
@@ -634,7 +559,7 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
                         logger.warning(f"⚠️ [scrape_url_to_markdown] Failed to update tenant_integration_param - no param_id returned")
                 except Exception as tip_e:
                     logger.warning(f"[tasks] upsert_tenant_integration_param failed: {tip_e}")
-                
+
                 try:
                     mark_task_succeeded(task_id=str(speako_task_id), celery_task_id=str(self.request.id),
                                         details={'url': url, 'artifacts': artifacts, 'pipeline': pipeline, 'knowledge_type': knowledge_type},
@@ -667,7 +592,7 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
                     logger.warning(f"⚠️ [scrape_url_to_markdown] Failed to update tenant_integration_param - no param_id returned")
             except Exception as tip_e:
                 logger.warning(f"[tasks] upsert_tenant_integration_param failed: {tip_e}")
-            
+
             try:
                 mark_task_succeeded(task_id=str(speako_task_id), celery_task_id=str(self.request.id),
                                     details={'url': url, 'artifacts': artifacts, 'pipeline': pipeline},
@@ -688,52 +613,6 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
             }
         }
 
-    except TimeoutError as e:
-        error_msg = f"Scraping job timed out for URL: {url}"
-        logger.error(f"⏱️  {error_msg} - Exceeded maximum wait time. Consider increasing SCRAPERAPI_POLL_TOTAL_TIMEOUT_MS.")
-        if speako_task_id:
-            try:
-                mark_task_failed(task_id=str(speako_task_id), celery_task_id=str(self.request.id),
-                                 error_code='timeout', error_message=error_msg,
-                                 details={'url': url, 'timeout_ms': total_timeout_ms}, actor='celery')
-            except Exception as db_e:
-                logger.warning(f"mark_task_failed failed: {db_e}")
-        return {
-            'success': False,
-            'error': 'Scraping timed out - the page took too long to process',
-            'error_type': 'timeout',
-            'url': url,
-            'job': {
-                'task_id': self.request.id,
-                'speako_task_id': speako_task_id,
-                'started_at': started_at,
-                'completed_at': datetime.utcnow().isoformat() + 'Z',
-                'duration_ms': int((time.time() - start_ts) * 1000),
-            }
-        }
-    except requests.exceptions.ReadTimeout as e:
-        error_msg = f"Network timeout while checking scraping status for URL: {url}"
-        logger.error(f"🌐 {error_msg} - ScraperAPI status endpoint did not respond in time. Consider increasing SCRAPE_TIMEOUT_MS.")
-        if speako_task_id:
-            try:
-                mark_task_failed(task_id=str(speako_task_id), celery_task_id=str(self.request.id),
-                                 error_code='network_timeout', error_message=error_msg,
-                                 details={'url': url, 'timeout_ms': timeout_ms}, actor='celery')
-            except Exception as db_e:
-                logger.warning(f"mark_task_failed failed: {db_e}")
-        return {
-            'success': False,
-            'error': 'Network timeout - unable to connect to scraping service',
-            'error_type': 'network_timeout',
-            'url': url,
-            'job': {
-                'task_id': self.request.id,
-                'speako_task_id': speako_task_id,
-                'started_at': started_at,
-                'completed_at': datetime.utcnow().isoformat() + 'Z',
-                'duration_ms': int((time.time() - start_ts) * 1000),
-            }
-        }
     except requests.exceptions.RequestException as e:
         error_msg = f"Network error while scraping URL: {url}"
         logger.error(f"🔌 {error_msg} - {type(e).__name__}: {str(e)}")
