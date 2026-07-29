@@ -22,6 +22,27 @@ app.conf.update(task_track_started=True)
 # Optionally emit task events for Flower/monitoring
 app.conf.update(worker_send_task_events=True, task_send_sent_event=True)
 
+# ── Worker memory hygiene (added 2026-07-29) ─────────────────────────────────
+# This is a single monolithic worker that imports EVERY task module below
+# (playwright, pandas, OpenAI, agent-publishing, scraping, ...), so each prefork
+# child carries a heavy baseline. On the 512MB instance that let the worker OOM
+# under a small burst of concurrent tasks (which silently dropped in-flight
+# availability-regen tasks). These settings bound per-child memory and recycle
+# children so RSS can't grow unbounded over the worker's lifetime. The durable
+# fix (splitting heavy tasks onto a dedicated queue/worker) is sketched in
+# docs/plans/celery-worker-memory-hardening.md.
+app.conf.update(
+    worker_max_tasks_per_child=50,        # recycle a forked child after 50 tasks
+    worker_max_memory_per_child=200000,   # KB (~200MB): recycle a child once it exceeds this
+    worker_prefetch_multiplier=1,         # fetch one task at a time so a slow/heavy task
+                                          # can't hold light tasks prefetched alongside it
+)
+# NOTE: task_acks_late is intentionally NOT set globally — SMS and Twilio-purchase
+# tasks are NOT idempotent and must never double-run after a worker restart. Late
+# ack is applied PER-TASK only to the idempotent availability-regen tasks (see
+# acks_late in tasks/availability_gen_regen.py) so those survive a restart instead
+# of being silently lost.
+
 # Configure Celery for better task persistence and monitoring
 # app.conf.update(
 #     result_expires=86400,  # Results expire after 24 hours

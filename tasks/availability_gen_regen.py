@@ -81,7 +81,7 @@ def fetch_sample_data():
         logger.error(f"[PRODUCTION] Database error: {e}")
         return None
 
-@app.task(bind=True)
+@app.task(bind=True, acks_late=True, reject_on_worker_lost=True)
 def gen_availability(self, tenant_id, location_id, location_tz, affected_date=None, task_id=None):
     logger.info(f"[LOCAL TEST] Generating availability for tenant={tenant_id}, location={location_id}")
 
@@ -381,7 +381,7 @@ def gen_availability(self, tenant_id, location_id, location_tz, affected_date=No
         return None
 
 
-@app.task(bind=True)
+@app.task(bind=True, acks_late=True, reject_on_worker_lost=True)
 def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_date=None, task_id=None):
     logger.info(f"[LOCAL TEST] Generating availability for tenant={tenant_id}, location={location_id}")
 
