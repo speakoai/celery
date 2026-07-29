@@ -235,6 +235,23 @@ def send_sms_confirmation_new(booking_id: int):
                 f"with {staff_name} for {service_name}."
             )
 
+        # Slice 3c: online bookings carry a meeting join link (a Zoom join_url or the
+        # Google Meet URL), stored on the booking's live external artifact. Include it
+        # so the customer can join. Non-online bookings have no such artifact → no-op.
+        cur.execute(
+            """
+            SELECT join_url FROM booking_external_artifact
+            WHERE tenant_id = %s AND booking_id = %s
+              AND state IN ('pending', 'active') AND join_url IS NOT NULL
+            ORDER BY artifact_id DESC LIMIT 1
+            """,
+            (tenant_id, booking_id),
+        )
+        _mrow = cur.fetchone()
+        meeting_link = _mrow[0] if _mrow else None
+        if meeting_link:
+            message += f" Join your meeting: {meeting_link}"
+
         # Append manage booking link if available
         if manage_booking_url:
             # Create shortened URL for SMS
