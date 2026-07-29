@@ -226,7 +226,7 @@ projects:
       region: virginia
       buildCommand: pip install -r requirements.txt
       startCommand: celery --app tasks.celery_app worker --loglevel info --concurrency
-        4 --events
+        2 --events
       autoDeployTrigger: commit
     - type: cron
       name: gen-availability-cron-aus-dev
