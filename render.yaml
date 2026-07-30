@@ -326,8 +326,10 @@ projects:
       branch: dev
       plan: starter
       envVars:
+      # Pin Python explicitly: Render's account default drifted to 3.14, which
+      # Celery 5.2.6 cannot import on. The rest of the fleet runs 3.11.11.
       - key: PYTHON_VERSION
-        sync: false
+        value: "3.11.11"
       - key: DATABASE_URL
         sync: false
       - key: CELERY_BROKER_URL
