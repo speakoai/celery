@@ -319,6 +319,24 @@ projects:
       startCommand: PYTHONPATH=. python dispatch/process_integration_outbox_dispatch.py
       schedule: '*/2 * * * *'
       autoDeployTrigger: commit
+    - type: cron
+      name: send-reminders-dev
+      runtime: python
+      repo: https://github.com/speakoai/celery
+      branch: dev
+      plan: starter
+      envVars:
+      - key: PYTHON_VERSION
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: CELERY_BROKER_URL
+        sync: false
+      region: virginia
+      buildCommand: pip install -r requirements.txt
+      startCommand: PYTHONPATH=. python dispatch/send_reminders_dispatch.py
+      schedule: '*/5 * * * *'
+      autoDeployTrigger: commit
   - name: Production
     services:
     - type: web
