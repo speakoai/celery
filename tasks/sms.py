@@ -423,6 +423,23 @@ def send_sms_confirmation_mod(booking_id: int):
                 f"with {staff_name} for {service_name}."
             )
 
+        # Online bookings: include the meeting join link (stable across a reschedule).
+        # Resolved by booking_ref because a modify creates a new booking_id whose
+        # artifact may still be relinking; the ref always finds the live meeting.
+        cur.execute(
+            """
+            SELECT join_url FROM booking_external_artifact
+            WHERE tenant_id = %s AND booking_ref = %s
+              AND state IN ('pending', 'active') AND join_url IS NOT NULL
+            ORDER BY artifact_id DESC LIMIT 1
+            """,
+            (tenant_id, booking_ref),
+        )
+        _mrow = cur.fetchone()
+        meeting_link = _mrow[0] if _mrow else None
+        if meeting_link:
+            message += f" Join your meeting: {meeting_link}"
+
         # Append manage booking link if available
         if manage_booking_url:
             # Create shortened URL for SMS
