@@ -2,6 +2,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import urllib.parse
+import json
+from datetime import datetime, timezone
 from tasks.celery_app import app
 from twilio.rest import Client
 import psycopg2
@@ -235,6 +237,23 @@ def send_sms_confirmation_new(booking_id: int):
                 f"with {staff_name} for {service_name}."
             )
 
+        # Slice 3c: online bookings carry a meeting join link (a Zoom join_url or the
+        # Google Meet URL), stored on the booking's live external artifact. Include it
+        # so the customer can join. Non-online bookings have no such artifact → no-op.
+        cur.execute(
+            """
+            SELECT join_url FROM booking_external_artifact
+            WHERE tenant_id = %s AND booking_id = %s
+              AND state IN ('pending', 'active') AND join_url IS NOT NULL
+            ORDER BY artifact_id DESC LIMIT 1
+            """,
+            (tenant_id, booking_id),
+        )
+        _mrow = cur.fetchone()
+        meeting_link = _mrow[0] if _mrow else None
+        if meeting_link:
+            message += f" Join your meeting: {meeting_link}"
+
         # Append manage booking link if available
         if manage_booking_url:
             # Create shortened URL for SMS
@@ -259,6 +278,196 @@ def send_sms_confirmation_new(booking_id: int):
         if 'cur' in locals():
             cur.close()
         if 'conn' in locals():
+            conn.close()
+
+
+@app.task
+def send_reminder(booking_id: int, offset_minutes: int):
+    """Send ONE customer reminder SMS for a booking, at a given offset (minutes before
+    start). Phase 4 / WP-C. Enqueued by dispatch/send_reminders_dispatch.py.
+
+    Exactly-once: an atomic claim on booking_notification.reminders[offset] — a
+    duplicate enqueue (e.g. overlapping dispatcher runs) claims nothing and returns
+    without sending. Suppressed (no SMS) when the booking is no longer 'confirmed'
+    (cancelled/rescheduled → a new booking_id carries its own reminders) or is a
+    chat-source booking (PSID, no real phone). Online bookings include the LATEST
+    meeting join link (re-read by booking_ref so a rescheduled link is current)."""
+    conn = None
+    cur = None
+    offset_key = str(int(offset_minutes))
+    sent_attempted = False
+    try:
+        conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+        cur = conn.cursor()
+
+        cur.execute("SELECT tenant_id, status FROM bookings WHERE booking_id = %s", (booking_id,))
+        brow = cur.fetchone()
+        if not brow:
+            print(f"[REMINDER] Booking {booking_id} not found.")
+            return
+        tenant_id, status = brow
+
+        # --- Atomic exactly-once claim. Ensure the row exists, then flip this offset
+        # from absent -> 'sending' in one conditional UPDATE. rowcount 0 => another run
+        # already owns this offset -> do not send (no duplicate). ---
+        cur.execute(
+            """
+            INSERT INTO booking_notification (tenant_id, booking_id, reminders)
+            VALUES (%s, %s, '{}'::jsonb)
+            ON CONFLICT (tenant_id, booking_id) DO NOTHING
+            """,
+            (tenant_id, booking_id),
+        )
+        cur.execute(
+            """
+            UPDATE booking_notification
+               SET reminders = jsonb_set(reminders, ARRAY[%s], %s::jsonb, true),
+                   updated_at = now()
+             WHERE tenant_id = %s AND booking_id = %s
+               AND NOT (reminders ? %s)
+            """,
+            (offset_key, json.dumps({"status": "sending"}), tenant_id, booking_id, offset_key),
+        )
+        if cur.rowcount == 0:
+            conn.commit()
+            print(f"[REMINDER] booking {booking_id} offset {offset_key}m already claimed/sent — skip.")
+            return
+        conn.commit()  # publish the claim so a concurrent run sees it
+
+        def _mark(state: dict):
+            cur.execute(
+                """
+                UPDATE booking_notification
+                   SET reminders = jsonb_set(reminders, ARRAY[%s], %s::jsonb, true), updated_at = now()
+                 WHERE tenant_id = %s AND booking_id = %s
+                """,
+                (offset_key, json.dumps(state), tenant_id, booking_id),
+            )
+            conn.commit()
+
+        # --- Suppress: only remind for still-confirmed bookings. A reschedule marks the
+        # original 'modified' and creates a new booking_id (which gets its own reminders). ---
+        if status != "confirmed":
+            _mark({"status": "suppressed", "reason": status})
+            print(f"[REMINDER] Suppressed booking {booking_id} offset {offset_key}m (status={status}).")
+            return
+
+        # --- Chat sources carry a PSID, not a real phone — no reminder SMS. ---
+        if _skip_sms_for_source(cur, booking_id, "send_reminder"):
+            _mark({"status": "suppressed", "reason": "chat_source"})
+            return
+
+        # --- Load booking details (mirror send_sms_confirmation_new). ---
+        cur.execute("""
+            SELECT
+                b.tenant_id, b.customer_name, b.start_time, b.booking_ref, b.party_num,
+                b.customer_phone, l.name AS location_name, l.location_type,
+                s.name AS staff_name, sv.name AS service_name, bp.alias AS booking_page_alias
+            FROM bookings b
+            JOIN locations l ON b.tenant_id = l.tenant_id AND b.location_id = l.location_id
+            LEFT JOIN staff s ON b.tenant_id = s.tenant_id AND b.staff_id = s.staff_id
+            LEFT JOIN services sv ON b.tenant_id = sv.tenant_id AND b.service_id = sv.service_id
+            LEFT JOIN booking_page bp ON b.tenant_id = bp.tenant_id AND b.location_id = bp.location_id AND bp.is_active = true
+            WHERE b.booking_id = %s
+        """, (booking_id,))
+        row = cur.fetchone()
+        if not row:
+            _mark({"status": "suppressed", "reason": "not_found"})
+            print(f"[REMINDER] Booking {booking_id} details vanished.")
+            return
+        (_tid, customer_name, start_time, booking_ref, party_num, customer_phone,
+         location_name, location_type, staff_name, service_name, booking_page_alias) = row
+
+        if not customer_phone:
+            _mark({"status": "suppressed", "reason": "no_phone"})
+            print(f"[REMINDER] booking {booking_id} has no phone — skip.")
+            return
+
+        # Manage-booking URL (same construction as the confirmation SMS).
+        manage_booking_url = ""
+        booking_access_token = None
+        cur.execute("""
+            SELECT token_id FROM booking_access_tokens
+            WHERE tenant_id = %s AND booking_id = %s AND purpose = 'view'
+            ORDER BY created_at DESC LIMIT 1
+        """, (tenant_id, booking_id))
+        token_row = cur.fetchone()
+        if token_row:
+            booking_access_token = str(token_row[0])
+        if booking_page_alias and booking_page_alias.strip():
+            base = os.getenv("BOOKING_LINK_BASE_URL", "https://speako.ai")
+            if booking_access_token and booking_access_token.strip():
+                manage_booking_url = f"{base}/customer/booking/{booking_page_alias.strip()}/view?token={booking_access_token.strip()}"
+            else:
+                manage_booking_url = f"{base}/customer/booking/{booking_page_alias.strip()}/view"
+
+        clean_ref = booking_ref[3:] if booking_ref.startswith("REF") else booking_ref
+
+        if location_type == "rest":
+            message = (
+                f"Reminder: Hi {customer_name}, your booking (Ref: {clean_ref}) for {party_num} "
+                f"at {location_name} is on {start_time.strftime('%Y-%m-%d %H:%M')}."
+            )
+        else:
+            message = (
+                f"Reminder: Hi {customer_name}, your booking (Ref: {clean_ref}) "
+                f"at {location_name} is on {start_time.strftime('%Y-%m-%d %H:%M')} "
+                f"with {staff_name} for {service_name}."
+            )
+
+        # Latest meeting link for online bookings — keyed by booking_ref so a reschedule
+        # (new booking_id, stable ref) still resolves the current link. No artifact → no-op.
+        cur.execute(
+            """
+            SELECT join_url FROM booking_external_artifact
+            WHERE tenant_id = %s AND booking_ref = %s
+              AND state IN ('pending', 'active') AND join_url IS NOT NULL
+            ORDER BY artifact_id DESC LIMIT 1
+            """,
+            (tenant_id, booking_ref),
+        )
+        _mrow = cur.fetchone()
+        meeting_link = _mrow[0] if _mrow else None
+        if meeting_link:
+            message += f" Join your meeting: {meeting_link}"
+
+        if manage_booking_url:
+            message += f" Manage your booking: {create_tiny_url(manage_booking_url)}"
+
+        message += " [Speako AI]"
+
+        sent_attempted = True
+        client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
+        msg = client.messages.create(
+            body=message, from_=os.getenv("TWILIO_SEND_SMS_NUMBER"), to=customer_phone
+        )
+        _mark({
+            "status": "sent",
+            "sent_at": datetime.now(timezone.utc).isoformat(),
+            "provider_message_id": getattr(msg, "sid", None),
+        })
+        print(f"[REMINDER] Sent to {customer_phone} (booking {booking_id}, offset {offset_key}m): {message}")
+
+    except Exception as e:
+        print(f"[REMINDER] Error for booking {booking_id} offset {offset_key}m: {e}")
+        # If we failed BEFORE sending, release the claim so a later run can retry. If we
+        # failed AFTER the Twilio send (e.g. the mark-sent write), leave it claimed —
+        # the SMS already went out, so retrying would double-send.
+        if not sent_attempted and conn is not None and cur is not None:
+            try:
+                conn.rollback()
+                cur.execute(
+                    "UPDATE booking_notification SET reminders = reminders - %s, updated_at = now() "
+                    "WHERE booking_id = %s",
+                    (offset_key, booking_id),
+                )
+                conn.commit()
+            except Exception:
+                pass
+    finally:
+        if cur is not None:
+            cur.close()
+        if conn is not None:
             conn.close()
 
 
@@ -405,6 +614,23 @@ def send_sms_confirmation_mod(booking_id: int):
                 f"has been successfully updated at {location_name} to {start_time.strftime('%Y-%m-%d %H:%M')} "
                 f"with {staff_name} for {service_name}."
             )
+
+        # Online bookings: include the meeting join link (stable across a reschedule).
+        # Resolved by booking_ref because a modify creates a new booking_id whose
+        # artifact may still be relinking; the ref always finds the live meeting.
+        cur.execute(
+            """
+            SELECT join_url FROM booking_external_artifact
+            WHERE tenant_id = %s AND booking_ref = %s
+              AND state IN ('pending', 'active') AND join_url IS NOT NULL
+            ORDER BY artifact_id DESC LIMIT 1
+            """,
+            (tenant_id, booking_ref),
+        )
+        _mrow = cur.fetchone()
+        meeting_link = _mrow[0] if _mrow else None
+        if meeting_link:
+            message += f" Join your meeting: {meeting_link}"
 
         # Append manage booking link if available
         if manage_booking_url:
