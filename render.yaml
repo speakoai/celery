@@ -601,3 +601,40 @@ projects:
       startCommand: PYTHONPATH=. python dispatch/refresh_annual_minutes_dispatch.py
       schedule: 15 0 * * *
       autoDeployTrigger: commit
+    - type: cron
+      name: process-integration-outbox
+      runtime: python
+      repo: https://github.com/speakoai/celery
+      branch: master
+      plan: starter
+      envVars:
+      # Pin Python: Render's account default drifted to 3.14, which Celery 5.2.6 can't import.
+      - key: PYTHON_VERSION
+        value: "3.11.11"
+      - key: SPEAKO_WEB_BASE_URL
+        sync: false
+      - key: API_SECRET_KEY
+        sync: false
+      region: virginia
+      buildCommand: pip install -r requirements.txt
+      startCommand: PYTHONPATH=. python dispatch/process_integration_outbox_dispatch.py
+      schedule: '*/2 * * * *'
+      autoDeployTrigger: commit
+    - type: cron
+      name: send-reminders
+      runtime: python
+      repo: https://github.com/speakoai/celery
+      branch: master
+      plan: starter
+      envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.11"
+      - key: DATABASE_URL
+        sync: false
+      - key: CELERY_BROKER_URL
+        sync: false
+      region: virginia
+      buildCommand: pip install -r requirements.txt
+      startCommand: PYTHONPATH=. python dispatch/send_reminders_dispatch.py
+      schedule: '*/5 * * * *'
+      autoDeployTrigger: commit
