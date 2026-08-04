@@ -303,6 +303,42 @@ projects:
       startCommand: PYTHONPATH=. python dispatch/cancel_unpaid_guarantees_dispatch.py
       schedule: '*/5 * * * *'
       autoDeployTrigger: commit
+    - type: cron
+      name: process-integration-outbox-dev
+      runtime: python
+      repo: https://github.com/speakoai/celery
+      branch: dev
+      plan: starter
+      envVars:
+      - key: SPEAKO_WEB_BASE_URL
+        sync: false
+      - key: API_SECRET_KEY
+        sync: false
+      region: virginia
+      buildCommand: pip install -r requirements.txt
+      startCommand: PYTHONPATH=. python dispatch/process_integration_outbox_dispatch.py
+      schedule: '*/2 * * * *'
+      autoDeployTrigger: commit
+    - type: cron
+      name: send-reminders-dev
+      runtime: python
+      repo: https://github.com/speakoai/celery
+      branch: dev
+      plan: starter
+      envVars:
+      # Pin Python explicitly: Render's account default drifted to 3.14, which
+      # Celery 5.2.6 cannot import on. The rest of the fleet runs 3.11.11.
+      - key: PYTHON_VERSION
+        value: "3.11.11"
+      - key: DATABASE_URL
+        sync: false
+      - key: CELERY_BROKER_URL
+        sync: false
+      region: virginia
+      buildCommand: pip install -r requirements.txt
+      startCommand: PYTHONPATH=. python dispatch/send_reminders_dispatch.py
+      schedule: '*/5 * * * *'
+      autoDeployTrigger: commit
   - name: Production
     services:
     - type: web
