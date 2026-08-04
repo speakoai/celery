@@ -23,6 +23,53 @@ logger = get_task_logger(__name__)
 
 
 # ============================================================================
+# Channel bands
+# ============================================================================
+#
+# ADDING A CHANNEL: a booking whose source appears in no band is counted in NO
+# band -- it silently vanishes from the dashboard chart rather than falling into
+# an "other" bucket. That is how 'web-widget' left two prod tenants staring at an
+# empty chart while holding real bookings. If you add a booking_source value, add
+# it here AND in speako-web/src/lib/dashboard-metrics-generator.ts, then bump
+# TRENDS_CACHE_VERSION below so every tenant rebuilds.
+#
+# 'onboarding' is mapped for completeness only -- obsolete, zero rows on dev and
+# prod.
+CHANNEL_BANDS = [
+    ("bookings_ai", ("voice-ai",)),
+    ("bookings_web", ("web",)),
+    ("bookings_dashboard", ("dashboard", "onboarding")),
+    ("bookings_chat", ("facebook", "instagram", "web-widget")),
+]
+
+BAND_FIELDS = [field for field, _ in CHANNEL_BANDS]
+
+# Booking states that count as real business.
+#
+# 'completed' is included deliberately: applying a terminal service tag moves a
+# booking there (to release the venue-unit EXCLUDE constraint), and counting only
+# 'confirmed' made a tenant's own numbers shrink as they marked work done.
+# 'cancelled' didn't happen; 'modified' rows are superseded originals and would
+# double-count every modification; a pending guarantee isn't a booking yet.
+COUNTED_STATUSES = "('confirmed','completed')"
+
+# Bumped when the cached JSON shape changes. Without a bump, tenants keep
+# appending to an old-shaped tally and any new band stays empty forever.
+TRENDS_CACHE_VERSION = "v3"
+
+
+def _band_count_sql(prefix=""):
+    """One COUNT per band, so the SQL can never drift from CHANNEL_BANDS."""
+    col = f"{prefix}source" if prefix else "source"
+    return ",\n                    ".join(
+        "COUNT(*) FILTER (WHERE {} IN ({})) as {}".format(
+            col, ", ".join("'{}'".format(src) for src in sources), field
+        )
+        for field, sources in CHANNEL_BANDS
+    )
+
+
+# ============================================================================
 # Database Connection
 # ============================================================================
 
@@ -99,7 +146,7 @@ def collect_summary_metrics(tenant_id, location_ids):
                 WHERE tenant_id = %s 
                   AND location_id = ANY(%s)
                   AND start_time >= NOW() - INTERVAL '60 days'
-                  AND status = 'confirmed'
+                  AND status IN ('confirmed','completed')
                 GROUP BY location_id
             """, (tenant_id, location_ids))
             
@@ -298,8 +345,8 @@ def get_cached_trends(tenant_id):
         redis_client = get_redis_client()
         
         # Get cached data
-        cache_key = f"dashboard_metrics:{tenant_id}:trends_data:v2"
-        last_update_key = f"dashboard_metrics:{tenant_id}:last_update:v2"
+        cache_key = f"dashboard_metrics:{tenant_id}:trends_data:{TRENDS_CACHE_VERSION}"
+        last_update_key = f"dashboard_metrics:{tenant_id}:last_update:{TRENDS_CACHE_VERSION}"
         
         cached_json = redis_client.get(cache_key)
         last_update = redis_client.get(last_update_key)
@@ -328,8 +375,8 @@ def save_trends_cache(tenant_id, trends_data):
         redis_client = get_redis_client()
         today_str = datetime.now().date().strftime("%Y-%m-%d")
         
-        cache_key = f"dashboard_metrics:{tenant_id}:trends_data:v2"
-        last_update_key = f"dashboard_metrics:{tenant_id}:last_update:v2"
+        cache_key = f"dashboard_metrics:{tenant_id}:trends_data:{TRENDS_CACHE_VERSION}"
+        last_update_key = f"dashboard_metrics:{tenant_id}:last_update:{TRENDS_CACHE_VERSION}"
         
         # Save data with 95-day TTL
         redis_client.setex(cache_key, 95 * 24 * 60 * 60, json.dumps(trends_data))
@@ -418,50 +465,46 @@ def incremental_trends_update(tenant_id, location_ids, location_names, cached_tr
             cur.execute("""
                 SELECT 
                     b.location_id,
-                    COUNT(*) FILTER (WHERE b.source = 'voice-ai') as ai_count,
-                    COUNT(*) FILTER (WHERE b.source IN ('web', 'dashboard', 'onboarding')) as web_count
+                    """ + _band_count_sql("b.") + """
                 FROM bookings b
                 WHERE b.tenant_id = %s
                   AND b.location_id = ANY(%s)
                   AND DATE(b.start_time) = %s
-                  AND b.status = 'confirmed'
+                  AND b.status IN """ + COUNTED_STATUSES + """
                 GROUP BY b.location_id
             """, (tenant_id, location_ids, yesterday))
             
             yesterday_data = {}
             for row in cur.fetchall():
                 loc_id = str(row[0])
+                # row is (location_id, <one count per band, in CHANNEL_BANDS order>)
                 yesterday_data[loc_id] = {
-                    "ai": row[1] or 0,
-                    "web": row[2] or 0
+                    field: row[i + 1] or 0 for i, field in enumerate(BAND_FIELDS)
                 }
         
         # Update each location's data
         for loc_id_str in cached_trends["by_location"].keys():
             loc_data = cached_trends["by_location"][loc_id_str]
             
-            # Get yesterday's counts (0 if no bookings)
-            new_ai = yesterday_data.get(loc_id_str, {}).get("ai", 0)
-            new_web = yesterday_data.get(loc_id_str, {}).get("web", 0)
-            
+            counts = yesterday_data.get(loc_id_str, {})
+
             # Update 90_days data (append + slide window)
             loc_data["90_days"]["dates"].append(yesterday_str)
             loc_data["90_days"]["dates"].pop(0)  # Remove oldest day
-            
-            loc_data["90_days"]["bookings_ai"].append(new_ai)
-            loc_data["90_days"]["bookings_ai"].pop(0)
-            
-            loc_data["90_days"]["bookings_web"].append(new_web)
-            loc_data["90_days"]["bookings_web"].pop(0)
-            
+
+            for field in BAND_FIELDS:
+                # A tally cached before this band existed has no such key; start
+                # it at the right length so the windows stay aligned.
+                series = loc_data["90_days"].setdefault(field, [0] * 90)
+                series.append(counts.get(field, 0))
+                series.pop(0)
+
             # Update 30_days and 7_days (slices from 90_days)
             loc_data["30_days"]["dates"] = loc_data["90_days"]["dates"][-30:]
-            loc_data["30_days"]["bookings_ai"] = loc_data["90_days"]["bookings_ai"][-30:]
-            loc_data["30_days"]["bookings_web"] = loc_data["90_days"]["bookings_web"][-30:]
-            
             loc_data["7_days"]["dates"] = loc_data["90_days"]["dates"][-7:]
-            loc_data["7_days"]["bookings_ai"] = loc_data["90_days"]["bookings_ai"][-7:]
-            loc_data["7_days"]["bookings_web"] = loc_data["90_days"]["bookings_web"][-7:]
+            for field in BAND_FIELDS:
+                loc_data["30_days"][field] = loc_data["90_days"][field][-30:]
+                loc_data["7_days"][field] = loc_data["90_days"][field][-7:]
         
         # Handle new locations that weren't in cache
         for loc_id in location_ids:
@@ -475,46 +518,42 @@ def incremental_trends_update(tenant_id, location_ids, location_names, cached_tr
                         cur.execute("""
                             SELECT 
                                 DATE(b.start_time) as booking_date,
-                                COUNT(*) FILTER (WHERE b.source = 'voice-ai') as ai_count,
-                                COUNT(*) FILTER (WHERE b.source IN ('web', 'dashboard', 'onboarding')) as web_count
+                            """ + _band_count_sql("b.") + """
                             FROM bookings b
                             WHERE b.tenant_id = %s
                               AND b.location_id = %s
                               AND b.start_time >= CURRENT_DATE - INTERVAL '89 days'
-                              AND b.status = 'confirmed'
+                              AND b.status IN """ + COUNTED_STATUSES + """
                             GROUP BY DATE(b.start_time)
                         """, (tenant_id, loc_id))
                         
                         # Build 90-day arrays
                         date_range_90 = [(today - timedelta(days=i)) for i in range(89, -1, -1)]
                         date_strings_90 = [d.strftime("%Y-%m-%d") for d in date_range_90]
-                        bookings_ai_90 = [0] * 90
-                        bookings_web_90 = [0] * 90
-                        
+                        band_series = {field: [0] * 90 for field in BAND_FIELDS}
+
                         for row in cur.fetchall():
                             date_str = row[0].strftime("%Y-%m-%d")
                             if date_str in date_strings_90:
                                 idx = date_strings_90.index(date_str)
-                                bookings_ai_90[idx] = row[1] or 0
-                                bookings_web_90[idx] = row[2] or 0
+                                # row is (booking_date, <one count per band>)
+                                for i, field in enumerate(BAND_FIELDS):
+                                    band_series[field][idx] = row[i + 1] or 0
                         
                         cached_trends["by_location"][loc_id_str] = {
                             "location_name": location_names.get(loc_id, f"Location {loc_id}"),
-                            "7_days": {
-                                "dates": date_strings_90[-7:],
-                                "bookings_ai": bookings_ai_90[-7:],
-                                "bookings_web": bookings_web_90[-7:]
-                            },
-                            "30_days": {
-                                "dates": date_strings_90[-30:],
-                                "bookings_ai": bookings_ai_90[-30:],
-                                "bookings_web": bookings_web_90[-30:]
-                            },
-                            "90_days": {
-                                "dates": date_strings_90,
-                                "bookings_ai": bookings_ai_90,
-                                "bookings_web": bookings_web_90
-                            }
+                            "7_days": dict(
+                                {"dates": date_strings_90[-7:]},
+                                **{f: band_series[f][-7:] for f in BAND_FIELDS},
+                            ),
+                            "30_days": dict(
+                                {"dates": date_strings_90[-30:]},
+                                **{f: band_series[f][-30:] for f in BAND_FIELDS},
+                            ),
+                            "90_days": dict(
+                                {"dates": date_strings_90},
+                                **{f: band_series[f] for f in BAND_FIELDS},
+                            )
                         }
                 finally:
                     conn_backfill.close()
@@ -524,25 +563,21 @@ def incremental_trends_update(tenant_id, location_ids, location_names, cached_tr
         cached_trends["all_locations"]["90_days"]["dates"].pop(0)
 
         # Recalculate all_locations aggregation
-        all_locations_ai_90 = [0] * 90
-        all_locations_web_90 = [0] * 90
-        
+        all_locations_90 = {field: [0] * 90 for field in BAND_FIELDS}
+
         for loc_data in cached_trends["by_location"].values():
-            for i in range(90):
-                all_locations_ai_90[i] += loc_data["90_days"]["bookings_ai"][i]
-                all_locations_web_90[i] += loc_data["90_days"]["bookings_web"][i]
-        
+            for field in BAND_FIELDS:
+                series = loc_data["90_days"].get(field, [0] * 90)
+                for i in range(90):
+                    all_locations_90[field][i] += series[i]
+
         # Update all_locations
-        cached_trends["all_locations"]["90_days"]["bookings_ai"] = all_locations_ai_90
-        cached_trends["all_locations"]["90_days"]["bookings_web"] = all_locations_web_90
-        
         cached_trends["all_locations"]["30_days"]["dates"] = cached_trends["all_locations"]["90_days"]["dates"][-30:]
-        cached_trends["all_locations"]["30_days"]["bookings_ai"] = all_locations_ai_90[-30:]
-        cached_trends["all_locations"]["30_days"]["bookings_web"] = all_locations_web_90[-30:]
-        
         cached_trends["all_locations"]["7_days"]["dates"] = cached_trends["all_locations"]["90_days"]["dates"][-7:]
-        cached_trends["all_locations"]["7_days"]["bookings_ai"] = all_locations_ai_90[-7:]
-        cached_trends["all_locations"]["7_days"]["bookings_web"] = all_locations_web_90[-7:]
+        for field in BAND_FIELDS:
+            cached_trends["all_locations"]["90_days"][field] = all_locations_90[field]
+            cached_trends["all_locations"]["30_days"][field] = all_locations_90[field][-30:]
+            cached_trends["all_locations"]["7_days"][field] = all_locations_90[field][-7:]
         
         logger.info(f"[Tenant {tenant_id}] ✓ Incremental update complete")
         return cached_trends
@@ -577,11 +612,10 @@ def full_trends_query(tenant_id, location_ids, location_names):
         # Initialize data structure for all locations
         location_data = {}
         for loc_id in location_ids:
-            location_data[loc_id] = {
-                "dates": date_strings_90.copy(),
-                "bookings_ai": [0] * 90,
-                "bookings_web": [0] * 90
-            }
+            location_data[loc_id] = dict(
+                {"dates": date_strings_90.copy()},
+                **{field: [0] * 90 for field in BAND_FIELDS},
+            )
         
         # Query: Get 90 days of booking data by source (using location timezone for date extraction)
         with conn.cursor() as cur:
@@ -589,13 +623,12 @@ def full_trends_query(tenant_id, location_ids, location_names):
                 SELECT 
                     b.location_id,
                     DATE(b.start_time) as booking_date,
-                    COUNT(*) FILTER (WHERE b.source = 'voice-ai') as ai_count,
-                    COUNT(*) FILTER (WHERE b.source IN ('web', 'dashboard', 'onboarding')) as web_count
+                    """ + _band_count_sql("b.") + """
                 FROM bookings b
                 WHERE b.tenant_id = %s
                   AND b.location_id = ANY(%s)
                   AND b.start_time >= CURRENT_DATE - INTERVAL '89 days'
-                  AND b.status = 'confirmed'
+                  AND b.status IN """ + COUNTED_STATUSES + """
                 GROUP BY b.location_id, DATE(b.start_time)
                 ORDER BY booking_date
             """, (tenant_id, location_ids))
@@ -604,15 +637,14 @@ def full_trends_query(tenant_id, location_ids, location_names):
             for row in cur.fetchall():
                 loc_id = row[0]
                 booking_date = row[1]
-                ai_count = row[2] or 0
-                web_count = row[3] or 0
-                
+
                 # Find index in date array
                 date_str = booking_date.strftime("%Y-%m-%d")
                 if date_str in date_strings_90:
                     idx = date_strings_90.index(date_str)
-                    location_data[loc_id]["bookings_ai"][idx] = ai_count
-                    location_data[loc_id]["bookings_web"][idx] = web_count
+                    # row is (location_id, booking_date, <one count per band>)
+                    for i, field in enumerate(BAND_FIELDS):
+                        location_data[loc_id][field][idx] = row[i + 2] or 0
         
         # Build trends structure with 7/30/90 day windows
         trends = {
@@ -621,30 +653,25 @@ def full_trends_query(tenant_id, location_ids, location_names):
         }
         
         # Aggregate all_locations data
-        all_locations_ai_90 = [0] * 90
-        all_locations_web_90 = [0] * 90
-        
+        all_locations_90 = {field: [0] * 90 for field in BAND_FIELDS}
         for loc_id in location_ids:
-            for i in range(90):
-                all_locations_ai_90[i] += location_data[loc_id]["bookings_ai"][i]
-                all_locations_web_90[i] += location_data[loc_id]["bookings_web"][i]
-        
+            for field in BAND_FIELDS:
+                for i in range(90):
+                    all_locations_90[field][i] += location_data[loc_id][field][i]
+
         # Create time windows for all_locations
-        trends["all_locations"]["7_days"] = {
-            "dates": date_strings_90[-7:],
-            "bookings_ai": all_locations_ai_90[-7:],
-            "bookings_web": all_locations_web_90[-7:]
-        }
-        trends["all_locations"]["30_days"] = {
-            "dates": date_strings_90[-30:],
-            "bookings_ai": all_locations_ai_90[-30:],
-            "bookings_web": all_locations_web_90[-30:]
-        }
-        trends["all_locations"]["90_days"] = {
-            "dates": date_strings_90,
-            "bookings_ai": all_locations_ai_90,
-            "bookings_web": all_locations_web_90
-        }
+        trends["all_locations"]["7_days"] = dict(
+            {"dates": date_strings_90[-7:]},
+            **{f: all_locations_90[f][-7:] for f in BAND_FIELDS},
+        )
+        trends["all_locations"]["30_days"] = dict(
+            {"dates": date_strings_90[-30:]},
+            **{f: all_locations_90[f][-30:] for f in BAND_FIELDS},
+        )
+        trends["all_locations"]["90_days"] = dict(
+            {"dates": date_strings_90},
+            **{f: all_locations_90[f] for f in BAND_FIELDS},
+        )
         
         # Create time windows for each location
         for loc_id in location_ids:
@@ -652,21 +679,18 @@ def full_trends_query(tenant_id, location_ids, location_names):
             
             trends["by_location"][str(loc_id)] = {
                 "location_name": location_names.get(loc_id, f"Location {loc_id}"),
-                "7_days": {
-                    "dates": loc_data["dates"][-7:],
-                    "bookings_ai": loc_data["bookings_ai"][-7:],
-                    "bookings_web": loc_data["bookings_web"][-7:]
-                },
-                "30_days": {
-                    "dates": loc_data["dates"][-30:],
-                    "bookings_ai": loc_data["bookings_ai"][-30:],
-                    "bookings_web": loc_data["bookings_web"][-30:]
-                },
-                "90_days": {
-                    "dates": loc_data["dates"],
-                    "bookings_ai": loc_data["bookings_ai"],
-                    "bookings_web": loc_data["bookings_web"]
-                }
+                "7_days": dict(
+                    {"dates": loc_data["dates"][-7:]},
+                    **{f: loc_data[f][-7:] for f in BAND_FIELDS},
+                ),
+                "30_days": dict(
+                    {"dates": loc_data["dates"][-30:]},
+                    **{f: loc_data[f][-30:] for f in BAND_FIELDS},
+                ),
+                "90_days": dict(
+                    {"dates": loc_data["dates"]},
+                    **{f: loc_data[f] for f in BAND_FIELDS},
+                )
             }
         
         logger.info(f"[Tenant {tenant_id}] ✓ Booking trends collected")
@@ -716,7 +740,9 @@ def save_metrics_to_database(tenant_id, metrics_json):
                 tenant_id,
                 datetime.now(),
                 json.dumps(metrics_json),
-                'v1'
+                # v2 = four channel bands + 'completed' counted. Kept in step
+                # with speako-web's generator, which writes the same string.
+                'v2'
             ))
             
             conn.commit()
