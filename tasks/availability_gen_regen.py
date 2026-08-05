@@ -2,6 +2,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from tasks.celery_app import app
+from tasks.utils.redact import redact_url
 from celery.utils.log import get_task_logger
 from tasks.utils.availability_helpers import (
     reconstruct_staff_availability,
@@ -20,8 +21,9 @@ from zoneinfo import ZoneInfo
 from dateutil import parser
 import time
 
-print(f"[DEBUG] DATABASE_URL: {os.getenv('DATABASE_URL')}")
-print(f"[DEBUG] REDIS_URL: {os.getenv('REDIS_URL')}")
+# NOTE: these two lines used to print the full DATABASE_URL and REDIS_URL
+# (passwords included) to Render's logs on every worker and cron start.
+# Removed 2026-08-05 — see tasks/utils/redact.py.
 
 load_dotenv()
 logger = get_task_logger(__name__)
@@ -65,7 +67,7 @@ def fetch_sample_data():
         logger.error("DATABASE_URL not set")
         return
 
-    logger.info(f"[PRODUCTION] Connecting to PostgreSQL at: {db_url}")
+    logger.info(f"[PRODUCTION] Connecting to PostgreSQL at: {redact_url(db_url)}")
 
     try:
         conn = psycopg2.connect(db_url)
@@ -95,7 +97,7 @@ def gen_availability(self, tenant_id, location_id, location_tz, affected_date=No
     try:
         pg_conn = psycopg2.connect(db_url)
         logger.info("✅ Connected to PostgreSQL")
-        logger.debug(f"🔍 Using DB URL: {os.getenv('DATABASE_URL')}")
+        logger.debug(f"🔍 Using DB URL: {redact_url(os.getenv('DATABASE_URL'))}")
 
         valkey_client = redis.Redis.from_url(redis_url, decode_responses=True)
         logger.info("[DEBUG] Connected to Redis")
