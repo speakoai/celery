@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import json
 """
@@ -167,6 +168,123 @@ def _format_onetime_hours(hours_data: list) -> list:
 
 
 # ============================================================================
+# Speakable Formatting Helpers (markdown layer only)
+# ============================================================================
+# Everything in the knowledge markdown ends up spoken by TTS, which reads
+# "18:00" as "one eight zero zero" and pronounces an email local part as a
+# pseudo-word. These helpers rewrite the *markdown* into the shape it should
+# sound like.
+#
+# They deliberately run downstream of json_output, so value_json keeps its
+# 24-hour machine-readable form. See docs/plans/speakable-agent-output/.
+
+_TIME_RANGE_RE = re.compile(r'\b(\d{1,2}):(\d{2})\s*[–—-]\s*(\d{1,2}):(\d{2})\b')
+
+# Characters that carry meaning in an address and must be spoken, not skipped.
+_SPOKEN_SYMBOLS = {
+    '.': 'dot', '_': 'underscore', '-': 'dash', '+': 'plus', "'": 'apostrophe',
+}
+
+
+def _speakable_clock(hour: int, minute: int) -> str:
+    """One 24-hour clock time as it should be spoken: 7 AM, 9:30 AM, noon, midnight."""
+    if minute == 0 and hour in (0, 24):
+        return "midnight"
+    if minute == 0 and hour == 12:
+        return "noon"
+    suffix = "AM" if hour < 12 else "PM"
+    hour12 = hour % 12 or 12
+    return f"{hour12} {suffix}" if minute == 0 else f"{hour12}:{minute:02d} {suffix}"
+
+
+def _speakable_hours(text: str) -> str:
+    """Rewrite every "HH:MM-HH:MM" range in an already-formatted hours string.
+
+    Idempotent: the output ("7 AM to 11 AM") contains no HH:MM-HH:MM pattern,
+    so re-running over converted text is a no-op — knowledge re-syncs often.
+    Slot labels, "Closed" and "Off Duty" pass through untouched.
+    """
+    if not text:
+        return text
+
+    def _rewrite(match):
+        start = _speakable_clock(int(match.group(1)), int(match.group(2)))
+        end = _speakable_clock(int(match.group(3)), int(match.group(4)))
+        return f"{start} to {end}"
+
+    return _TIME_RANGE_RE.sub(_rewrite, text)
+
+
+def _spell_out(text: str) -> str:
+    """Spell text as separate spoken letters.
+
+    "secretaryssds" -> "S. E. C., R. E. T., A. R. Y., S. S. D. S."
+
+    Grouped in threes with a comma between groups: the commas become prosodic
+    pauses, which is what stops TTS compressing a long letter run and dropping
+    letters. A trailing single letter is merged into the previous group so no
+    group is left orphaned. Never hyphen-joined — TTS treats "s-e-c-r-e-t" as
+    one token and elides most of it, which is the original defect.
+    """
+    tokens = []
+    for char in text or "":
+        if char.isspace():
+            continue
+        if char.isalnum():
+            tokens.append(f"{char.upper()}.")
+        elif char in _SPOKEN_SYMBOLS:
+            tokens.append(_SPOKEN_SYMBOLS[char])
+
+    if not tokens:
+        return ""
+
+    groups = [tokens[i:i + 3] for i in range(0, len(tokens), 3)]
+    if len(groups) > 1 and len(groups[-1]) == 1:
+        groups[-2].extend(groups.pop())
+
+    return ", ".join(" ".join(group) for group in groups)
+
+
+def _speakable_email(email: str) -> str:
+    """An email address as it should be read aloud on a phone call.
+
+    The local part is always spelled out: an address said once at conversational
+    speed is useless to a caller writing it down. The domain is spoken as words
+    with "." expanded, because spelling a whole domain is harder to listen to
+    than the occasional fumbled custom domain — and a tenant can add a rule on
+    the dashboard Pronunciations page for that case.
+    """
+    email = (email or "").strip()
+    if "@" not in email:
+        return ""
+
+    local, _, domain = email.partition("@")
+    spoken_local = _spell_out(local)
+    spoken_domain = " dot ".join(part for part in domain.split(".") if part)
+    if not spoken_local or not spoken_domain:
+        return ""
+
+    return f"{spoken_local}, at {spoken_domain}"
+
+
+def _speakable_website(url: str) -> str:
+    """A website as it should be read aloud: scheme and "www." dropped, "." spoken.
+
+    Only the host is returned — a long path is unusable over the phone.
+    """
+    cleaned = (url or "").strip()
+    for prefix in ("https://", "http://"):
+        if cleaned.lower().startswith(prefix):
+            cleaned = cleaned[len(prefix):]
+            break
+    if cleaned.lower().startswith("www."):
+        cleaned = cleaned[4:]
+
+    host = cleaned.split("/")[0]
+    return " dot ".join(part for part in host.split(".") if part)
+
+
+# ============================================================================
 # Markdown Generation Helpers for business_info
 # ============================================================================
 
@@ -174,7 +292,7 @@ def _format_day_hours_markdown(hours_array: list) -> str:
     """Format hours array for a single day into markdown string."""
     if not hours_array:
         return "Closed"
-    return ", ".join(hours_array)
+    return _speakable_hours(", ".join(hours_array))
 
 
 def _format_week_schedule_markdown(recurring_dict: dict) -> str:
@@ -220,7 +338,7 @@ def _format_exceptions_markdown(exceptions_array: list) -> str:
             else:
                 desc = "Closed"
         else:
-            hours_text = ", ".join(hours) if hours else "Open"
+            hours_text = _speakable_hours(", ".join(hours)) if hours else "Open"
             if holiday_name:
                 desc = f"{hours_text} ({holiday_name})"
             elif exc_type == 'special_hours':
@@ -283,8 +401,16 @@ def _build_business_info_markdown(json_data: dict) -> str:
             contact_lines.append(f"- **Phone**: {phone}")
         if email:
             contact_lines.append(f"- **Email**: {email}")
+            # Spoken form: the raw address stays above for text channels (widget,
+            # Messenger, IG), where spelling it out would be wrong.
+            spoken_email = _speakable_email(email)
+            if spoken_email:
+                contact_lines.append(f"  - *Spoken form*: {spoken_email}")
         if website:
             contact_lines.append(f"- **Website**: {website}")
+            spoken_website = _speakable_website(website)
+            if spoken_website:
+                contact_lines.append(f"  - *Spoken form*: {spoken_website}")
         sections.append("\n" + "\n".join(contact_lines))
     
     # Opening Hours (Phase 1/FR1a): business_info is scoped to ONE location, so inline
@@ -1303,8 +1429,14 @@ def _format_location_details_markdown(location: dict) -> str:
             sections.append(f"  \n📞 {phone}")
         if email:
             sections.append(f"  \n📧 {email}")
+            spoken_email = _speakable_email(email)
+            if spoken_email:
+                sections.append(f"  \n*Spoken form*: {spoken_email}")
         if website:
             sections.append(f"  \n🌐 {website}")
+            spoken_website = _speakable_website(website)
+            if spoken_website:
+                sections.append(f"  \n*Spoken form*: {spoken_website}")
     
     # Hours
     hours = location.get('hours', {})
@@ -1686,7 +1818,7 @@ def _format_staff_day_hours_markdown(hours_array: list) -> str:
     """Format hours array for a single day into markdown string (staff context)."""
     if not hours_array:
         return "Off Duty"
-    return ", ".join(hours_array)
+    return _speakable_hours(", ".join(hours_array))
 
 
 def _format_staff_week_schedule_markdown(recurring_dict: dict) -> str:
@@ -1832,7 +1964,7 @@ def _format_staff_member_markdown(staff: dict, is_primary: bool = True) -> str:
                 
                 # Get first time range as example
                 first_day_hours = loc_recurring[days_available[0]]
-                hours_str = first_day_hours[0] if first_day_hours else ''
+                hours_str = _speakable_hours(first_day_hours[0]) if first_day_hours else ''
                 
                 sections.append(f"- **{loc_name}**: {days_str} {hours_str}")
     
