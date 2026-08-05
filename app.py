@@ -7,6 +7,7 @@ import psycopg2
 import redis
 from functools import wraps
 from flask import Flask, flash, render_template, redirect, request, jsonify
+from tasks.utils.redact import redact_url
 from tasks.demo_task import add
 from tasks.availability_gen_regen import gen_availability, gen_availability_venue
 from tasks.sms import (
@@ -2893,8 +2894,11 @@ def elevenlabs_post_conversation_webhook():
     # Debug: Show configured environment resources
     print("-" * 80)
     print("🔧 CONFIGURED RESOURCES:")
-    db_url_display = DATABASE_URL[:50] + "..." if DATABASE_URL and len(DATABASE_URL) > 50 else DATABASE_URL
-    db_url_dev_display = DATABASE_URL_DEV[:50] + "..." if DATABASE_URL_DEV and len(DATABASE_URL_DEV) > 50 else DATABASE_URL_DEV
+    # Redact, don't truncate: "postgresql://speako_ai_dev_db_user:" is already
+    # 35 chars, so the old [:50] preview leaked the first ~15 characters of the
+    # password into Render's logs on every webhook.
+    db_url_display = redact_url(DATABASE_URL)
+    db_url_dev_display = redact_url(DATABASE_URL_DEV, placeholder="")
     print(f"   DATABASE_URL (PROD): {db_url_display}")
     print(f"   DATABASE_URL_DEV: {db_url_dev_display or 'NOT CONFIGURED'}")
     print(f"   R2_BUCKET_NAME (PROD): {os.getenv('R2_BUCKET_NAME', 'NOT SET')}")
