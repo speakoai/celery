@@ -339,6 +339,44 @@ projects:
       startCommand: PYTHONPATH=. python dispatch/send_reminders_dispatch.py
       schedule: '*/5 * * * *'
       autoDeployTrigger: commit
+    - type: cron
+      name: pull-render-logs-dev
+      runtime: python
+      repo: https://github.com/speakoai/celery
+      branch: dev
+      plan: starter
+      envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.11"
+      - key: DATABASE_URL
+        sync: false
+      - key: CELERY_BROKER_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: RENDER_API_KEY
+        sync: false
+      - key: RENDER_OWNER_ID
+        sync: false
+      - key: RENDER_VOICE_AZURE_SERVICE_ID_DEV
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_ENDPOINT_URL
+        sync: false
+      - key: R2_BUCKET_NAME_DEV
+        sync: false
+      region: virginia
+      buildCommand: pip install -r requirements.txt
+      # --sync runs the sweep inline in this cron instead of enqueueing it. The
+      # celery worker is a single memory-constrained process shared with
+      # availability regeneration; a log sweep has no business occupying one of
+      # its slots.
+      startCommand: PYTHONPATH=. python dispatch/pull_render_logs_dispatch.py --dev --sync
+      schedule: '*/5 * * * *'
+      autoDeployTrigger: commit
   - name: Production
     services:
     - type: web
@@ -674,5 +712,43 @@ projects:
       region: virginia
       buildCommand: pip install -r requirements.txt
       startCommand: PYTHONPATH=. python dispatch/send_reminders_dispatch.py
+      schedule: '*/5 * * * *'
+      autoDeployTrigger: commit
+    - type: cron
+      name: pull-render-logs
+      runtime: python
+      repo: https://github.com/speakoai/celery
+      branch: master
+      plan: starter
+      envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.11"
+      - key: DATABASE_URL
+        sync: false
+      - key: CELERY_BROKER_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: RENDER_API_KEY
+        sync: false
+      - key: RENDER_OWNER_ID
+        sync: false
+      - key: RENDER_VOICE_AZURE_SERVICE_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_ENDPOINT_URL
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false
+      region: virginia
+      buildCommand: pip install -r requirements.txt
+      # --sync runs the sweep inline in this cron instead of enqueueing it. The
+      # celery worker is a single memory-constrained process shared with
+      # availability regeneration; a log sweep has no business occupying one of
+      # its slots.
+      startCommand: PYTHONPATH=. python dispatch/pull_render_logs_dispatch.py --sync
       schedule: '*/5 * * * *'
       autoDeployTrigger: commit
