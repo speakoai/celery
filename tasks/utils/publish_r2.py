@@ -231,3 +231,71 @@ def upload_audio_to_r2(
     )
 
     return (r2_key, public_url)
+
+
+def upload_call_log_to_r2(
+    tenant_id,
+    location_id,
+    call_sid: str,
+    call_date: str,
+    gz_bytes: bytes,
+    extra_metadata: Dict[str, str] = None,
+    use_dev: bool = False,
+) -> str:
+    """
+    Upload a gzipped per-call server-log artifact to R2.
+
+    Deliberately returns ONLY the object key — never a public URL. Unlike
+    conversation audio, these artifacts contain caller phone numbers, names and
+    full transcripts, so they must be served through the authenticated proxy in
+    speako-agent-admin, not linked directly.
+
+    The key is deterministic, so re-running the puller for the same call
+    overwrites the same object instead of accumulating duplicates.
+
+    Path: call-logs/{tenant_id}/{location_id}/{YYYY-MM-DD}/{call_sid}.jsonl.gz
+    Calls with no known tenant/location (rejected before the media stream, or
+    crashed before `Stream started`) land under call-logs/unattached/{date}/.
+    """
+    if use_dev:
+        bucket_name = R2_BUCKET_NAME_DEV
+        env_label = "DEV"
+    else:
+        bucket_name = R2_BUCKET_NAME
+        env_label = "PROD"
+
+    if not bucket_name:
+        raise RuntimeError(f"R2 bucket name not configured for {env_label} environment")
+
+    if tenant_id and location_id:
+        r2_key = f"call-logs/{tenant_id}/{location_id}/{call_date}/{call_sid}.jsonl.gz"
+    else:
+        r2_key = f"call-logs/unattached/{call_date}/{call_sid}.jsonl.gz"
+
+    metadata = {
+        'call_sid': call_sid,
+        'group': 'call_server_log',
+        'environment': env_label.lower(),
+        'upload_timestamp': datetime.utcnow().isoformat() + 'Z',
+    }
+    if tenant_id:
+        metadata['tenant_id'] = str(tenant_id)
+    if location_id:
+        metadata['location_id'] = str(location_id)
+    if extra_metadata:
+        metadata.update({k: str(v) for k, v in extra_metadata.items()})
+
+    _get_r2_client().put_object(
+        Bucket=bucket_name,
+        Key=r2_key,
+        Body=gz_bytes,
+        ContentType='application/gzip',
+        ContentEncoding='gzip',
+        Metadata=metadata,
+    )
+
+    logger.info(
+        f"[publish_r2] Uploaded call log to R2 ({env_label}): key={r2_key}, "
+        f"bytes={len(gz_bytes)}"
+    )
+    return r2_key
