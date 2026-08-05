@@ -18,6 +18,7 @@ Usage:
 
 import argparse
 import json
+import sys
 from datetime import datetime
 
 from dotenv import load_dotenv
@@ -47,6 +48,13 @@ def main():
     if args.sync:
         result = pull_render_logs(**kwargs)
         print(json.dumps(result, indent=2))
+        # Exit non-zero on a configuration failure so Render marks the cron run
+        # RED. Without this a missing RENDER_API_KEY would return cleanly and
+        # every run would look green while nothing was ever captured — the
+        # exact silent failure that would waste a multi-day soak.
+        if not result.get("success"):
+            print(f"[ERROR] sweep did not run: {result.get('error')}")
+            sys.exit(1)
     else:
         async_result = pull_render_logs.apply_async(kwargs=kwargs)
         print(f"[DISPATCHED] Task ID = {async_result.id}")
