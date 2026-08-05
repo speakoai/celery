@@ -55,6 +55,15 @@ def main():
         if not result.get("success"):
             print(f"[ERROR] sweep did not run: {result.get('error')}")
             sys.exit(1)
+        # A sweep that found work and completed none of it is a broken sweep,
+        # even though the task itself "succeeded". The classic cause is a
+        # misconfigured R2 bucket variable: parsing works, every upload throws,
+        # and the run would otherwise exit 0 and show green while capturing
+        # nothing. Isolated failures (one bad call among many) still pass.
+        if result.get("failed") and not result.get("uploaded"):
+            print(f"[ERROR] every artifact failed to store "
+                  f"({result['failed']} call(s), 0 uploaded) — check R2 config")
+            sys.exit(1)
     else:
         async_result = pull_render_logs.apply_async(kwargs=kwargs)
         print(f"[DISPATCHED] Task ID = {async_result.id}")
