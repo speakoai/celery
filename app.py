@@ -12,6 +12,7 @@ from tasks.demo_task import add
 from tasks.availability_gen_regen import gen_availability, gen_availability_venue
 from tasks.sms import (
     send_sms_confirmation_new, send_sms_confirmation_mod, send_sms_confirmation_can,
+    send_sms_merchant,
     send_email_confirmation_new_rest, send_email_confirmation_new, 
     send_email_confirmation_mod_rest, send_email_confirmation_mod,
     send_email_confirmation_can_rest, send_email_confirmation_can,
@@ -1302,6 +1303,64 @@ def api_send_sms():
         
         return jsonify(response), 202
         
+    except Exception as e:
+        return jsonify({
+            'error': 'Internal server error',
+            'message': str(e)
+        }), 500
+
+
+@app.route('/api/booking/merchant_sms', methods=['POST'])
+@require_api_key
+def api_send_merchant_sms():
+    """
+    Text opted-in team members (tenant_users.receive_booking_sms with a
+    verified phone) about a booking event. Called by speako-web's
+    sendBookingNotifications funnel for every booking source.
+    Expected JSON payload:
+    {
+        "booking_id": 123,
+        "action": "new" | "modify" | "cancel"
+    }
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'JSON payload required'}), 400
+
+        missing_fields = [f for f in ('booking_id', 'action') if f not in data]
+        if missing_fields:
+            return jsonify({
+                'error': 'Missing required fields',
+                'missing_fields': missing_fields
+            }), 400
+
+        try:
+            booking_id = int(data['booking_id'])
+        except (ValueError, TypeError):
+            return jsonify({
+                'error': 'Invalid booking_id',
+                'message': 'booking_id must be a valid integer',
+                'provided': data['booking_id']
+            }), 400
+
+        action = data['action']
+        if action not in ('new', 'modify', 'cancel'):
+            return jsonify({
+                'error': 'Invalid action',
+                'message': 'action must be one of: new, modify, cancel',
+                'provided': action
+            }), 400
+
+        task = send_sms_merchant.delay(booking_id, action)
+
+        return jsonify({
+            'message': 'Merchant SMS task started',
+            'booking_id': booking_id,
+            'action': action,
+            'task_id': task.id
+        }), 202
+
     except Exception as e:
         return jsonify({
             'error': 'Internal server error',

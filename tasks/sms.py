@@ -779,6 +779,127 @@ def send_sms_confirmation_can(booking_id: int):
         if 'conn' in locals():
             conn.close()
 
+@app.task
+def send_sms_merchant(booking_id: int, action: str):
+    """
+    Text the tenant's opted-in team members about a booking event.
+
+    Recipients come from tenant_users: receive_booking_sms = true AND a
+    phone_number mirrored from a Clerk-VERIFIED phone (speako-web keeps the
+    mirror; celery never talks to Clerk). Triggered by speako-web's
+    sendBookingNotifications funnel via /api/booking/merchant_sms, so every
+    booking source (voice, dashboard, public page, chat) is covered.
+    """
+    try:
+        if action not in ("new", "modify", "cancel"):
+            print(f"[Merchant SMS] Unknown action '{action}' for booking {booking_id} — skipping.")
+            return
+
+        conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT
+                b.tenant_id,
+                b.customer_name,
+                b.start_time,
+                b.booking_ref,
+                b.party_num,
+                l.name AS location_name,
+                l.location_type,
+                s.name AS staff_name,
+                sv.name AS service_name
+            FROM bookings b
+            JOIN locations l
+              ON b.tenant_id = l.tenant_id AND b.location_id = l.location_id
+            LEFT JOIN staff s
+              ON b.tenant_id = s.tenant_id AND b.staff_id = s.staff_id
+            LEFT JOIN services sv
+              ON b.tenant_id = sv.tenant_id AND b.service_id = sv.service_id
+            WHERE b.booking_id = %s
+        """, (booking_id,))
+
+        row = cur.fetchone()
+        if not row:
+            print(f"[Merchant SMS] Booking {booking_id} not found.")
+            return
+
+        (
+            tenant_id,
+            customer_name,
+            start_time,
+            booking_ref,
+            party_num,
+            location_name,
+            location_type,
+            staff_name,
+            service_name,
+        ) = row
+
+        cur.execute("""
+            SELECT phone_number
+            FROM tenant_users
+            WHERE tenant_id = %s
+              AND receive_booking_sms = true
+              AND phone_number IS NOT NULL
+              AND is_system_user = false
+        """, (tenant_id,))
+        recipients = [r[0] for r in cur.fetchall()]
+
+        if not recipients:
+            print(f"[Merchant SMS] No opted-in verified phones for tenant {tenant_id} — nothing to send.")
+            return
+
+        clean_ref = booking_ref[3:] if booking_ref and booking_ref.startswith("REF") else (booking_ref or "")
+        when = start_time.strftime('%Y-%m-%d %H:%M')
+
+        event = {
+            "new": "New booking",
+            "modify": "Booking updated",
+            "cancel": "Booking cancelled",
+        }[action]
+
+        if location_type == "rest":
+            message = (
+                f"{event} at {location_name}: {customer_name}, party of {party_num}, "
+                f"{when} (Ref: {clean_ref})."
+            )
+        else:
+            detail = ""
+            if staff_name and service_name:
+                detail = f" with {staff_name} for {service_name}"
+            elif service_name:
+                detail = f" for {service_name}"
+            message = (
+                f"{event} at {location_name}: {customer_name}, {when}{detail} "
+                f"(Ref: {clean_ref})."
+            )
+
+        message += " [Speako AI]"
+
+        client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
+        sent = 0
+        for phone in recipients:
+            try:
+                client.messages.create(
+                    body=message,
+                    from_=os.getenv("TWILIO_SEND_SMS_NUMBER"),
+                    to=phone,
+                )
+                sent += 1
+            except Exception as send_err:
+                print(f"[Merchant SMS] Failed sending to ***{str(phone)[-3:]}: {send_err}")
+
+        print(f"[Merchant SMS] Booking {booking_id} ({action}): sent {sent}/{len(recipients)} — {message}")
+
+    except Exception as e:
+        print(f"[Merchant SMS] Error: {e}")
+    finally:
+        if 'cur' in locals():
+            cur.close()
+        if 'conn' in locals():
+            conn.close()
+
 # Simple email validation regex
 EMAIL_REGEX = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
 
