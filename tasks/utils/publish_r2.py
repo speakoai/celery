@@ -26,13 +26,18 @@ R2_PUBLIC_BASE_URL_DEV = os.getenv("R2_PUBLIC_BASE_URL_DEV", "https://assets-dev
 
 
 def _get_r2_client():
-    """Get configured boto3 S3 client for Cloudflare R2."""
-    if not all([R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT_URL, R2_BUCKET_NAME]):
+    """Get configured boto3 S3 client for Cloudflare R2.
+
+    Only validates the client-level variables. Bucket names are checked at
+    each call site against the environment (dev/prod) actually being written,
+    so a dev-only service doesn't have to carry R2_BUCKET_NAME.
+    """
+    if not all([R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT_URL]):
         raise RuntimeError(
             "R2 storage not configured. Missing one or more environment variables: "
-            "R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT_URL, R2_BUCKET_NAME"
+            "R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT_URL"
         )
-    
+
     return boto3.client(
         's3',
         endpoint_url=R2_ENDPOINT_URL,
@@ -104,11 +109,14 @@ def upload_knowledge_to_r2(
     
     Upload path structure: {tenant_id}/{location_id}/knowledges/publish/{filename}
     """
+    if not R2_BUCKET_NAME:
+        raise RuntimeError("R2_BUCKET_NAME not configured")
+
     logger.info(
         f"[publish_r2] Uploading to R2: tenant_id={tenant_id}, location_id={location_id}, "
         f"filename={filename}, content_size={len(content)} bytes"
     )
-    
+
     r2_client = _get_r2_client()
     
     # Construct R2 key (path in bucket)
