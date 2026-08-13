@@ -1,5 +1,5 @@
 {
-  "catalogue_version": "2026-08-14.1",
+  "catalogue_version": "2026-08-14.2",
   "_readme": "Single source of truth for call-quality issue detection. See docs/plans/call-quality-issues.md in speako-workspace. The rule engine reads `threshold`; the LLM triage pass receives entries with detector='llm' as its checklist; findings copy title/symptom/likely_cause/suggested_fix at write time so speako-agent-admin needs no copy of this file. Render the human-readable view with scripts/render-issue-catalogue.py — never hand-edit the generated markdown. Bump catalogue_version on any change to an entry's meaning or threshold.",
   "defaults": {
     "short_utterance_max_chars": 12,
@@ -162,7 +162,7 @@
       "severity": "critical",
       "detector": "llm",
       "title": "Caller had to repeat themselves",
-      "symptom": "The caller restates the same request or answer, indicating the agent did not act on it the first time.",
+      "symptom": "The caller restates the same request because the agent did not act on it the first time. The most reliable LLM detector on prod — about 7 in 9 genuine — and it repeatedly surfaced callers asking to order by phone being pushed an online link two or three times before being told phone orders are not possible.",
       "likely_cause": "The strongest single proxy for 'something went wrong' — it catches failures no specific rule anticipated, including ones with no trace signature at all.",
       "suggested_fix": "Read the turn before the repetition. If the agent responded but wrongly, look at `answered_different_question`; if it stayed silent, a deterministic rule should also have fired — if none did, the detector has a gap worth closing.",
       "threshold": {},
@@ -173,7 +173,7 @@
       "severity": "critical",
       "detector": "llm",
       "title": "Agent answered something the caller did not ask",
-      "symptom": "The assistant's reply does not address the caller's actual request.",
+      "symptom": "The agent's reply does not address what the caller asked. This does NOT include the agent declining a request it cannot serve ('I'm not able to help with refunds'), asking a clarifying question after a garbled or one-word utterance, or offering the only available path such as an online link. Those are correct behaviour. Verified on prod: roughly half of this type were one of those three.",
       "likely_cause": "Usually mis-transcription rather than reasoning failure — a short or accented word heard as something else. The agent then answers the misheard question confidently.",
       "suggested_fix": "Compare the caller transcript in the trace against what the caller plainly meant. A wrong transcript confirms STT; a correct transcript with a wrong answer points at the agent prompt or knowledge.",
       "threshold": {},
@@ -261,10 +261,10 @@
     },
     {
       "id": "booking_confirmed_without_details",
-      "severity": "critical",
+      "severity": "info",
       "detector": "llm",
       "title": "Booking confirmed with details missing",
-      "symptom": "The agent confirms a booking while a required detail — staff, service, time, name — was never established or is spoken as a placeholder.",
+      "symptom": "The agent states a booking or order is CONFIRMED while a required detail — staff, service, time, name — was never established. Verified 0 for 3 on prod: it fired on the agent DECLINING ('we are closed for the holiday', 'I cannot take orders by phone') and once on a booking that had every detail, objecting only to the reference being spelled out, which is deliberate speakable-output behaviour. Do NOT raise this unless the agent asserts a confirmation.",
       "likely_cause": "The booking tool accepted incomplete input, or the agent narrated success before the tool returned.",
       "suggested_fix": "Cross-check the booking row for this call. A confirmed booking the caller believes in but the system did not record correctly is the most damaging failure in this catalogue.",
       "threshold": {},
