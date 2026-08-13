@@ -307,3 +307,25 @@ def upload_call_log_to_r2(
         f"bytes={len(gz_bytes)}"
     )
     return r2_key
+
+
+def download_call_log_from_r2(r2_key: str, use_dev: bool = False) -> bytes:
+    """
+    Fetch a per-call server-log artifact back out of R2, still gzipped.
+
+    Counterpart to `upload_call_log_to_r2`. Deliberately returns raw bytes and
+    does NOT decompress: callers differ in what they want (the analyzer wants
+    text, a re-upload would want the original bytes), and gzip.decompress is
+    cheap.
+
+    Reads only — never deletes or overwrites. Raises on a missing key rather
+    than returning None, so a caller cannot mistake "artifact gone" for
+    "artifact empty".
+    """
+    bucket_name = R2_BUCKET_NAME_DEV if use_dev else R2_BUCKET_NAME
+    if not bucket_name:
+        raise RuntimeError(
+            f"R2 bucket not configured ({'R2_BUCKET_NAME_DEV' if use_dev else 'R2_BUCKET_NAME'})"
+        )
+    client = _get_r2_client()
+    return client.get_object(Bucket=bucket_name, Key=r2_key)["Body"].read()
