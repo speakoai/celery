@@ -228,12 +228,12 @@ def test_slow_answer_is_dead_air_not_a_missing_response():
         line(1, SPEECH_START, ts=at(10)),
         line(2, SPEECH_STOP, ts=at(12)),
         line(3, caller("Hi, can I make a reservation for next Wednesday"), ts=at(12)),
-        line(4, ASSISTANT, ts=at(20)),      # 8s — slow, but an answer
+        line(4, ASSISTANT, ts=at(25)),      # 13s — slow, but an answer
     ]), CATALOGUE)
     assert "agent_no_response" not in rules(findings)
     assert "short_utterance_dropped" not in rules(findings)
     finding = one(findings, "dead_air")
-    assert finding["evidence"]["seconds"] == 8.0
+    assert finding["evidence"]["seconds"] == 13.0
     assert finding["evidence"]["possible_reengagement"] is True
 
 
@@ -242,7 +242,7 @@ def test_moderately_slow_answer_is_not_flagged_as_reengagement():
         line(1, SPEECH_START, ts=at(10)),
         line(2, SPEECH_STOP, ts=at(12)),
         line(3, caller("a table for four please"), ts=at(12)),
-        line(4, ASSISTANT, ts=at(17)),      # 5s — dead air, plainly an answer
+        line(4, ASSISTANT, ts=at(22)),      # 10s — dead air, plainly an answer
     ]), CATALOGUE)
     assert "possible_reengagement" not in one(findings, "dead_air")["evidence"]
 
@@ -280,9 +280,9 @@ def test_dead_air_measured_from_the_caller_finishing():
         line(1, SPEECH_START, ts=at(10)),
         line(2, SPEECH_STOP, ts=at(12)),
         line(3, caller("a table for four please"), ts=at(12)),
-        line(4, ASSISTANT, ts=at(17)),      # 5s > 3.5s threshold
+        line(4, ASSISTANT, ts=at(22)),      # 10s > 8s threshold
     ]), CATALOGUE)
-    assert one(findings, "dead_air")["evidence"]["seconds"] == 5.0
+    assert one(findings, "dead_air")["evidence"]["seconds"] == 10.0
 
 
 def test_prompt_response_is_not_dead_air():
