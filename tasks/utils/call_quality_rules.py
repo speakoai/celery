@@ -76,7 +76,11 @@ from datetime import datetime
 # 2026-08-14.1  Phase 6 calibration against 87 prod artifacts: terminal-tool
 #       handoff suppression, vad_split_caller_sentence, and cancelled/silent
 #       responses no longer count as answers. Critical rate 34% -> 16%.
-ANALYZER_VERSION = "2026-08-14.1"
+# 2026-08-14.2  Prod spot-check of the surviving criticals: a caller barging in
+#       over a response the agent was already generating is not an ignored
+#       turn (7 of 11 were this), and a tool call counts as acting on the turn.
+#       Critical rate 16% -> 11%.
+ANALYZER_VERSION = "2026-08-14.2"
 
 # ── Line classification ──────────────────────────────────────────────────────
 # Matched against `msg`, which render_log_parse has already stripped of the
@@ -302,6 +306,18 @@ def build_turns(events):
             if current is not None:
                 current.end_seq = event.seq
                 current.next_start_ts = event.ts
+                # `generating=True` on the barge-in means the agent was ALREADY
+                # producing a response to the turn now closing. Its
+                # `Response audio complete` line is logged after this marker, so
+                # a naive span check attributes it to the next turn and reports
+                # the answered turn as ignored.
+                #
+                # Measured on prod: 7 of 11 headline criticals were this. The
+                # caller interrupting the agent is not the agent ignoring the
+                # caller — it is the opposite.
+                if (event.kind == "caller_speech_start_bargein"
+                        and str(event.data.get("generating", "")).lower() == "true"):
+                    current.responses.append(event)
                 turns.append(current)
             index += 1
             current = Turn(index, event.seq, event.ts)
@@ -325,6 +341,12 @@ def build_turns(events):
             current.status = "failed"
         elif event.kind == "turn_metrics":
             _apply_turn_metrics(current, event)
+        elif event.kind == "tool_call":
+            # The agent acting on what the caller said IS a response to it. The
+            # spoken reply follows the tool, often after the caller has spoken
+            # again — `switch_language` in particular rebuilds the session first.
+            # Silence *after* a tool is dead air, not a turn the agent ignored.
+            current.responses.append(event)
         elif event.kind in _ASSISTANT_KINDS and _is_audible_response(event):
             # Any audible assistant line before the next caller turn counts as
             # answering it, however slow. Gating this on a time window turned

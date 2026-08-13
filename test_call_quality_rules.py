@@ -508,3 +508,51 @@ def test_a_genuine_drop_still_fires_when_no_terminal_tool_ran():
         line(3, CALL_END, ts=at(15)),
     ]), CATALOGUE)
     assert {"agent_no_response", "call_ended_mid_turn"} <= rules(findings)
+
+
+def test_caller_barging_in_over_the_agent_is_not_an_ignored_turn():
+    """REGRESSION, from a prod spot-check where 7 of 11 headline criticals were
+    this. `generating=True` on the barge-in means the agent was ALREADY
+    producing a reply to the turn now closing; its Response-audio-complete line
+    is logged after the barge-in marker, so a naive span check blamed the agent
+    for a turn it was actively answering."""
+    findings = analyze(artifact([
+        line(1, SPEECH_START, ts=at(10)),
+        line(2, caller("I want to make a booking"), ts=at(12)),
+        line(3, "[Azure] Caller speech started (barge-in: generating=True "
+                "buffered_marks=2); stopping playback", ts=at(14)),
+        line(4, "[Azure] Response audio complete: azure_chunks=12 azure_bytes=44000 "
+                "twilio_sent=12", ts=at(14)),
+        line(5, caller("actually make it seven"), ts=at(16)),
+        line(6, ASSISTANT, ts=at(18)),
+    ]), CATALOGUE)
+    assert "agent_no_response" not in rules(findings)
+    assert "short_utterance_dropped" not in rules(findings)
+
+
+def test_barge_in_while_the_agent_was_idle_still_reports_the_drop():
+    """generating=False means nothing was being produced — the turn really did
+    go unanswered."""
+    findings = analyze(artifact([
+        line(1, SPEECH_START, ts=at(10)),
+        line(2, caller("I want to make a booking"), ts=at(12)),
+        line(3, "[Azure] Caller speech started (barge-in: generating=False "
+                "buffered_marks=0); stopping playback", ts=at(30)),
+        line(4, caller("hello?"), ts=at(31)),
+        line(5, ASSISTANT, ts=at(33)),
+    ]), CATALOGUE)
+    assert "agent_no_response" in rules(findings)
+
+
+def test_a_tool_call_counts_as_the_agent_acting_on_the_turn():
+    """switch_language rebuilds the session before speaking, so the reply lands
+    after the caller has spoken again. Acting on the request is not ignoring it."""
+    findings = analyze(artifact([
+        line(1, SPEECH_START, ts=at(10)),
+        line(2, caller("मंदिर में कितने ब्राह्मण हैं?"), ts=at(12)),
+        line(3, "[Azure] Tool call: switch_language call_id=x params={'language': 'hi'}", ts=at(13)),
+        line(4, SPEECH_START, ts=at(30)),
+        line(5, caller("hello"), ts=at(31)),
+        line(6, ASSISTANT, ts=at(33)),
+    ]), CATALOGUE)
+    assert "agent_no_response" not in rules(findings)
