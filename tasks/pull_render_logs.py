@@ -52,6 +52,7 @@ import requests
 from celery.utils.log import get_task_logger
 
 from tasks.celery_app import app
+from tasks.utils import call_quality_llm as cq_llm
 from tasks.utils import call_quality_rules as cq_rules
 from tasks.utils import call_quality_store as cq_store
 from tasks.utils.publish_r2 import upload_call_log_to_r2
@@ -215,18 +216,43 @@ def _attach_pointer(conn, call, r2_key, quality=None):
 # call" and be visible in the summary — never lose the artifact, never fail the
 # call, never turn the cron red. Cron health stays tied to capture only.
 
-def _analyze_quietly(call):
-    """Deterministic findings for one call, or [] if anything goes wrong."""
+def _analyze_quietly(call, llm_budget):
+    """Findings for one call, or [] if anything goes wrong.
+
+    ``llm_budget`` is a one-element list used as a mutable counter across the
+    sweep, so the triage pass is capped per run rather than per call.
+    """
     try:
         catalogue = cq_store.load_catalogue()
     except Exception as exc:
         logger.error("[CallQuality] catalogue unavailable — analysis skipped: %s", exc)
         return []
+
     try:
-        return cq_rules.analyze_call(call, catalogue)
+        events = cq_rules.classify_lines(call.get("lines") or [])
+        findings = cq_rules.evaluate(
+            cq_rules.header_from_call(call), events, catalogue)
     except Exception as exc:
         logger.error("[CallQuality] %s analysis failed: %s", call.get("call_sid"), exc)
         return []
+
+    # Deterministic findings are already secured above. The triage pass is
+    # additive and strictly best-effort: it is env-flagged off, capped per run,
+    # and a failure here must never discard the rule findings we already have.
+    if cq_llm.is_enabled() and llm_budget[0] > 0:
+        llm_budget[0] -= 1
+        try:
+            findings = findings + [
+                f for f in cq_llm.triage(events, findings, catalogue)
+                # The DB has UNIQUE (conversation, rule); a deterministic
+                # finding always wins over an LLM one for the same rule.
+                if f["rule_id"] not in {r["rule_id"] for r in findings}
+            ]
+        except Exception as exc:
+            logger.warning("[CallQuality] %s triage skipped: %s",
+                           call.get("call_sid"), exc)
+
+    return findings
 
 
 def _store_findings_quietly(conn, call, conversation_id, findings):
@@ -363,6 +389,8 @@ def pull_render_logs(self, service_id=None, is_dev=False, window_minutes=None,
     uploaded = attached = skipped_inflight = failed = 0
     gap_calls = 0
     analyzed = findings_written = 0
+    # Mutable so _analyze_quietly can decrement it across calls in this run.
+    llm_budget = [cq_llm.MAX_CALLS_PER_RUN if cq_llm.is_enabled() else 0]
     conn = None
     try:
         db_url = os.getenv("DATABASE_URL")
@@ -400,7 +428,7 @@ def pull_render_logs(self, service_id=None, is_dev=False, window_minutes=None,
                 # Analysis rides on the artifact we already hold in memory —
                 # see the plan §8. Never fatal: capture is the authoritative
                 # job, so a broken analyzer must not cost us the log.
-                findings = _analyze_quietly(call)
+                findings = _analyze_quietly(call, llm_budget)
                 conversation_id = (
                     _attach_pointer(conn, call, r2_key,
                                     quality=cq_rules.summarize(findings))
@@ -449,6 +477,11 @@ def pull_render_logs(self, service_id=None, is_dev=False, window_minutes=None,
         # that being an error.
         "analyzed": analyzed,
         "findings": findings_written,
+        # Phase 5. `llm_used` is 0 when the pass is disabled; a value equal to
+        # MAX_CALLS_PER_RUN means the cap bit and some calls got rule-only
+        # findings — never silently.
+        "llm_enabled": cq_llm.is_enabled(),
+        "llm_used": (cq_llm.MAX_CALLS_PER_RUN - llm_budget[0]) if cq_llm.is_enabled() else 0,
     }
     # One line per sweep, deliberately greppable: with Phase 5 monitoring out of
     # scope, this is the only way to notice the pipeline has stopped working.
