@@ -135,8 +135,21 @@ _SUPPRESSED_BY = {
     "caller_repeated_themselves": {"vad_split_caller_sentence"},
 }
 
+# LLM findings a TOOL CALL disproves outright. The model reads a transcript in
+# which the caller asks for a person and the conversation stops, and concludes
+# the request went nowhere — but the call ends precisely BECAUSE the handoff
+# succeeded and the stream moved to the conference.
+#
+# Measured on the prod backfill: `dead_end_transfer` fired 13 times and
+# `transfer_to_human` had actually run on 13 of 13. This is the same false
+# positive already fixed in the rule engine, returning by another route, so it
+# is settled with the same evidence rather than by asking the model nicely.
+_DISPROVED_BY_TOOL = {
+    "dead_end_transfer": ("transfer", "forward"),
+}
 
-def validate(raw, transcript_lines, catalogue, rule_findings=()):
+
+def validate(raw, transcript_lines, catalogue, rule_findings=(), tools_used=()):
     """Turn a model response into findings, dropping anything unsupported.
 
     Silently discards rather than raising: a malformed response must cost us the
@@ -169,6 +182,10 @@ def validate(raw, transcript_lines, catalogue, rule_findings=()):
         if rule_id not in allowed or rule_id in seen:
             continue
         if _SUPPRESSED_BY.get(rule_id, set()) & already:
+            continue
+        markers = _DISPROVED_BY_TOOL.get(rule_id)
+        if markers and any(m in (name or "").lower()
+                           for name in tools_used for m in markers):
             continue
 
         cited = [s for s in _as_ints(candidate.get("seq")) if s in valid_seqs]
@@ -236,4 +253,6 @@ def triage(events, rule_findings, catalogue, client=None):
         temperature=0,
     )
     return validate(response.choices[0].message.content, transcript, catalogue,
-                    rule_findings=rule_findings)
+                    rule_findings=rule_findings,
+                    tools_used=[e.data.get("name") for e in events
+                                if e.kind == "tool_call"])
