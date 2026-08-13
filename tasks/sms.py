@@ -13,6 +13,7 @@ import requests
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 from tasks.email_template_utils import render_booking_confirmation_template, render_customer_booking_confirmation_template, format_time_12hour
+from tasks.utils.display_format import format_display_datetime
 
 def create_tiny_url(long_url: str) -> str:
     """
@@ -211,7 +212,7 @@ def send_sms_confirmation_new(booking_id: int):
             amount_str = f" of {_guarantee_amount}" if _guarantee_amount is not None else ""
             pending_message = (
                 f"Hi {customer_name}, your booking (Ref: {clean_ref}) at {location_name} on "
-                f"{start_time.strftime('%Y-%m-%d %H:%M')} is pending. Secure your reservation by adding a "
+                f"{format_display_datetime(start_time)} is pending. Secure your reservation by adding a "
                 f"payment card{amount_str} here: {payment_link} Your card will not be charged unless you "
                 f"fail to arrive. Complete within {hold_minutes} minutes or the booking will be cancelled. "
                 f"[Speako AI]"
@@ -228,12 +229,12 @@ def send_sms_confirmation_new(booking_id: int):
         if location_type == "rest":
             message = (
                 f"Hi {customer_name}, your booking (Ref: {clean_ref}) for {party_num} "
-                f"is confirmed at {location_name} on {start_time.strftime('%Y-%m-%d %H:%M')}."
+                f"is confirmed at {location_name} on {format_display_datetime(start_time)}."
             )
         else:
             message = (
                 f"Hi {customer_name}, your booking (Ref: {clean_ref}) "
-                f"is confirmed at {location_name} on {start_time.strftime('%Y-%m-%d %H:%M')} "
+                f"is confirmed at {location_name} on {format_display_datetime(start_time)} "
                 f"with {staff_name} for {service_name}."
             )
 
@@ -406,12 +407,12 @@ def send_reminder(booking_id: int, offset_minutes: int):
         if location_type == "rest":
             message = (
                 f"Reminder: Hi {customer_name}, your booking (Ref: {clean_ref}) for {party_num} "
-                f"at {location_name} is on {start_time.strftime('%Y-%m-%d %H:%M')}."
+                f"at {location_name} is on {format_display_datetime(start_time)}."
             )
         else:
             message = (
                 f"Reminder: Hi {customer_name}, your booking (Ref: {clean_ref}) "
-                f"at {location_name} is on {start_time.strftime('%Y-%m-%d %H:%M')} "
+                f"at {location_name} is on {format_display_datetime(start_time)} "
                 f"with {staff_name} for {service_name}."
             )
 
@@ -499,7 +500,7 @@ def send_sms_guarantee_cancelled(booking_id: int):
         clean_ref = booking_ref[3:] if booking_ref and booking_ref.startswith("REF") else booking_ref
         message = (
             f"Hi {customer_name}, your booking (Ref: {clean_ref}) at {location_name} on "
-            f"{start_time.strftime('%Y-%m-%d %H:%M')} has been cancelled because the booking "
+            f"{format_display_datetime(start_time)} has been cancelled because the booking "
             f"guarantee was not secured in time. You're welcome to book again anytime. [Speako AI]"
         )
 
@@ -606,12 +607,12 @@ def send_sms_confirmation_mod(booking_id: int):
         if location_type == "rest":
             message = (
                 f"Hi {customer_name}, your booking (Ref: {clean_ref}) for {party_num} "
-                f"has been successfully updated at {location_name} to {start_time.strftime('%Y-%m-%d %H:%M')}."
+                f"has been successfully updated at {location_name} to {format_display_datetime(start_time)}."
             )
         else:
             message = (
                 f"Hi {customer_name}, your booking (Ref: {clean_ref}) "
-                f"has been successfully updated at {location_name} to {start_time.strftime('%Y-%m-%d %H:%M')} "
+                f"has been successfully updated at {location_name} to {format_display_datetime(start_time)} "
                 f"with {staff_name} for {service_name}."
             )
 
@@ -744,12 +745,12 @@ def send_sms_confirmation_can(booking_id: int):
         if location_type == "rest":
             message = (
                 f"Hi {customer_name}, your booking (Ref: {booking_ref}) for {party_num} "
-                f"at {location_name} on {start_time.strftime('%Y-%m-%d %H:%M')} has been cancelled."
+                f"at {location_name} on {format_display_datetime(start_time)} has been cancelled."
             )
         else:
             message = (
                 f"Hi {customer_name}, your booking (Ref: {clean_ref}) "
-                f"at {location_name} on {start_time.strftime('%Y-%m-%d %H:%M')} "
+                f"at {location_name} on {format_display_datetime(start_time)} "
                 f"with {staff_name} for {service_name} has been cancelled."
             )
 
@@ -851,7 +852,7 @@ def send_sms_merchant(booking_id: int, action: str):
             return
 
         clean_ref = booking_ref[3:] if booking_ref and booking_ref.startswith("REF") else (booking_ref or "")
-        when = start_time.strftime('%Y-%m-%d %H:%M')
+        when = format_display_datetime(start_time)
 
         event = {
             "new": "New booking",
