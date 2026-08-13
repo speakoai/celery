@@ -243,3 +243,17 @@ def test_triage_skips_calls_too_short_to_judge():
     findings = llm.triage(artifact(CONVERSATION[:2]), [], CATALOGUE, client=client)
     assert findings == []
     assert client.captured is None
+
+
+def test_llm_cannot_reclaim_what_a_rule_already_explained():
+    """The model sees the caller apparently repeating themselves; the rule
+    engine, which has the timings, knows VAD split the sentence. The rule wins
+    — it has evidence the model cannot see. Regression from a real dev call
+    where both fired on the same moment and both were the same root cause."""
+    payload = {"findings": [{"rule_id": "caller_repeated_themselves",
+                             "seq": [20], "detail": "caller restated the time"}]}
+    transcript = llm.build_transcript(artifact(CONVERSATION))
+
+    assert llm.validate(payload, transcript, CATALOGUE) != []          # alone, kept
+    assert llm.validate(payload, transcript, CATALOGUE,
+                        rule_findings=[{"rule_id": "vad_split_caller_sentence"}]) == []

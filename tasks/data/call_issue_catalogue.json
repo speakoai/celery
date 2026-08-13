@@ -21,6 +21,17 @@
       "related": ["Azure STT truncation", "Azure barge-in / echo guard"]
     },
     {
+      "id": "vad_split_caller_sentence",
+      "severity": "moderate",
+      "detector": "rule",
+      "title": "Caller's sentence was cut in two",
+      "symptom": "The agent stayed silent after a caller turn, and the caller immediately carried on speaking — the turn had been ended on a hesitation pause rather than at the end of a thought.",
+      "likely_cause": "The end-of-speech silence threshold is short enough to treat a natural mid-sentence pause as a finished turn. The agent behaved correctly by waiting; the turn boundary was wrong. Measured on a real call: the caller paused ~1.2s mid-sentence and the turn was closed.",
+      "suggested_fix": "Raise the end-of-speech silence threshold for this location so ordinary hesitation does not end a turn. Check `[Azure] Session effective config:` in the trace for the value actually in force — a `VAD config mismatch` on the same call means the published setting never applied.",
+      "threshold": { "resume_within_seconds": 2.0 },
+      "related": ["Azure STT truncation"]
+    },
+    {
       "id": "agent_no_response",
       "severity": "critical",
       "detector": "rule",

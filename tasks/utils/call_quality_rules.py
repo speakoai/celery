@@ -92,7 +92,8 @@ _PATTERNS = (
     ("caller_transcript_failed", re.compile(r"^\[Azure\] Caller transcription FAILED")),
     ("assistant_transcript",     re.compile(r"^\[Azure\] Assistant transcript:")),
     ("response_completed",       re.compile(r"^\[Azure\] Response completed: id=\S* "
-                                            r"status=(?P<status>\S+)")),
+                                            r"status=(?P<status>\S+).*?"
+                                            r"twilio_sent=(?P<twilio_sent>\d+)", re.S)),
     ("response_audio_complete",  re.compile(r"^\[Azure\] Response audio complete:")),
     ("turn_metrics",             re.compile(r"^\[TurnMetrics\] (?P<json>\{.*)", re.S)),
     ("vad_mismatch",             re.compile(r"^\[Azure\] VAD config mismatch")),
@@ -104,14 +105,41 @@ _PATTERNS = (
 )
 
 # An assistant-side line means the agent produced something for this turn.
+#
+# `response_completed` is conditional: a response that ended `cancelled` having
+# sent nothing to Twilio produced NO audible speech, so the caller experienced
+# silence. Counting it as an answer would mask exactly the failure this feature
+# exists to catch. See `_is_audible_response`.
 _ASSISTANT_KINDS = frozenset({
     "assistant_transcript", "response_completed", "response_audio_complete",
 })
+
+
+def _is_audible_response(event):
+    """Did the caller actually hear something from this event?"""
+    if event.kind != "response_completed":
+        return True
+    try:
+        if int(event.data.get("twilio_sent") or 0) > 0:
+            return True
+    except (TypeError, ValueError):
+        return True          # unparseable — assume audible rather than invent a fault
+    return False
 
 # A tool result carrying any of these is treated as failed. Deliberately
 # conservative and substring-based: the payload is truncated to 300 chars at
 # the source, so structured parsing is not reliably possible.
 _TOOL_ERROR_MARKERS = ("error", '"success": false', '"success":false', "exception", "traceback")
+
+# Tools that legitimately END the conversation. After one of these fires, the
+# agent going quiet and the stream stopping is the SUCCESS path, not silence.
+#
+# Calibrated against 87 prod artifacts (2026-08-14): `call_ended_mid_turn` was
+# firing on 23% of calls, and 13 of the 14 inspected were callers saying "I want
+# to speak to a person" — where `transfer_to_human` HAD been invoked and the
+# call ended because it was handed to a human. Reporting those as failures would
+# have been the single largest source of false criticals.
+_TERMINAL_TOOLS = ("transfer", "forward", "end_call", "hangup")
 
 
 class Event:
@@ -132,12 +160,14 @@ class Turn:
 
     __slots__ = ("index", "start_seq", "start_ts", "stop_ts", "transcript",
                  "transcript_chars", "status", "responses", "end_seq",
-                 "barge_in", "marks_outstanding", "ended_by_call_end")
+                 "barge_in", "marks_outstanding", "ended_by_call_end",
+                 "next_start_ts")
 
     def __init__(self, index, start_seq, start_ts):
         self.index = index
         self.start_seq = start_seq
         self.start_ts = start_ts
+        self.next_start_ts = None     # when the caller began speaking again
         self.stop_ts = None
         self.transcript = None
         self.transcript_chars = 0
@@ -151,6 +181,22 @@ class Turn:
     @property
     def answered(self):
         return bool(self.responses)
+
+    def resumed_within(self, seconds):
+        """Did the caller start speaking again almost immediately?
+
+        If so, this "turn" was never a finished thought — VAD ended it on a
+        hesitation pause and the caller carried on. The agent staying quiet was
+        correct behaviour, not a failure to respond.
+
+        Verified on a real call: the caller said "Can you make it like tomorrow
+        morning at…", paused ~1.2s, then "11 A.m.". Reported as a critical
+        `agent_no_response` before this existed.
+        """
+        base = self.stop_ts or self.start_ts
+        if base is None or self.next_start_ts is None:
+            return False
+        return 0 <= (self.next_start_ts - base).total_seconds() <= seconds
 
     def first_response_delay(self):
         """Seconds from the caller finishing to the agent's first line, or None."""
@@ -252,6 +298,7 @@ def build_turns(events):
         if event.kind in ("caller_speech_start", "caller_speech_start_bargein"):
             if current is not None:
                 current.end_seq = event.seq
+                current.next_start_ts = event.ts
                 turns.append(current)
             index += 1
             current = Turn(index, event.seq, event.ts)
@@ -275,8 +322,8 @@ def build_turns(events):
             current.status = "failed"
         elif event.kind == "turn_metrics":
             _apply_turn_metrics(current, event)
-        elif event.kind in _ASSISTANT_KINDS:
-            # Any assistant line before the next caller turn counts as
+        elif event.kind in _ASSISTANT_KINDS and _is_audible_response(event):
+            # Any audible assistant line before the next caller turn counts as
             # answering it, however slow. Gating this on a time window turned
             # merely-slow answers into critical "agent ignored the caller"
             # findings — verified against a real dev call where the agent
@@ -376,6 +423,9 @@ def index_catalogue(catalogue):
             .get("threshold", {})
             .get("min_occurrences", 2),
         "long_dead_air_seconds": defaults.get("long_dead_air_seconds", 7.0),
+        "vad_split_seconds": by_id["vad_split_caller_sentence"]
+            .get("threshold", {})
+            .get("resume_within_seconds", 2.0),
     }
 
 
@@ -396,7 +446,22 @@ def evaluate(header, events, catalogue):
     findings = []
     unanswered = []
 
+    # Sequence at which the conversation was deliberately handed off or ended.
+    # A caller turn at or after this point is not owed a spoken reply.
+    terminal_seq = next(
+        (e.seq for e in events
+         if e.kind == "tool_call"
+         and any(t in (e.data.get("name") or "").lower() for t in _TERMINAL_TOOLS)),
+        None,
+    )
+
     for turn in turns:
+        handed_off = (
+            terminal_seq is not None
+            and turn.start_seq is not None
+            and turn.end_seq is not None
+            and turn.start_seq <= terminal_seq <= turn.end_seq
+        )
 
         if turn.status == "empty":
             findings.append(_finding(
@@ -409,26 +474,34 @@ def evaluate(header, events, catalogue):
                 evidence={"turn": turn.index, "seq": turn.start_seq},
             ))
 
-        # "No response" is only meaningful for a turn we actually heard.
-        if turn.status == "ok" and not turn.answered:
-            unanswered.append(turn)
+        # "No response" is only meaningful for a turn we actually heard, and
+        # only if the agent still owed the caller a reply.
+        if turn.status == "ok" and not turn.answered and not handed_off:
             evidence = {
                 "turn": turn.index,
                 "seq": turn.start_seq,
                 "transcript": turn.transcript,
                 "transcript_chars": turn.transcript_chars,
             }
-            if turn.transcript_chars <= catalogue["short_max_chars"]:
+
+            # The caller carried straight on — VAD ended the turn on a pause,
+            # it was not the agent ignoring them. Different problem, different
+            # fix, and NOT critical.
+            if turn.resumed_within(catalogue["vad_split_seconds"]):
                 findings.append(_finding(
-                    catalogue, "short_utterance_dropped",
+                    catalogue, "vad_split_caller_sentence",
                     evidence=evidence, confidence=confidence,
                 ))
             else:
+                unanswered.append(turn)
                 findings.append(_finding(
-                    catalogue, "agent_no_response",
+                    catalogue,
+                    "short_utterance_dropped"
+                    if turn.transcript_chars <= catalogue["short_max_chars"]
+                    else "agent_no_response",
                     evidence=evidence, confidence=confidence,
                 ))
-            if turn.ended_by_call_end:
+            if not turn.resumed_within(catalogue["vad_split_seconds"]) and turn.ended_by_call_end:
                 findings.append(_finding(
                     catalogue, "call_ended_mid_turn",
                     evidence=evidence, confidence=confidence,

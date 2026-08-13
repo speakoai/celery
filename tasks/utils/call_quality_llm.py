@@ -127,7 +127,16 @@ def build_prompt(transcript_lines, rule_findings, catalogue):
     )
 
 
-def validate(raw, transcript_lines, catalogue):
+# An LLM finding the deterministic pass has already explained differently.
+# The model reads a transcript and sees the caller apparently restating
+# themselves; the rule engine, which has the timings, knows the turn was split
+# by VAD mid-sentence. The rule wins — it has evidence the model cannot see.
+_SUPPRESSED_BY = {
+    "caller_repeated_themselves": {"vad_split_caller_sentence"},
+}
+
+
+def validate(raw, transcript_lines, catalogue, rule_findings=()):
     """Turn a model response into findings, dropping anything unsupported.
 
     Silently discards rather than raising: a malformed response must cost us the
@@ -151,12 +160,15 @@ def validate(raw, transcript_lines, catalogue):
     except (ValueError, AttributeError):
         return []
 
+    already = {f["rule_id"] for f in rule_findings}
     findings, seen = [], set()
     for candidate in candidates:
         if not isinstance(candidate, dict):
             continue
         rule_id = candidate.get("rule_id")
         if rule_id not in allowed or rule_id in seen:
+            continue
+        if _SUPPRESSED_BY.get(rule_id, set()) & already:
             continue
 
         cited = [s for s in _as_ints(candidate.get("seq")) if s in valid_seqs]
@@ -223,4 +235,5 @@ def triage(events, rule_findings, catalogue, client=None):
         max_tokens=MAX_OUTPUT_TOKENS,
         temperature=0,
     )
-    return validate(response.choices[0].message.content, transcript, catalogue)
+    return validate(response.choices[0].message.content, transcript, catalogue,
+                    rule_findings=rule_findings)
