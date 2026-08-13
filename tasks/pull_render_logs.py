@@ -52,6 +52,8 @@ import requests
 from celery.utils.log import get_task_logger
 
 from tasks.celery_app import app
+from tasks.utils import call_quality_rules as cq_rules
+from tasks.utils import call_quality_store as cq_store
 from tasks.utils.publish_r2 import upload_call_log_to_r2
 from tasks.utils.render_log_parse import (
     CHANNEL_MARKER,
@@ -155,8 +157,9 @@ def _sweep(api_key, owner_id, resource, start_time, end_time):
 
 # ── Attach ───────────────────────────────────────────────────────────────────
 
-def _attach_pointer(conn, call, r2_key):
-    """Merge the artifact pointer into location_conversations.raw_metadata.
+def _attach_pointer(conn, call, r2_key, quality=None):
+    """Merge the artifact pointer into location_conversations.raw_metadata and
+    return the matched ``location_conversation_id`` (or None).
 
     Matches on raw_metadata->>'call_sid', which speako-voice-ai writes at
     finalize (Phase 3). Scoped by tenant + location so the planner can use the
@@ -165,9 +168,25 @@ def _attach_pointer(conn, call, r2_key):
 
     Additive: the `||` only sets the keys named here, leaving the rest of
     raw_metadata untouched.
+
+    ``quality`` is the call-quality summary (Phase 3) merged in the same
+    statement, so badging the conversations list costs no extra round trip.
+
+    Returning the id rather than a rowcount is what lets findings be written
+    against the conversation without a second lookup. A NULL return means the
+    conversation row does not exist yet — voice-ai writes it after the call, so
+    the sweep's SETTLE_SECONDS overlap picks the call up on a later run.
     """
     if not call["tenant_id"]:
-        return 0
+        return None
+    payload = {
+        "log_r2_key": r2_key,
+        "log_lines": len(call["lines"]),
+        "log_incomplete": bool(call["gaps"]),
+        "log_pulled_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if quality:
+        payload.update(quality)
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -177,18 +196,71 @@ def _attach_pointer(conn, call, r2_key):
              WHERE tenant_id = %s
                AND location_id = %s
                AND raw_metadata->>'call_sid' = %s
+         RETURNING location_conversation_id
             """,
             (
-                json.dumps({
-                    "log_r2_key": r2_key,
-                    "log_lines": len(call["lines"]),
-                    "log_incomplete": bool(call["gaps"]),
-                    "log_pulled_at": datetime.now(timezone.utc).isoformat(),
-                }),
+                json.dumps(payload),
                 call["tenant_id"], call["location_id"], call["call_sid"],
             ),
         )
-        return cur.rowcount
+        row = cur.fetchone()
+        return row[0] if row else None
+
+
+# ── Call-quality analysis (Phase 3) ──────────────────────────────────────────
+#
+# Both helpers swallow their own exceptions by design. Log capture is the
+# authoritative job of this sweep: a malformed catalogue, an unexpected line
+# format or a findings-insert failure must degrade to "no findings for this
+# call" and be visible in the summary — never lose the artifact, never fail the
+# call, never turn the cron red. Cron health stays tied to capture only.
+
+def _analyze_quietly(call):
+    """Deterministic findings for one call, or [] if anything goes wrong."""
+    try:
+        catalogue = cq_store.load_catalogue()
+    except Exception as exc:
+        logger.error("[CallQuality] catalogue unavailable — analysis skipped: %s", exc)
+        return []
+    try:
+        return cq_rules.analyze_call(call, catalogue)
+    except Exception as exc:
+        logger.error("[CallQuality] %s analysis failed: %s", call.get("call_sid"), exc)
+        return []
+
+
+def _store_findings_quietly(conn, call, conversation_id, findings):
+    """Persist findings. Returns rows newly inserted, 0 on any failure.
+
+    Uses a SAVEPOINT so a failed insert cannot poison the surrounding
+    transaction — the artifact pointer for this call, and every attach already
+    made in this sweep, must still commit.
+    """
+    if not findings:
+        return 0
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SAVEPOINT cq_findings")
+        try:
+            written = cq_store.insert_findings(
+                conn,
+                tenant_id=call["tenant_id"],
+                location_id=call["location_id"],
+                conversation_id=conversation_id,
+                call_sid=call["call_sid"],
+                findings=findings,
+            )
+            with conn.cursor() as cur:
+                cur.execute("RELEASE SAVEPOINT cq_findings")
+            return written
+        except Exception:
+            with conn.cursor() as cur:
+                cur.execute("ROLLBACK TO SAVEPOINT cq_findings")
+            raise
+    except Exception as exc:
+        logger.error("[CallQuality] %s findings not stored: %s",
+                     call.get("call_sid"), exc)
+        return 0
 
 
 # ── Cursor ───────────────────────────────────────────────────────────────────
@@ -290,6 +362,7 @@ def pull_render_logs(self, service_id=None, is_dev=False, window_minutes=None,
     # ── Persist ──
     uploaded = attached = skipped_inflight = failed = 0
     gap_calls = 0
+    analyzed = findings_written = 0
     conn = None
     try:
         db_url = os.getenv("DATABASE_URL")
@@ -323,8 +396,21 @@ def pull_render_logs(self, service_id=None, is_dev=False, window_minutes=None,
                 uploaded += 1
                 if call["gaps"]:
                     gap_calls += 1
-                if conn and _attach_pointer(conn, call, r2_key):
+
+                # Analysis rides on the artifact we already hold in memory —
+                # see the plan §8. Never fatal: capture is the authoritative
+                # job, so a broken analyzer must not cost us the log.
+                findings = _analyze_quietly(call)
+                conversation_id = (
+                    _attach_pointer(conn, call, r2_key,
+                                    quality=cq_rules.summarize(findings))
+                    if conn else None
+                )
+                if conversation_id:
                     attached += 1
+                    analyzed += 1
+                    findings_written += _store_findings_quietly(
+                        conn, call, conversation_id, findings)
             except Exception as exc:
                 failed += 1
                 logger.error("[RenderLogs] %s failed: %s", call_sid, exc)
@@ -358,6 +444,11 @@ def pull_render_logs(self, service_id=None, is_dev=False, window_minutes=None,
         "calls_with_gaps": gap_calls,
         "failed": failed,
         "truncated": stats["truncated"],
+        # Phase 3. `analyzed` counts calls that reached a conversation row;
+        # `findings` counts NEW rows, so a re-swept call contributes 0 without
+        # that being an error.
+        "analyzed": analyzed,
+        "findings": findings_written,
     }
     # One line per sweep, deliberately greppable: with Phase 5 monitoring out of
     # scope, this is the only way to notice the pipeline has stopped working.

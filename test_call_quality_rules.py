@@ -16,9 +16,10 @@ import pytest
 
 from tasks.utils.call_quality_rules import (
     analyze,
-    build_turns,
+    analyze_call,
     index_catalogue,
     parse_artifact,
+    summarize,
 )
 
 CATALOGUE = index_catalogue(json.loads(
@@ -167,9 +168,16 @@ def test_call_ended_mid_turn_when_last_words_unanswered():
 
 # ── Honesty rules ────────────────────────────────────────────────────────────
 
-def test_sequence_gap_in_the_turn_suppresses_the_no_response_finding():
-    """Render drops >6k lines/min silently, so absence inside a hole is not
-    evidence of silence."""
+def test_sequence_gaps_do_not_suppress_findings():
+    """REGRESSION. Gaps are structural, not evidence of loss: voice-ai's
+    CallContextFilter advances the sequence for every log record but marks only
+    the ~ct~ channel subset, so every real artifact has holes — both dev
+    artifacts showed 24 gap ranges on a complete call.
+
+    An earlier version suppressed absence-based findings whenever a gap spanned
+    the turn, which disabled the headline detector on every production call
+    while looking like 'no issues found'.
+    """
     findings = analyze(artifact([
         line(1, SPEECH_START),
         line(2, caller("yeah")),
@@ -177,32 +185,64 @@ def test_sequence_gap_in_the_turn_suppresses_the_no_response_finding():
         line(10, caller("hello")),
         line(11, ASSISTANT),
     ], gaps=[[3, 8]]), CATALOGUE)
-    assert "short_utterance_dropped" not in rules(findings)
-    assert "agent_no_response" not in rules(findings)
+    assert "short_utterance_dropped" in rules(findings)
+    assert one(findings, "short_utterance_dropped")["confidence"] == "high"
 
 
-def test_gap_elsewhere_does_not_suppress_but_downgrades_confidence():
+def test_realistic_gap_density_still_yields_findings():
+    """Mirrors the shape of a real artifact: heavy structural gaps, incomplete
+    flagged true, call complete."""
+    findings = analyze(artifact([
+        line(1, SPEECH_START),
+        line(12, SPEECH_STOP),
+        line(13, caller("yeah")),
+        line(30, SPEECH_START),
+        line(40, caller("hello are you there")),
+        line(41, ASSISTANT),
+        line(60, CALL_END),
+    ], gaps=[[2, 11], [14, 29], [31, 39], [42, 59]], incomplete=True), CATALOGUE)
+    assert "short_utterance_dropped" in rules(findings)
+
+
+def test_missing_call_end_downgrades_confidence():
+    """`call_complete: false` is the one honest header signal — we never saw
+    the call end, so the tail of the trace really is missing."""
     findings = analyze(artifact([
         line(1, SPEECH_START),
         line(2, caller("yeah")),
         line(3, SPEECH_START),
         line(4, caller("hello")),
         line(5, ASSISTANT),
-        line(20, CALL_END),
-    ], gaps=[[6, 19]]), CATALOGUE)
+    ], call_complete=False), CATALOGUE)
     assert one(findings, "short_utterance_dropped")["confidence"] == "degraded"
 
 
-def test_late_response_does_not_count_as_answering_the_turn():
-    """A silence-policy check-in arrives long after the caller spoke. It must
-    not be credited as an answer — see the module docstring."""
+def test_slow_answer_is_dead_air_not_a_missing_response():
+    """REGRESSION. Taken from a real dev call: the agent replied 7.88s after
+    the caller finished. An answer-window cutoff reported that genuine reply as
+    a critical `agent_no_response`. Lateness is dead air, never absence.
+    """
     findings = analyze(artifact([
         line(1, SPEECH_START, ts=at(10)),
-        line(2, SPEECH_STOP, ts=at(11)),
-        line(3, caller("yeah"), ts=at(11)),
-        line(4, ASSISTANT, ts=at(40)),     # ~29s later
+        line(2, SPEECH_STOP, ts=at(12)),
+        line(3, caller("Hi, can I make a reservation for next Wednesday"), ts=at(12)),
+        line(4, ASSISTANT, ts=at(20)),      # 8s — slow, but an answer
     ]), CATALOGUE)
-    assert "short_utterance_dropped" in rules(findings)
+    assert "agent_no_response" not in rules(findings)
+    assert "short_utterance_dropped" not in rules(findings)
+    finding = one(findings, "dead_air")
+    assert finding["evidence"]["seconds"] == 8.0
+    assert finding["evidence"]["possible_reengagement"] is True
+
+
+def test_moderately_slow_answer_is_not_flagged_as_reengagement():
+    findings = analyze(artifact([
+        line(1, SPEECH_START, ts=at(10)),
+        line(2, SPEECH_STOP, ts=at(12)),
+        line(3, caller("a table for four please"), ts=at(12)),
+        line(4, ASSISTANT, ts=at(17)),      # 5s — dead air, plainly an answer
+    ]), CATALOGUE)
+    assert "possible_reengagement" not in one(findings, "dead_air")["evidence"]
 
 
 def test_missing_timestamps_do_not_manufacture_findings():
@@ -339,6 +379,47 @@ def test_findings_carry_everything_the_db_row_needs():
 def test_empty_and_malformed_input_are_survivable():
     assert analyze("", CATALOGUE) == []
     assert analyze("not json\n{}\n", CATALOGUE) == []
+
+
+# ── Phase 3: the in-memory path used by pull_render_logs ─────────────────────
+
+def test_in_memory_path_matches_the_stored_artifact_path():
+    """analyze_call() runs on pull_render_logs' live call dict; analyze() runs
+    on the stored artifact during backfill. They must agree, or a backfilled
+    finding would differ from the one raised live for the same call."""
+    lines = [
+        {"seq": 1, "ts": at(10), "level": "info", "msg": SPEECH_START},
+        {"seq": 2, "ts": at(11), "level": "info", "msg": SPEECH_STOP},
+        {"seq": 3, "ts": at(11), "level": "info", "msg": caller("yeah")},
+        {"seq": 4, "ts": at(12), "level": "info", "msg": CALL_END},
+    ]
+    call = {"call_sid": "CAtest", "lines": lines, "gaps": [], "complete": True}
+
+    from_memory = analyze_call(call, CATALOGUE)
+    from_stored = analyze(artifact([json.dumps(line_dict) for line_dict in lines]),
+                          CATALOGUE)
+
+    assert rules(from_memory) == rules(from_stored)
+    assert "short_utterance_dropped" in rules(from_memory)
+
+
+def test_summary_takes_the_worst_severity():
+    findings = analyze(artifact([
+        line(1, SPEECH_START),
+        line(2, caller("yeah")),
+        line(3, "[Azure] VAD config mismatch: threshold", level="warning"),
+        line(4, CALL_END),
+    ]), CATALOGUE)
+    summary = summarize(findings)
+    assert summary["quality_severity"] == "critical"   # not the moderate VAD one
+    assert summary["quality_count"] == len(findings)
+    assert summary["quality_rules"] == sorted(summary["quality_rules"])
+
+
+def test_summary_of_a_clean_call():
+    assert summarize([]) == {
+        "quality_severity": None, "quality_count": 0, "quality_rules": [],
+    }
 
 
 @pytest.mark.parametrize("rule_id", [
