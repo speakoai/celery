@@ -783,3 +783,33 @@ projects:
       startCommand: PYTHONPATH=. python dispatch/pull_render_logs_dispatch.py --sync
       schedule: '*/5 * * * *'
       autoDeployTrigger: commit
+    - type: cron
+      name: verify-call-findings
+      runtime: python
+      repo: https://github.com/speakoai/celery
+      branch: master
+      plan: starter
+      envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.11"
+      - key: DATABASE_URL
+        sync: false
+      - key: CELERY_BROKER_URL
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_ENDPOINT_URL
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false
+      region: virginia
+      buildCommand: pip install -r requirements.txt
+      # Separate from the log sweep because recordings arrive AFTER the call:
+      # Twilio finalises them and voice-ai uploads with retries, so the audio is
+      # often not there yet when the log sweep runs. Hourly, offset from the
+      # sweep, and it only re-checks findings that already exist.
+      startCommand: PYTHONPATH=. python dispatch/verify_call_findings_dispatch.py --sync
+      schedule: '17 * * * *'
+      autoDeployTrigger: commit
