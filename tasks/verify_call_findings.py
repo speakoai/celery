@@ -38,6 +38,18 @@ logger = get_task_logger(__name__)
 
 VERIFIABLE_RULES = ("stt_empty_transcript", "stt_transcription_failed")
 
+# Abstentions worth trying again later. A recording arrives AFTER the call —
+# Twilio finalises it, then voice-ai uploads with retries — so `no_audio` and
+# `audio_missing` frequently just mean "not yet", and `error` may be a network
+# blip. Everything else (mono, undecodable, no_timestamp, and every real
+# verdict) is settled and must never be re-run.
+#
+# Without this the first attempt is the only attempt: the eligibility filter
+# skips anything carrying `audio_verified`, so one transient failure would
+# retire the finding permanently. Found by running the task by hand.
+RETRYABLE_REASONS = ("error", "audio_missing", "no_audio")
+RETRY_WINDOW = "2 days"     # recordings land in minutes; this is generous
+
 MAX_CALLS_PER_RUN = 25
 AUDIO_TIMEOUT_SECONDS = 30
 MAX_AUDIO_BYTES = 25 * 1024 * 1024      # a long call is ~2MB; this is a sanity cap
@@ -61,12 +73,17 @@ def verify_call_findings(self, is_dev=False, limit=None):
             ON c.location_conversation_id = f.location_conversation_id
          WHERE f.rule_id = ANY(%s)
            AND f.status = 'open'
-           AND NOT (f.evidence ? 'audio_verified')
            AND c.raw_metadata ? 'log_r2_key'
+           AND (
+                 NOT (f.evidence ? 'audio_verified')
+              OR (f.evidence->>'audio_reason' = ANY(%s)
+                  AND f.created_at > now() - %s::interval)
+               )
          ORDER BY f.created_at DESC
          LIMIT %s
         """,
-        (list(VERIFIABLE_RULES), min(limit or MAX_CALLS_PER_RUN, MAX_CALLS_PER_RUN)),
+        (list(VERIFIABLE_RULES), list(RETRYABLE_REASONS), RETRY_WINDOW,
+         min(limit or MAX_CALLS_PER_RUN, MAX_CALLS_PER_RUN)),
     )
     rows = cur.fetchall()
 
@@ -101,9 +118,13 @@ def verify_call_findings(self, is_dev=False, limit=None):
         # finding: alignment drifts ~1-1.5s, so absence in the window is much
         # weaker evidence than presence. Confirm or abstain, never contradict.
         confidence = "high" if verdict == "spoke" else None
+        # Strip `audio_reason` before merging: a retry that succeeds must not
+        # leave the previous attempt's failure reason sitting beside its verdict.
+        # The new payload re-adds it only if this attempt also abstained.
         cur.execute(
             """UPDATE call_quality_findings
-                  SET evidence = COALESCE(evidence,'{}'::jsonb) || %s::jsonb,
+                  SET evidence = (COALESCE(evidence,'{}'::jsonb) - 'audio_reason')
+                                 || %s::jsonb,
                       confidence = COALESCE(%s, confidence)
                 WHERE id = %s AND status = 'open'""",
             (json.dumps(result), confidence, fid),
