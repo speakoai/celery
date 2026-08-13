@@ -47,18 +47,33 @@ prompt ("are you still there?") is indistinguishable from a genuine answer by
 tag alone — both surface as an assistant transcript.
 
 That direction of error hides bugs rather than inventing them: a check-in
-arriving long after an ignored turn would otherwise read as "the agent
-answered". We bound it by time — a response only counts as answering the turn
-if it begins within ``answer_window_seconds``; later ones are reported as dead
-air instead. Adding ``[SilencePolicy]`` to the allowlist would remove the
-ambiguity entirely and is recorded as a follow-up in the plan.
+arriving long after an ignored turn reads as "the agent answered".
+
+An earlier version tried to bound this by time — crediting a response only if
+it arrived within a window. Verified against a real dev call, that was worse:
+the agent replied 7.88s after the caller finished, and a 7.0s window reported a
+genuine answer as ``agent_no_response``, critical severity. Turning slow
+answers into missing ones is a far more damaging error than crediting a
+check-in.
+
+So any assistant line before the next caller turn now counts as answering it,
+and lateness is reported as ``dead_air``. Past ``long_dead_air_seconds`` the
+finding carries ``possible_reengagement: true`` so the ambiguity is visible
+without being decided. Adding ``[SilencePolicy]`` to voice-ai's allowlist would
+resolve it properly — Phase 7.
 """
 
 import json
 import re
 from datetime import datetime
 
-ANALYZER_VERSION = "2026-08-13.1"
+# Bump on any change to detection semantics. Findings record it, so a
+# recalibration can be told apart from the run that first raised an issue.
+#   .1  initial ten detectors
+#   .2  gap-suppression removed (structurally always-on) and the answer-window
+#       cutoff removed (turned slow answers into critical false positives) —
+#       both found by running .1 against real dev artifacts
+ANALYZER_VERSION = "2026-08-13.2"
 
 # ── Line classification ──────────────────────────────────────────────────────
 # Matched against `msg`, which render_log_parse has already stripped of the
@@ -160,14 +175,54 @@ def _parse_ts(value):
         return None
 
 
-def parse_artifact(jsonl_text):
-    """Split an unzipped artifact into ``(header, [Event, ...])``.
+def _classify(obj):
+    """One line dict → an Event, or None if it carries no signal for us."""
+    msg = obj.get("msg") or ""
+    for kind, pattern in _PATTERNS:
+        match = pattern.match(msg)
+        if match:
+            return Event(
+                seq=obj.get("seq"),
+                ts=_parse_ts(obj.get("ts")),
+                level=(obj.get("level") or "").lower(),
+                kind=kind,
+                msg=msg,
+                data=match.groupdict(),
+            )
+    return None
+
+
+def classify_lines(lines):
+    """Classify already-structured ``{seq, ts, level, msg}`` dicts.
+
+    This is the in-memory path: pull_render_logs holds exactly this list at the
+    moment it stores an artifact, so analysis there costs no serialisation and
+    no R2 round-trip. :func:`parse_artifact` is the stored-artifact path used
+    for backfill.
 
     Unclassifiable lines are dropped — they carry no signal for these rules but
     still consumed a sequence number, which is why gap detection reads the
     header rather than recomputing from what survives here.
     """
-    header, events = {}, []
+    events = [event for event in (_classify(obj) for obj in lines) if event]
+    events.sort(key=lambda e: (e.seq is None, e.seq))
+    return events
+
+
+def header_from_call(call):
+    """Build the header fields `evaluate` needs from pull_render_logs' in-memory
+    call dict, so the in-memory and stored-artifact paths agree on gap handling."""
+    gaps = call.get("gaps") or []
+    return {
+        "sequence_gaps": gaps,
+        "incomplete": bool(gaps),
+        "call_complete": bool(call.get("complete")),
+    }
+
+
+def parse_artifact(jsonl_text):
+    """Split an unzipped stored artifact into ``(header, [Event, ...])``."""
+    header, lines = {}, []
     for raw in jsonl_text.splitlines():
         raw = raw.strip()
         if not raw:
@@ -178,33 +233,18 @@ def parse_artifact(jsonl_text):
             continue
         if "_artifact" in obj:
             header = obj
-            continue
-        msg = obj.get("msg") or ""
-        for kind, pattern in _PATTERNS:
-            match = pattern.match(msg)
-            if match:
-                events.append(Event(
-                    seq=obj.get("seq"),
-                    ts=_parse_ts(obj.get("ts")),
-                    level=(obj.get("level") or "").lower(),
-                    kind=kind,
-                    msg=msg,
-                    data=match.groupdict(),
-                ))
-                break
-    events.sort(key=lambda e: (e.seq is None, e.seq))
-    return header, events
+        else:
+            lines.append(obj)
+    return header, classify_lines(lines)
 
 
-def build_turns(events, answer_window_seconds):
+def build_turns(events):
     """Group events into caller turns.
 
     A turn opens on a caller speech start and closes at the next one (or at
-    call end). Assistant lines inside that span count as answering the turn
-    only if they begin within ``answer_window_seconds`` of the caller
-    finishing — see the silence-policy note in the module docstring. Lines
-    with no usable timestamp are counted as answers, since dropping them would
-    manufacture false "agent ignored the caller" findings.
+    call end). Every assistant line inside that span counts as answering the
+    turn, regardless of how late it arrives — lateness is `dead_air`'s job, not
+    a reason to call the turn unanswered.
     """
     turns, current, index = [], None, 0
 
@@ -236,11 +276,13 @@ def build_turns(events, answer_window_seconds):
         elif event.kind == "turn_metrics":
             _apply_turn_metrics(current, event)
         elif event.kind in _ASSISTANT_KINDS:
-            base = current.stop_ts or current.start_ts
-            if base is None or event.ts is None:
-                current.responses.append(event)
-            elif (event.ts - base).total_seconds() <= answer_window_seconds:
-                current.responses.append(event)
+            # Any assistant line before the next caller turn counts as
+            # answering it, however slow. Gating this on a time window turned
+            # merely-slow answers into critical "agent ignored the caller"
+            # findings — verified against a real dev call where the agent
+            # replied at 7.88s and a 7.0s window reported it as silence.
+            # Slowness is what `dead_air` is for.
+            current.responses.append(event)
         elif event.kind in ("call_ended", "stream_stopped"):
             current.end_seq = event.seq
             current.ended_by_call_end = True
@@ -269,17 +311,32 @@ def _apply_turn_metrics(turn, event):
 
 # ── Gap handling ─────────────────────────────────────────────────────────────
 
-def _gap_overlaps(gaps, start_seq, end_seq):
-    """Did we fail to retrieve any line inside this turn's span?
+def sequence_gaps_are_structural():
+    """``header['sequence_gaps']`` CANNOT be used to detect dropped lines.
 
-    Render drops application logs above 6,000 lines/min per instance without
-    marking the gap, so an absence inside a hole is not evidence of silence.
+    Verified against real dev artifacts on 2026-08-13: both showed 24 gap
+    ranges and ``incomplete: true`` on a normal, complete 90-second call.
+
+    The cause is by design. speako-voice-ai's ``CallContextFilter`` increments
+    the per-call sequence for EVERY log record, but stamps the ``~ct~`` channel
+    marker on only the audio-timeline subset. The Render query retrieves the
+    marked lines alone, so every unmarked line leaves a hole. A gap therefore
+    means "a line we never intended to capture", not "a line Render dropped" —
+    which is what ``_sequence_gaps`` in render_log_parse.py means by leaving the
+    judgement to a human.
+
+    An earlier version of this module suppressed absence-based findings whenever
+    a gap spanned the turn. Because gaps are universal, that silently disabled
+    ``agent_no_response`` and ``short_utterance_dropped`` entirely — the whole
+    point of the feature — while appearing to work.
+
+    Genuine drop detection needs a SECOND counter in voice-ai that advances only
+    on channel lines; a hole in that one would be real evidence. Recorded as
+    Phase 7 in the plan. Until then the exposure is: if Render ever does drop an
+    assistant line (needs >6,000 lines/min on one instance — far above current
+    volume), that turn could be misreported as unanswered.
     """
-    if start_seq is None:
-        return False
-    upper = end_seq if end_seq is not None else float("inf")
-    return any(not (gap_end < start_seq or gap_start > upper)
-               for gap_start, gap_end in (gaps or []))
+    return True
 
 
 # ── Findings ─────────────────────────────────────────────────────────────────
@@ -318,7 +375,7 @@ def index_catalogue(catalogue):
         "min_repeat": by_id["repeated_no_response"]
             .get("threshold", {})
             .get("min_occurrences", 2),
-        "answer_window_seconds": defaults.get("long_dead_air_seconds", 7.0),
+        "long_dead_air_seconds": defaults.get("long_dead_air_seconds", 7.0),
     }
 
 
@@ -327,17 +384,19 @@ def evaluate(header, events, catalogue):
 
     ``catalogue`` must be the output of :func:`index_catalogue`.
     """
-    gaps = header.get("sequence_gaps") or []
-    trace_incomplete = bool(header.get("incomplete"))
-    turns = build_turns(events, catalogue["answer_window_seconds"])
+    # NOT header['sequence_gaps'] / header['incomplete'] — both are structurally
+    # true on every call and say nothing about loss. See
+    # :func:`sequence_gaps_are_structural`. `call_complete` is the one honest
+    # signal in the header: false means we never saw the call end, so the tail
+    # of the trace really is missing.
+    tail_missing = header.get("call_complete") is False
+    confidence = "degraded" if tail_missing else "high"
+
+    turns = build_turns(events)
     findings = []
     unanswered = []
 
     for turn in turns:
-        # Absence-based rules are only trustworthy if we actually retrieved
-        # every line in the turn's span.
-        span_has_gap = _gap_overlaps(gaps, turn.start_seq, turn.end_seq)
-        confidence = "degraded" if (span_has_gap or trace_incomplete) else "high"
 
         if turn.status == "empty":
             findings.append(_finding(
@@ -351,7 +410,7 @@ def evaluate(header, events, catalogue):
             ))
 
         # "No response" is only meaningful for a turn we actually heard.
-        if turn.status == "ok" and not turn.answered and not span_has_gap:
+        if turn.status == "ok" and not turn.answered:
             unanswered.append(turn)
             evidence = {
                 "turn": turn.index,
@@ -377,11 +436,15 @@ def evaluate(header, events, catalogue):
 
         delay = turn.first_response_delay()
         if delay is not None and delay > catalogue["dead_air_seconds"]:
-            findings.append(_finding(
-                catalogue, "dead_air",
-                evidence={"turn": turn.index, "seq": turn.start_seq,
-                          "seconds": round(delay, 2)},
-            ))
+            evidence = {"turn": turn.index, "seq": turn.start_seq,
+                        "seconds": round(delay, 2)}
+            # Past this point the "answer" may actually be a silence-policy
+            # re-engagement prompt rather than a reply to what the caller said.
+            # [SilencePolicy] lines are not in voice-ai's capture allowlist, so
+            # we can flag the ambiguity but not resolve it — see Phase 7.
+            if delay > catalogue["long_dead_air_seconds"]:
+                evidence["possible_reengagement"] = True
+            findings.append(_finding(catalogue, "dead_air", evidence=evidence))
 
         if turn.barge_in and turn.marks_outstanding > 0:
             findings.append(_finding(
@@ -396,7 +459,7 @@ def evaluate(header, events, catalogue):
             evidence={"count": len(unanswered),
                       "turns": [t.index for t in unanswered],
                       "seq": unanswered[0].start_seq},
-            confidence="degraded" if trace_incomplete else "high",
+            confidence=confidence,
         ))
 
     for event in events:
@@ -438,6 +501,27 @@ def _dedupe(findings):
 
 
 def analyze(jsonl_text, catalogue):
-    """Convenience end-to-end entry point: artifact text → findings."""
+    """Stored-artifact entry point: artifact text → findings. Used by backfill."""
     header, events = parse_artifact(jsonl_text)
     return evaluate(header, events, catalogue)
+
+
+def analyze_call(call, catalogue):
+    """In-memory entry point: pull_render_logs' call dict → findings."""
+    return evaluate(header_from_call(call), classify_lines(call.get("lines") or []),
+                    catalogue)
+
+
+def summarize(findings):
+    """Compact summary merged into ``location_conversations.raw_metadata`` so the
+    conversations list can badge a row without joining or fetching R2."""
+    if not findings:
+        return {"quality_severity": None, "quality_count": 0, "quality_rules": []}
+    severity = ("critical" if any(f["severity"] == "critical" for f in findings)
+                else "moderate" if any(f["severity"] == "moderate" for f in findings)
+                else "info")
+    return {
+        "quality_severity": severity,
+        "quality_count": len(findings),
+        "quality_rules": sorted(f["rule_id"] for f in findings),
+    }
