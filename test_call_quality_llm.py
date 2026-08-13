@@ -257,3 +257,19 @@ def test_llm_cannot_reclaim_what_a_rule_already_explained():
     assert llm.validate(payload, transcript, CATALOGUE) != []          # alone, kept
     assert llm.validate(payload, transcript, CATALOGUE,
                         rule_findings=[{"rule_id": "vad_split_caller_sentence"}]) == []
+
+
+def test_llm_cannot_call_a_completed_transfer_a_dead_end():
+    """REGRESSION from the prod backfill: dead_end_transfer fired 13 times and
+    transfer_to_human had actually run on 13 of 13. The model sees the caller
+    ask for a person and the conversation stop, not knowing the call ends
+    BECAUSE the handoff succeeded."""
+    payload = {"findings": [{"rule_id": "dead_end_transfer", "seq": [20],
+                             "detail": "caller asked for a person and got nowhere"}]}
+    transcript = llm.build_transcript(artifact(CONVERSATION))
+
+    assert llm.validate(payload, transcript, CATALOGUE) != []          # alone, kept
+    assert llm.validate(payload, transcript, CATALOGUE,
+                        tools_used=["transfer_to_human"]) == []
+    assert llm.validate(payload, transcript, CATALOGUE,
+                        tools_used=["check_availabilities"]) != []
