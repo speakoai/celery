@@ -228,7 +228,11 @@ def test_slow_answer_is_dead_air_not_a_missing_response():
         line(1, SPEECH_START, ts=at(10)),
         line(2, SPEECH_STOP, ts=at(12)),
         line(3, caller("Hi, can I make a reservation for next Wednesday"), ts=at(12)),
-        line(4, ASSISTANT, ts=at(25)),      # 13s — slow, but an answer
+        line(4, ASSISTANT, ts=at(25)),
+        # 8000 bytes = 1s of speech; confirmed at 26s, so playback began at 25s
+        line(5, "[Azure] Response completed: id=r1 status=completed audio_chunks=1 "
+                "audio_bytes=8000 twilio_sent=1 transcript='ok'", ts=at(25)),
+        line(6, "[PlaybackClock] response playback confirmed (ack-last): id=r1 gen=1", ts=at(26)),
     ]), CATALOGUE)
     assert "agent_no_response" not in rules(findings)
     assert "short_utterance_dropped" not in rules(findings)
@@ -242,7 +246,9 @@ def test_moderately_slow_answer_is_not_flagged_as_reengagement():
         line(1, SPEECH_START, ts=at(10)),
         line(2, SPEECH_STOP, ts=at(12)),
         line(3, caller("a table for four please"), ts=at(12)),
-        line(4, ASSISTANT, ts=at(22)),      # 10s — dead air, plainly an answer
+        line(4, "[Azure] Response completed: id=r1 status=completed audio_chunks=1 "
+                "audio_bytes=8000 twilio_sent=1 transcript='ok'", ts=at(22)),
+        line(5, "[PlaybackClock] response playback confirmed (ack-last): id=r1 gen=1", ts=at(23)),
     ]), CATALOGUE)
     assert "possible_reengagement" not in one(findings, "dead_air")["evidence"]
 
@@ -280,7 +286,9 @@ def test_dead_air_measured_from_the_caller_finishing():
         line(1, SPEECH_START, ts=at(10)),
         line(2, SPEECH_STOP, ts=at(12)),
         line(3, caller("a table for four please"), ts=at(12)),
-        line(4, ASSISTANT, ts=at(22)),      # 10s > 8s threshold
+        line(4, "[Azure] Response completed: id=r1 status=completed audio_chunks=1 "
+                "audio_bytes=8000 twilio_sent=1 transcript='ok'", ts=at(22)),
+        line(5, "[PlaybackClock] response playback confirmed (ack-last): id=r1 gen=1", ts=at(23)),
     ]), CATALOGUE)
     assert one(findings, "dead_air")["evidence"]["seconds"] == 10.0
 
@@ -556,3 +564,40 @@ def test_a_tool_call_counts_as_the_agent_acting_on_the_turn():
         line(6, ASSISTANT, ts=at(33)),
     ]), CATALOGUE)
     assert "agent_no_response" not in rules(findings)
+
+
+def test_dead_air_is_not_the_length_of_a_long_reply():
+    """REGRESSION, the biggest measurement error in the project. Every log
+    marker (Response audio complete / Assistant transcript / Response completed)
+    fires only once the WHOLE reply has been generated. Measuring to one of them
+    measured how long the agent TALKED, not how long the caller WAITED.
+
+    Real prod case: a caller asked "you tell me your service", was reported as
+    19.1s of dead air, and had in fact been answered in 1.6s — the agent then
+    spoke for 43 seconds listing services.
+
+    Here: caller stops at 12s, the reply is 40s of speech (320000 bytes)
+    confirmed at 54s, so playback began at 14s — a 2s wait, not 30s.
+    """
+    findings = analyze(artifact([
+        line(1, SPEECH_START, ts=at(10)),
+        line(2, SPEECH_STOP, ts=at(12)),
+        line(3, caller("you tell me your service"), ts=at(12)),
+        line(4, "[Azure] Response completed: id=r9 status=completed audio_chunks=80 "
+                "audio_bytes=320000 twilio_sent=80 transcript='...'", ts=at(42)),
+        line(5, "[PlaybackClock] response playback confirmed (ack-last): id=r9 gen=1", ts=at(54)),
+    ]), CATALOGUE)
+    assert "dead_air" not in rules(findings)
+
+
+def test_dead_air_abstains_when_playback_was_never_confirmed():
+    """A response the caller interrupted never gets a playback confirmation, so
+    its start cannot be derived. Abstain rather than fall back to a marker that
+    overstates the wait."""
+    findings = analyze(artifact([
+        line(1, SPEECH_START, ts=at(10)),
+        line(2, SPEECH_STOP, ts=at(12)),
+        line(3, caller("a table for four please"), ts=at(12)),
+        line(4, ASSISTANT, ts=at(40)),
+    ]), CATALOGUE)
+    assert "dead_air" not in rules(findings)

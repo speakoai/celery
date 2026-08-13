@@ -65,7 +65,7 @@ resolve it properly — Phase 7.
 
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Bump on any change to detection semantics. Findings record it, so a
 # recalibration can be told apart from the run that first raised an issue.
@@ -98,9 +98,12 @@ _PATTERNS = (
     ("caller_transcript_empty",  re.compile(r"^\[Azure\] EMPTY CALLER TRANSCRIPT")),
     ("caller_transcript_failed", re.compile(r"^\[Azure\] Caller transcription FAILED")),
     ("assistant_transcript",     re.compile(r"^\[Azure\] Assistant transcript:")),
-    ("response_completed",       re.compile(r"^\[Azure\] Response completed: id=\S* "
+    ("response_completed",       re.compile(r"^\[Azure\] Response completed: id=(?P<rid>\S*) "
                                             r"status=(?P<status>\S+).*?"
+                                            r"audio_bytes=(?P<audio_bytes>\d+) "
                                             r"twilio_sent=(?P<twilio_sent>\d+)", re.S)),
+    ("playback_confirmed",       re.compile(r"^\[PlaybackClock\] response playback confirmed"
+                                            r".*?id=(?P<rid>\S+)", re.S)),
     ("response_audio_complete",  re.compile(r"^\[Azure\] Response audio complete:")),
     ("turn_metrics",             re.compile(r"^\[TurnMetrics\] (?P<json>\{.*)", re.S)),
     ("vad_mismatch",             re.compile(r"^\[Azure\] VAD config mismatch")),
@@ -120,6 +123,47 @@ _PATTERNS = (
 _ASSISTANT_KINDS = frozenset({
     "assistant_transcript", "response_completed", "response_audio_complete",
 })
+
+
+# Twilio media streams are 8-bit mu-law at 8kHz, so one second of speech is
+# 8000 bytes. Verified across 173 prod responses: at this rate playback starts
+# before generation completes for 97% of them (which streaming requires), while
+# every other candidate rate implies playback finishing before it began.
+TWILIO_BYTES_PER_SECOND = 8000.0
+
+
+def playback_starts(events):
+    """``{response_id: when the caller first HEARD it}``.
+
+    The log has no playback-start marker — `[Azure -> Twilio]` is in the capture
+    allowlist but never actually emitted, and every `[PlaybackClock]` line is a
+    playback *confirmation*, i.e. the end. So the start is derived: audio ends
+    when playback is confirmed, and lasts `audio_bytes / 8000` seconds.
+
+    This matters enormously. Every other marker (`Response audio complete`,
+    `Assistant transcript`, `Response completed`) fires only once the WHOLE
+    reply has been generated, so measuring to one of them measures the LENGTH OF
+    THE REPLY, not the caller's wait. Measured on prod: a caller asking "you
+    tell me your service" was recorded as 19.1s of dead air when the agent had
+    in fact answered in 1.6s and then talked for 43 seconds.
+    """
+    sizes = {}
+    for e in events:
+        if e.kind == "response_completed":
+            rid = e.data.get("rid")
+            try:
+                nbytes = int(e.data.get("audio_bytes") or 0)
+            except (TypeError, ValueError):
+                nbytes = 0
+            if rid and nbytes > 0:
+                sizes[rid] = nbytes
+    out = {}
+    for e in events:
+        if e.kind == "playback_confirmed" and e.ts is not None:
+            rid = e.data.get("rid")
+            if rid in sizes:
+                out[rid] = e.ts - timedelta(seconds=sizes[rid] / TWILIO_BYTES_PER_SECOND)
+    return out
 
 
 def _is_audible_response(event):
@@ -205,22 +249,36 @@ class Turn:
             return False
         return 0 <= (self.next_start_ts - base).total_seconds() <= seconds
 
-    def first_response_delay(self):
+    def first_response_delay(self, starts=None):
         """Seconds from the caller finishing until they HEAR the agent, or None.
 
-        Only audible events count. `responses` also holds tool calls and
-        barge-in markers, which are evidence the agent acted but are silent to
-        the caller — measuring to those would report a call as responsive while
-        the caller sat listening to nothing.
+        `starts` maps response id -> derived playback start (see
+        :func:`playback_starts`). When a turn's response is in there, that is
+        used; the log's own markers all fire after the whole reply has been
+        generated and would measure reply length instead of the caller's wait.
+
+        Tool calls and barge-in markers live in `responses` too — they show the
+        agent acted, but are silent to the caller, so they never count here.
         """
         base = self.stop_ts or self.start_ts
         if base is None:
             return None
-        first = next((r.ts for r in self.responses
-                      if r.ts is not None and r.kind in _ASSISTANT_KINDS), None)
-        if first is None:
+        # ONLY a derived playback start is trustworthy. Falling back to the
+        # log's own markers would silently reintroduce the very error this
+        # exists to avoid: they fire once the whole reply has been generated, so
+        # a long answer reads as a long wait. A response with no playback
+        # confirmation (typically because the caller interrupted it) is simply
+        # not measurable — abstain rather than overstate.
+        best = None
+        for r in self.responses:
+            if r.kind != "response_completed" or not starts:
+                continue
+            ts = starts.get(r.data.get("rid"))
+            if ts is not None and (best is None or ts < best):
+                best = ts
+        if best is None:
             return None
-        return max(0.0, (first - base).total_seconds())
+        return max(0.0, (best - base).total_seconds())
 
 
 # ── Parsing ──────────────────────────────────────────────────────────────────
@@ -475,6 +533,7 @@ def evaluate(header, events, catalogue):
     confidence = "degraded" if tail_missing else "high"
 
     turns = build_turns(events)
+    starts = playback_starts(events)
     findings = []
     unanswered = []
 
@@ -539,7 +598,7 @@ def evaluate(header, events, catalogue):
                     evidence=evidence, confidence=confidence,
                 ))
 
-        delay = turn.first_response_delay()
+        delay = turn.first_response_delay(starts)
         if delay is not None and delay > catalogue["dead_air_seconds"]:
             evidence = {"turn": turn.index, "seq": turn.start_seq,
                         "seconds": round(delay, 2)}
