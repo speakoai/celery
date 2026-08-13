@@ -73,7 +73,10 @@ from datetime import datetime
 #   .2  gap-suppression removed (structurally always-on) and the answer-window
 #       cutoff removed (turned slow answers into critical false positives) —
 #       both found by running .1 against real dev artifacts
-ANALYZER_VERSION = "2026-08-13.2"
+# 2026-08-14.1  Phase 6 calibration against 87 prod artifacts: terminal-tool
+#       handoff suppression, vad_split_caller_sentence, and cancelled/silent
+#       responses no longer count as answers. Critical rate 34% -> 16%.
+ANALYZER_VERSION = "2026-08-14.1"
 
 # ── Line classification ──────────────────────────────────────────────────────
 # Matched against `msg`, which render_log_parse has already stripped of the
