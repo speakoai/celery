@@ -105,12 +105,14 @@ def test_barge_in_variant_matches_before_plain_speech_start():
 
 def test_short_utterance_dropped_is_critical():
     findings = analyze(artifact([
-        line(1, SPEECH_START),
-        line(2, SPEECH_STOP),
-        line(3, caller("yeah")),
-        line(4, SPEECH_START),          # caller speaks again, agent never replied
-        line(5, caller("hello? are you there")),
-        line(6, ASSISTANT),
+        line(1, SPEECH_START, ts=at(10)),
+        line(2, SPEECH_STOP, ts=at(11)),
+        line(3, caller("yeah"), ts=at(11)),
+        # Caller waits, gets nothing, and gives up on it 9s later. A gap this
+        # long is a real non-response, not a hesitation pause mid-sentence.
+        line(4, SPEECH_START, ts=at(20)),
+        line(5, caller("hello? are you there"), ts=at(21)),
+        line(6, ASSISTANT, ts=at(22)),
     ]), CATALOGUE)
 
     finding = one(findings, "short_utterance_dropped")
@@ -124,11 +126,11 @@ def test_short_utterance_dropped_is_critical():
 
 def test_long_utterance_unanswered_is_agent_no_response():
     findings = analyze(artifact([
-        line(1, SPEECH_START),
-        line(2, caller("I would like to book a table for four people on Friday")),
-        line(3, SPEECH_START),
-        line(4, caller("hello")),
-        line(5, ASSISTANT),
+        line(1, SPEECH_START, ts=at(10)),
+        line(2, caller("I would like to book a table for four people on Friday"), ts=at(12)),
+        line(3, SPEECH_START, ts=at(22)),
+        line(4, caller("hello"), ts=at(23)),
+        line(5, ASSISTANT, ts=at(24)),
     ]), CATALOGUE)
     assert "agent_no_response" in rules(findings)
     assert "short_utterance_dropped" not in rules(findings)
@@ -208,11 +210,11 @@ def test_missing_call_end_downgrades_confidence():
     """`call_complete: false` is the one honest header signal — we never saw
     the call end, so the tail of the trace really is missing."""
     findings = analyze(artifact([
-        line(1, SPEECH_START),
-        line(2, caller("yeah")),
-        line(3, SPEECH_START),
-        line(4, caller("hello")),
-        line(5, ASSISTANT),
+        line(1, SPEECH_START, ts=at(10)),
+        line(2, caller("yeah"), ts=at(11)),
+        line(3, SPEECH_START, ts=at(25)),
+        line(4, caller("hello"), ts=at(26)),
+        line(5, ASSISTANT, ts=at(27)),
     ], call_complete=False), CATALOGUE)
     assert one(findings, "short_utterance_dropped")["confidence"] == "degraded"
 
@@ -337,10 +339,10 @@ def test_tool_failure_detected_and_success_ignored():
 
 def test_repeated_no_response_escalates():
     findings = analyze(artifact([
-        line(1, SPEECH_START), line(2, caller("yeah")),
-        line(3, SPEECH_START), line(4, caller("okay")),
-        line(5, SPEECH_START), line(6, caller("hello")),
-        line(7, ASSISTANT),
+        line(1, SPEECH_START, ts=at(10)), line(2, caller("yeah"), ts=at(11)),
+        line(3, SPEECH_START, ts=at(25)), line(4, caller("okay"), ts=at(26)),
+        line(5, SPEECH_START, ts=at(40)), line(6, caller("hello"), ts=at(41)),
+        line(7, ASSISTANT, ts=at(42)),
     ]), CATALOGUE)
     finding = one(findings, "repeated_no_response")
     assert finding["evidence"]["count"] == 2
@@ -353,10 +355,10 @@ def test_one_finding_per_rule_per_call_with_occurrence_count():
     """The DB has UNIQUE (location_conversation_id, rule_id), so the engine
     must collapse repeats rather than let an insert fail."""
     findings = analyze(artifact([
-        line(1, SPEECH_START), line(2, caller("yeah")),
-        line(3, SPEECH_START), line(4, caller("okay")),
-        line(5, SPEECH_START), line(6, caller("hello")),
-        line(7, ASSISTANT),
+        line(1, SPEECH_START, ts=at(10)), line(2, caller("yeah"), ts=at(11)),
+        line(3, SPEECH_START, ts=at(25)), line(4, caller("okay"), ts=at(26)),
+        line(5, SPEECH_START, ts=at(40)), line(6, caller("hello"), ts=at(41)),
+        line(7, ASSISTANT, ts=at(42)),
     ]), CATALOGUE)
     assert len(findings) == len({f["rule_id"] for f in findings})
     assert one(findings, "short_utterance_dropped")["evidence"]["occurrences"] == 2
@@ -432,3 +434,77 @@ def test_every_deterministic_catalogue_entry_is_implemented(rule_id):
     """Guards against a catalogue entry marked `rule` that no code ever emits."""
     assert rule_id in CATALOGUE["by_id"]
     assert CATALOGUE["by_id"][rule_id]["detector"] == "rule"
+
+
+# ── Phase 6 calibration fixes ────────────────────────────────────────────────
+
+def test_vad_split_is_moderate_not_a_critical_non_response():
+    """REGRESSION, from a real dev call. The caller said 'Can you make it like
+    tomorrow morning at…', paused ~1.2s, then '11 A.m.'. The agent correctly
+    waited. Before this rule that was reported as a CRITICAL agent_no_response.
+    """
+    findings = analyze(artifact([
+        line(1, SPEECH_START, ts=at(10)),
+        line(2, SPEECH_STOP, ts=at(15)),
+        line(3, caller("Can you make it like tomorrow morning at"), ts=at(15)),
+        line(4, SPEECH_START, ts=at(16)),          # caller carries on, 1.2s later
+        line(5, caller("11 A.m."), ts=at(18)),
+        line(6, ASSISTANT, ts=at(20)),
+    ]), CATALOGUE)
+    finding = one(findings, "vad_split_caller_sentence")
+    assert finding["severity"] == "moderate"
+    assert "agent_no_response" not in rules(findings)
+    assert "short_utterance_dropped" not in rules(findings)
+    assert "call_ended_mid_turn" not in rules(findings)
+
+
+def test_cancelled_response_with_no_audio_is_not_an_answer():
+    """A response that ended `cancelled` having sent nothing to Twilio was
+    never heard by the caller, so it cannot count as answering the turn."""
+    silent = ("[Azure] Response completed: id=resp_x status=cancelled "
+              "audio_chunks=0 audio_bytes=0 twilio_sent=0 transcript=''")
+    findings = analyze(artifact([
+        line(1, SPEECH_START, ts=at(10)),
+        line(2, caller("I would like to book a table for four on Friday"), ts=at(12)),
+        line(3, silent, ts=at(13)),
+        line(4, SPEECH_START, ts=at(30)),
+        line(5, caller("hello"), ts=at(31)),
+        line(6, ASSISTANT, ts=at(32)),
+    ]), CATALOGUE)
+    assert "agent_no_response" in rules(findings)
+
+
+def test_completed_response_that_reached_twilio_is_an_answer():
+    heard = ("[Azure] Response completed: id=resp_x status=completed "
+             "audio_chunks=27 audio_bytes=103509 twilio_sent=27 transcript='ok'")
+    findings = analyze(artifact([
+        line(1, SPEECH_START, ts=at(10)),
+        line(2, caller("I would like to book a table for four on Friday"), ts=at(12)),
+        line(3, heard, ts=at(13)),
+        line(4, CALL_END, ts=at(20)),
+    ]), CATALOGUE)
+    assert "agent_no_response" not in rules(findings)
+
+
+def test_transfer_to_human_is_not_an_unanswered_turn():
+    """REGRESSION, calibrated against 87 prod artifacts. `call_ended_mid_turn`
+    was firing on 23% of prod calls; 13 of 14 inspected were callers asking for
+    a person where transfer_to_human HAD fired and the call ended because it
+    was handed to a human. That is the success path."""
+    findings = analyze(artifact([
+        line(1, SPEECH_START, ts=at(10)),
+        line(2, caller("I want to speak to a person"), ts=at(12)),
+        line(3, "[Azure] Tool call: transfer_to_human call_id=x params={}", ts=at(13)),
+        line(4, CALL_END, ts=at(15)),
+    ]), CATALOGUE)
+    assert "agent_no_response" not in rules(findings)
+    assert "call_ended_mid_turn" not in rules(findings)
+
+
+def test_a_genuine_drop_still_fires_when_no_terminal_tool_ran():
+    findings = analyze(artifact([
+        line(1, SPEECH_START, ts=at(10)),
+        line(2, caller("I want to speak to a person"), ts=at(12)),
+        line(3, CALL_END, ts=at(15)),
+    ]), CATALOGUE)
+    assert {"agent_no_response", "call_ended_mid_turn"} <= rules(findings)
