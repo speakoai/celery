@@ -1,13 +1,11 @@
 {
-  "catalogue_version": "2026-08-13.1",
+  "catalogue_version": "2026-08-14.1",
   "_readme": "Single source of truth for call-quality issue detection. See docs/plans/call-quality-issues.md in speako-workspace. The rule engine reads `threshold`; the LLM triage pass receives entries with detector='llm' as its checklist; findings copy title/symptom/likely_cause/suggested_fix at write time so speako-agent-admin needs no copy of this file. Render the human-readable view with scripts/render-issue-catalogue.py — never hand-edit the generated markdown. Bump catalogue_version on any change to an entry's meaning or threshold.",
-
   "defaults": {
     "short_utterance_max_chars": 12,
-    "dead_air_seconds": 3.5,
-    "long_dead_air_seconds": 7.0
+    "dead_air_seconds": 8.0,
+    "long_dead_air_seconds": 12.0
   },
-
   "entries": [
     {
       "id": "short_utterance_dropped",
@@ -17,8 +15,13 @@
       "symptom": "The caller said something brief — \"yeah\", \"booking\", \"7pm\" — and no assistant response followed before the next caller turn or the end of the call.",
       "likely_cause": "Server VAD ended the turn before STT settled, or the utterance fell under the energy threshold. Short confirmations are the most common casualty because they carry little acoustic energy and end abruptly.",
       "suggested_fix": "Check this location's VAD settings on the Agents page — end-of-speech silence and detection threshold. Compare `[Azure] Session effective config:` in the trace against what was published; a `VAD config mismatch` line in the same call means the requested settings never took effect.",
-      "threshold": { "max_chars": 12 },
-      "related": ["Azure STT truncation", "Azure barge-in / echo guard"]
+      "threshold": {
+        "max_chars": 12
+      },
+      "related": [
+        "Azure STT truncation",
+        "Azure barge-in / echo guard"
+      ]
     },
     {
       "id": "vad_split_caller_sentence",
@@ -28,8 +31,12 @@
       "symptom": "The agent stayed silent after a caller turn, and the caller immediately carried on speaking — the turn had been ended on a hesitation pause rather than at the end of a thought.",
       "likely_cause": "The end-of-speech silence threshold is short enough to treat a natural mid-sentence pause as a finished turn. The agent behaved correctly by waiting; the turn boundary was wrong. Measured on a real call: the caller paused ~1.2s mid-sentence and the turn was closed.",
       "suggested_fix": "Raise the end-of-speech silence threshold for this location so ordinary hesitation does not end a turn. Check `[Azure] Session effective config:` in the trace for the value actually in force — a `VAD config mismatch` on the same call means the published setting never applied.",
-      "threshold": { "resume_within_seconds": 2.0 },
-      "related": ["Azure STT truncation"]
+      "threshold": {
+        "resume_within_seconds": 2.0
+      },
+      "related": [
+        "Azure STT truncation"
+      ]
     },
     {
       "id": "agent_no_response",
@@ -40,7 +47,9 @@
       "likely_cause": "The response was never created, was created and produced no audio, or the WebSocket to the model stalled. Distinct from `short_utterance_dropped` in that the caller's speech was long enough to be heard clearly.",
       "suggested_fix": "Read the trace around the caller transcript's sequence number. If a tool call sits between the transcript and the silence, the tool likely hung — check `Tool result:` for that turn.",
       "threshold": {},
-      "related": ["Caller-silence re-engagement policy"]
+      "related": [
+        "Caller-silence re-engagement policy"
+      ]
     },
     {
       "id": "repeated_no_response",
@@ -50,8 +59,12 @@
       "symptom": "Two or more unanswered caller turns in the same conversation.",
       "likely_cause": "A systematic setting problem rather than a one-off glitch — usually VAD or a persistently degraded audio path, not a transient model stall.",
       "suggested_fix": "Treat as a location-level configuration fault. Compare against other calls at the same location on the same day; if they all show it, the settings changed or the line quality did.",
-      "threshold": { "min_occurrences": 2 },
-      "related": ["Azure STT truncation"]
+      "threshold": {
+        "min_occurrences": 2
+      },
+      "related": [
+        "Azure STT truncation"
+      ]
     },
     {
       "id": "call_ended_mid_turn",
@@ -73,7 +86,10 @@
       "likely_cause": "Known Azure STT truncation behaviour; suspected links to multi-language auto-detect and echo cancellation. Also seen on poor-reception mobile calls and strong accents.",
       "suggested_fix": "Check the location's configured languages — a narrow, explicit language list detects more reliably than broad auto-detect. Confirm the caller's audio is not being clipped by the echo guard.",
       "threshold": {},
-      "related": ["Azure STT truncation", "Azure barge-in / echo guard"]
+      "related": [
+        "Azure STT truncation",
+        "Azure barge-in / echo guard"
+      ]
     },
     {
       "id": "stt_transcription_failed",
@@ -84,7 +100,9 @@
       "likely_cause": "An error from the speech service rather than a quiet caller — a transport fault, an unsupported language for the configured pipeline, or a service-side rejection.",
       "suggested_fix": "Check the location's language configuration against what the platform actually supports. Voice Live's multilingual VAD/STT does not cover every language Speako lets a tenant choose.",
       "threshold": {},
-      "related": ["Azure Voice Live Thai unsupported"]
+      "related": [
+        "Azure Voice Live Thai unsupported"
+      ]
     },
     {
       "id": "dead_air",
@@ -92,10 +110,14 @@
       "detector": "rule",
       "title": "Long silence before the agent replied",
       "symptom": "The gap between the caller finishing and the first outbound agent audio exceeded the threshold.",
-      "likely_cause": "A slow tool call (availability lookup, booking write), model latency, or a retry behind the scenes. Callers experience anything past ~3 seconds as the line having gone dead.",
-      "suggested_fix": "Look for a `Tool call:` / `Tool result:` pair spanning the gap. If the delay is tool-side, that tool is the target, not the speech settings.",
-      "threshold": { "seconds": 3.5 },
-      "related": ["Celery worker OOM → stale availability cache"]
+      "likely_cause": "A slow tool call (availability lookup, booking write) or model latency. Measured across 87 prod calls, the MEDIAN audible response delay is already ~4s and p90 is ~8.4s, so 4s is this product's normal rather than a fault — the threshold flags turns roughly twice as slow as typical. Note 54 of 91 slow turns had no tool running at all, i.e. pure generation latency.",
+      "suggested_fix": "Look for a Tool call / Tool result pair spanning the gap. If there is none the delay is generation latency, not a tool — check the agent's prompt size and knowledge retrieval for this location. The caller's wait is longer than measured here, because the clock starts at VAD end-of-turn, which is itself ~1s after they stopped speaking.",
+      "threshold": {
+        "seconds": 8.0
+      },
+      "related": [
+        "Celery worker OOM → stale availability cache"
+      ]
     },
     {
       "id": "agent_talked_over_caller",
@@ -106,7 +128,9 @@
       "likely_cause": "Barge-in handling did not truncate the in-flight response fast enough, so both parties were talking. Mark-based playback tracking exists to bound this.",
       "suggested_fix": "Check `[Azure -> Twilio]` clear timing and `[PlaybackClock]` around the overlap. Persistent cases at one location point at VAD sensitivity rather than the barge-in path itself.",
       "threshold": {},
-      "related": ["Azure barge-in / echo guard"]
+      "related": [
+        "Azure barge-in / echo guard"
+      ]
     },
     {
       "id": "vad_config_mismatch",
@@ -128,9 +152,11 @@
       "likely_cause": "Availability lookup, booking write, SMS or transfer failed. The agent usually improvises around the failure, which is what the caller hears.",
       "suggested_fix": "Identify the tool from the trace and check that subsystem for the same timestamp. A booking tool failing mid-call often leaves the caller believing a booking was made.",
       "threshold": {},
-      "related": ["Booking NULL-ID fix", "Online-booking confirmation deadlock"]
+      "related": [
+        "Booking NULL-ID fix",
+        "Online-booking confirmation deadlock"
+      ]
     },
-
     {
       "id": "caller_repeated_themselves",
       "severity": "critical",
@@ -151,7 +177,9 @@
       "likely_cause": "Usually mis-transcription rather than reasoning failure — a short or accented word heard as something else. The agent then answers the misheard question confidently.",
       "suggested_fix": "Compare the caller transcript in the trace against what the caller plainly meant. A wrong transcript confirms STT; a correct transcript with a wrong answer points at the agent prompt or knowledge.",
       "threshold": {},
-      "related": ["Azure STT truncation"]
+      "related": [
+        "Azure STT truncation"
+      ]
     },
     {
       "id": "repetition_or_apology_loop",
@@ -173,7 +201,10 @@
       "likely_cause": "The session rebuild after `switch_language` did not carry the new language's instructions through cleanly.",
       "suggested_fix": "Confirm the location's language list and that the agent was republished after any language change. Check the trace for a session update at the switch point.",
       "threshold": {},
-      "related": ["Hindi gender voice persona", "Azure language-transfer rollback points"]
+      "related": [
+        "Hindi gender voice persona",
+        "Azure language-transfer rollback points"
+      ]
     },
     {
       "id": "gender_persona_mismatch",
@@ -184,7 +215,9 @@
       "likely_cause": "The persona gender line was lost in a session rebuild, or the location has never been republished since gender-aware personas shipped.",
       "suggested_fix": "Republish the location. This activates per-location and does not apply retroactively to agents published earlier.",
       "threshold": {},
-      "related": ["Hindi gender voice persona"]
+      "related": [
+        "Hindi gender voice persona"
+      ]
     },
     {
       "id": "unspeakable_output",
@@ -195,7 +228,10 @@
       "likely_cause": "The model synthesises its own text, so there is no interception point to fix this at render time — it has to come from the agent's instructions.",
       "suggested_fix": "Confirm the location has the speakable-output behaviour fragment and has been re-synced and republished. Activation is manual per location: re-sync first, then republish.",
       "threshold": {},
-      "related": ["Speakable agent output", "Date/time display standardization"]
+      "related": [
+        "Speakable agent output",
+        "Date/time display standardization"
+      ]
     },
     {
       "id": "mispronounced_proper_noun",
@@ -206,7 +242,9 @@
       "likely_cause": "TTS pronunciation of proper nouns cannot be reliably fixed by prompting; it needs a pronunciation lexicon, which is wired but not yet generally available.",
       "suggested_fix": "Record the exact word and intended pronunciation on the parked lexicon ticket. Do not attempt to fix this by editing the agent prompt — it does not hold.",
       "threshold": {},
-      "related": ["Voice pronunciation lexicon (parked)"]
+      "related": [
+        "Voice pronunciation lexicon (parked)"
+      ]
     },
     {
       "id": "dead_end_transfer",
@@ -217,7 +255,9 @@
       "likely_cause": "No number configured for the location, or the configured number is not the one actually dialled.",
       "suggested_fix": "Verify the location's human transfer number. Note this setting has previously been read from a different field than the dashboard displayed, so confirm against the trace rather than the UI alone.",
       "threshold": {},
-      "related": ["Transfer to Human = dead config"]
+      "related": [
+        "Transfer to Human = dead config"
+      ]
     },
     {
       "id": "booking_confirmed_without_details",
@@ -228,7 +268,10 @@
       "likely_cause": "The booking tool accepted incomplete input, or the agent narrated success before the tool returned.",
       "suggested_fix": "Cross-check the booking row for this call. A confirmed booking the caller believes in but the system did not record correctly is the most damaging failure in this catalogue.",
       "threshold": {},
-      "related": ["Booking NULL-ID fix", "Online-booking confirmation deadlock"]
+      "related": [
+        "Booking NULL-ID fix",
+        "Online-booking confirmation deadlock"
+      ]
     },
     {
       "id": "hallucinated_availability",
@@ -239,7 +282,9 @@
       "likely_cause": "The availability tool failed or returned nothing and the agent improvised rather than admitting it could not check.",
       "suggested_fix": "Look for a failed or absent availability call on that turn. A stale or empty availability cache is a known cause and shows up as the tool returning nothing rather than erroring.",
       "threshold": {},
-      "related": ["Celery worker OOM → stale availability cache"]
+      "related": [
+        "Celery worker OOM → stale availability cache"
+      ]
     }
   ]
 }

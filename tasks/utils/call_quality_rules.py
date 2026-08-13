@@ -206,11 +206,18 @@ class Turn:
         return 0 <= (self.next_start_ts - base).total_seconds() <= seconds
 
     def first_response_delay(self):
-        """Seconds from the caller finishing to the agent's first line, or None."""
+        """Seconds from the caller finishing until they HEAR the agent, or None.
+
+        Only audible events count. `responses` also holds tool calls and
+        barge-in markers, which are evidence the agent acted but are silent to
+        the caller — measuring to those would report a call as responsive while
+        the caller sat listening to nothing.
+        """
         base = self.stop_ts or self.start_ts
-        if base is None or not self.responses:
+        if base is None:
             return None
-        first = next((r.ts for r in self.responses if r.ts is not None), None)
+        first = next((r.ts for r in self.responses
+                      if r.ts is not None and r.kind in _ASSISTANT_KINDS), None)
         if first is None:
             return None
         return max(0.0, (first - base).total_seconds())
