@@ -58,7 +58,13 @@ MAX_AUDIO_BYTES = 25 * 1024 * 1024      # a long call is ~2MB; this is a sanity 
 @app.task(bind=True, name="tasks.verify_call_findings.verify_call_findings")
 def verify_call_findings(self, is_dev=False, limit=None):
     """Sweep unverified stt_* findings and check each against its recording."""
-    db_url = os.getenv("DATABASE_URL" if is_dev else "DATABASE_URL_PROD")
+    # Always DATABASE_URL: each deployed service points it at its OWN
+    # environment's database, exactly as pull_render_logs does. Selecting a
+    # separate prod variable here is a local-script habit — that variable exists
+    # on a developer machine reaching production, not on the production service
+    # itself, so it made this task unrunnable in prod while working on dev by
+    # accident. `is_dev` still selects the R2 bucket, which does differ.
+    db_url = os.getenv("DATABASE_URL")
     if not db_url:
         return {"success": False, "error": "no_database_url"}
 
