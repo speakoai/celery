@@ -18,6 +18,7 @@ from tasks.sms import (
     send_email_confirmation_can_rest, send_email_confirmation_can,
     send_email_confirmation_customer_new, send_email_confirmation_customer_mod, send_email_confirmation_customer_can
 )
+from tasks.utils.display_format import format_display_datetime
 from tasks.celery_app import app as celery_app
 from tasks.analyze_knowledge import analyze_knowledge_file
 from tasks.scrape_url import scrape_url_to_markdown
@@ -265,9 +266,9 @@ def send_demo_agent_notification(conversation_id: str, agent_config: dict) -> di
                 from zoneinfo import ZoneInfo
                 utc_dt = datetime.fromtimestamp(start_unix, tz=ZoneInfo('UTC'))
                 local_dt = utc_dt.astimezone(ZoneInfo(timezone_str))
-                call_time_str = local_dt.strftime('%d %b %Y, %I:%M %p')
+                call_time_str = format_display_datetime(local_dt)
             except Exception:
-                call_time_str = datetime.fromtimestamp(start_unix).strftime('%d %b %Y, %I:%M %p')
+                call_time_str = format_display_datetime(datetime.fromtimestamp(start_unix))
         
         # Language
         language = metadata.get('main_language', '') or details.get('language', 'Unknown')
