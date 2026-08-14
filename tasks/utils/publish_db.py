@@ -1918,6 +1918,40 @@ def get_tool_prompt_template() -> Dict[str, Any]:
             pass
 
 
+def get_tool_id_by_display_name(display_name: str) -> Optional[str]:
+    """
+    Resolve an ai_tools.tool_id from its display_name.
+
+    Needed because Booking Manager's `handling_mode` names its replacement tool
+    by display name ("transfer_booking_call", "send_booking_link") while the
+    prompt composition works in opaque tool_ids. Parity with
+    getToolIdByDisplayName in speako-web src/lib/publish/db.ts.
+
+    Returns None when no such tool exists, so callers can fall back rather than
+    publish an agent with no booking prompts at all.
+    """
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT tool_id FROM ai_tools WHERE display_name = %s LIMIT 1",
+                    (display_name,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    logger.warning(
+                        f"[publish_db] No ai_tools row with display_name='{display_name}'"
+                    )
+                    return None
+                return row[0]
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 def get_tool_service_prompts(tool_ids: List[str]) -> List[Dict[str, Any]]:
     """
     Get service_prompts for multiple tools from ai_tools table.

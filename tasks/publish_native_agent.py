@@ -31,9 +31,12 @@ from .utils.publish_db import (
     get_location_type,
     get_privacy_url,
     get_prompt_fragments,
+    get_tool_id_by_display_name,
     get_tool_prompt_template,
     get_tool_service_prompts,
 )
+
+from .utils.publish_tool_rules import prompt_gate_passes, resolve_booking_bundle
 
 logger = get_task_logger(__name__)
 
@@ -563,7 +566,7 @@ def _build_enabled_tools(tool_params: list) -> list:
 
         # Check if this is a bundle that expands to multiple tools
         if param_code in BUNDLE_MAP:
-            for tool_key in BUNDLE_MAP[param_code]:
+            for tool_key in resolve_booking_bundle(param_code, BUNDLE_MAP[param_code], value_json):
                 if tool_key not in enabled_keys:
                     schema = registry.get(tool_key)
                     if schema:
@@ -920,6 +923,10 @@ def _ensure_fragments_and_compose(
     try:
         tool_params_with_ids = collect_tool_params(tenant_id, location_id)
         all_tool_ids = []
+        # Per tool, the `properties` of every enabled param that owns it, so a
+        # prompt entry carrying `requires_property` can be gated on an option
+        # (e.g. "also offer to transfer the caller") without needing its own tool.
+        tool_id_properties = {}
         for param in tool_params_with_ids:
             pc = param.get("param_code", "")
             vj = param.get("value_json", {})
@@ -928,9 +935,34 @@ def _ensure_fragments_and_compose(
             is_enabled = vj.get("enabled", False) if isinstance(vj, dict) else False
             if not is_enabled:
                 continue
-            tids = param.get("tool_ids", [])
+
+            tids = param.get("tool_ids", []) or []
+
+            # Booking Manager's handling_mode swaps the whole bundle for a single
+            # tool (see resolve_booking_bundle). The prompts must follow the
+            # tools, or a "Transfer to Staff" location would publish
+            # transfer_booking_call while still being told how to take bookings.
+            mode = (vj.get("properties") or {}).get("handling_mode")
+            if pc.startswith("booking_manager") and mode and mode != "ai_handles":
+                replacement = {
+                    "transfer_to_human": "transfer_booking_call",
+                    "send_booking_link": "send_booking_link",
+                }.get(mode)
+                if replacement:
+                    replacement_id = get_tool_id_by_display_name(replacement)
+                    if replacement_id:
+                        tids = [replacement_id]
+                    else:
+                        logger.warning(
+                            f"[publish_openai] handling_mode='{mode}' but '{replacement}' "
+                            f"is not in ai_tools — keeping the default booking prompts"
+                        )
+
             if tids:
                 all_tool_ids.extend(tids)
+                props = (vj.get("properties") or {}) if isinstance(vj, dict) else {}
+                for tid in tids:
+                    tool_id_properties.setdefault(tid, []).append(props)
 
         unique_tool_ids = list(set(all_tool_ids))
         if unique_tool_ids:
@@ -946,10 +978,19 @@ def _ensure_fragments_and_compose(
                 sp = td.get("service_prompts")
                 if not sp:
                     continue
+                owner_props = tool_id_properties.get(td.get("tool_id"), [])
                 for po in sp.get("by_service_type", {}).get(service_key, []):
                     md = po.get("markdown", "")
-                    if md:
-                        extracted.append(md)
+                    if not md:
+                        continue
+                    gate = po.get("requires_property")
+                    if not prompt_gate_passes(gate, owner_props):
+                        logger.info(
+                            f"[publish_openai] Skipping '{gate}'-gated prompt for "
+                            f"tool {td.get('tool_id')} — option is off"
+                        )
+                        continue
+                    extracted.append(md)
 
             if extracted:
                 all_tool_prompts = "\n\n".join(extracted).replace("\\n", "\n")
