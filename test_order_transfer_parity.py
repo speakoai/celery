@@ -14,6 +14,7 @@ import pytest
 from tasks.utils.publish_tool_rules import (
     prompt_gate_passes,
     prompt_tool_gate_passes,
+    publishes_booking_tools,
     resolve_booking_bundle,
 )
 
@@ -131,3 +132,31 @@ def test_prompt_is_withheld_when_its_tool_is_disabled():
     assert prompt_tool_gate_passes("transfer_to_human", {"send_order_link"}) is False
     assert prompt_tool_gate_passes("transfer_to_human", set()) is False
     assert prompt_tool_gate_passes("transfer_to_human", None) is False
+
+
+# ── publishes_booking_tools: does this agent take bookings itself? ─────────
+
+def test_full_bundle_means_the_agent_takes_bookings():
+    assert publishes_booking_tools(REST_BUNDLE) is True
+
+
+def test_transfer_mode_means_it_does_not():
+    """The state behind a real failed call: the agent kept being told to collect
+    a name and a duration for tools it no longer had, said it would check
+    availability, and sat silent until the watchdog hung up on the caller."""
+    assert publishes_booking_tools(["end_call", "transfer_booking_call"]) is False
+
+
+def test_send_booking_link_mode_means_it_does_not():
+    assert publishes_booking_tools(["end_call", "send_booking_link"]) is False
+
+
+def test_service_side_booking_tools_count():
+    assert publishes_booking_tools(["make_booking_service"]) is True
+    assert publishes_booking_tools(["check_availabilities_service"]) is True
+
+
+def test_unrelated_tools_do_not_count():
+    assert publishes_booking_tools(["send_order_link", "transfer_to_human"]) is False
+    assert publishes_booking_tools([]) is False
+    assert publishes_booking_tools(None) is False
