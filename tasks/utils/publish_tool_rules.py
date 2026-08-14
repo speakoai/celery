@@ -54,3 +54,22 @@ def prompt_gate_passes(gate: Optional[str], owner_props: Sequence[Optional[dict]
     if not gate:
         return True
     return any((p or {}).get(gate) is True for p in owner_props)
+
+
+def prompt_tool_gate_passes(required_tool, enabled_param_codes) -> bool:
+    """Whether a prompt entry's `requires_tool` dependency is satisfied.
+
+    Belt to `prompt_gate_passes`' braces. The dashboard is supposed to stop a
+    tenant enabling "also offer to transfer the caller" without configuring
+    Transfer to Human — but that gate has been bypassed for real (it sat below
+    the deferred save's early return, so it never ran), leaving a location with
+    the option on and the transfer tool off. Publishing the offer text in that
+    state gives the caller an agent that offers to put them through and then has
+    no tool to do it.
+
+    The publisher therefore refuses to ship a prompt whose tool is not enabled,
+    regardless of what the config says.
+    """
+    if not required_tool:
+        return True
+    return required_tool in (enabled_param_codes or set())

@@ -11,7 +11,11 @@ Run:  python -m pytest test_order_transfer_parity.py -q
 
 import pytest
 
-from tasks.utils.publish_tool_rules import prompt_gate_passes, resolve_booking_bundle
+from tasks.utils.publish_tool_rules import (
+    prompt_gate_passes,
+    prompt_tool_gate_passes,
+    resolve_booking_bundle,
+)
 
 
 REST_BUNDLE = [
@@ -105,3 +109,25 @@ def test_any_owning_param_may_open_the_gate():
 
 def test_none_properties_do_not_explode():
     assert prompt_gate_passes("offer_human_transfer", [None]) is False
+
+
+# ── requires_tool: never describe a capability the agent lacks ─────────────
+
+def test_ungated_entries_need_no_tool():
+    assert prompt_tool_gate_passes(None, set()) is True
+    assert prompt_tool_gate_passes("", {"anything"}) is True
+
+
+def test_prompt_publishes_when_its_tool_is_enabled():
+    assert prompt_tool_gate_passes(
+        "transfer_to_human", {"send_order_link", "transfer_to_human"}
+    ) is True
+
+
+def test_prompt_is_withheld_when_its_tool_is_disabled():
+    """The exact state the UI bug persisted on dev loc 35: the option was saved
+    on while transfer_to_human was off. Publishing the offer there would give the
+    caller an agent that offers to put them through and then has no tool to."""
+    assert prompt_tool_gate_passes("transfer_to_human", {"send_order_link"}) is False
+    assert prompt_tool_gate_passes("transfer_to_human", set()) is False
+    assert prompt_tool_gate_passes("transfer_to_human", None) is False

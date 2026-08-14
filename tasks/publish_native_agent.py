@@ -36,7 +36,11 @@ from .utils.publish_db import (
     get_tool_service_prompts,
 )
 
-from .utils.publish_tool_rules import prompt_gate_passes, resolve_booking_bundle
+from .utils.publish_tool_rules import (
+    prompt_gate_passes,
+    prompt_tool_gate_passes,
+    resolve_booking_bundle,
+)
 
 logger = get_task_logger(__name__)
 
@@ -927,6 +931,9 @@ def _ensure_fragments_and_compose(
         # prompt entry carrying `requires_property` can be gated on an option
         # (e.g. "also offer to transfer the caller") without needing its own tool.
         tool_id_properties = {}
+        # Param codes actually enabled, for `requires_tool` — a prompt must
+        # never describe a capability whose tool is not being published.
+        enabled_param_codes = set()
         for param in tool_params_with_ids:
             pc = param.get("param_code", "")
             vj = param.get("value_json", {})
@@ -935,6 +942,7 @@ def _ensure_fragments_and_compose(
             is_enabled = vj.get("enabled", False) if isinstance(vj, dict) else False
             if not is_enabled:
                 continue
+            enabled_param_codes.add(pc)
 
             tids = param.get("tool_ids", []) or []
 
@@ -988,6 +996,15 @@ def _ensure_fragments_and_compose(
                         logger.info(
                             f"[publish_openai] Skipping '{gate}'-gated prompt for "
                             f"tool {td.get('tool_id')} — option is off"
+                        )
+                        continue
+                    required_tool = po.get("requires_tool")
+                    if not prompt_tool_gate_passes(required_tool, enabled_param_codes):
+                        logger.warning(
+                            f"[publish_openai] Skipping prompt for tool "
+                            f"{td.get('tool_id')} — it needs '{required_tool}', which "
+                            f"is not enabled at this location. The agent would have "
+                            f"offered something it has no tool to do."
                         )
                         continue
                     extracted.append(md)
