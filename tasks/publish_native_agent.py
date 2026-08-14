@@ -37,8 +37,10 @@ from .utils.publish_db import (
 )
 
 from .utils.publish_tool_rules import (
+    BOOKING_TOOL_KEYS,
     prompt_gate_passes,
     prompt_tool_gate_passes,
+    publishes_booking_tools,
     resolve_booking_bundle,
 )
 
@@ -931,6 +933,9 @@ def _ensure_fragments_and_compose(
         # prompt entry carrying `requires_property` can be gated on an option
         # (e.g. "also offer to transfer the caller") without needing its own tool.
         tool_id_properties = {}
+        # True when a booking_manager param keeps its full bundle, i.e. the
+        # agent really does take bookings itself.
+        takes_bookings = False
         # Param codes actually enabled, for `requires_tool` — a prompt must
         # never describe a capability whose tool is not being published.
         enabled_param_codes = set()
@@ -951,6 +956,8 @@ def _ensure_fragments_and_compose(
             # tools, or a "Transfer to Staff" location would publish
             # transfer_booking_call while still being told how to take bookings.
             mode = (vj.get("properties") or {}).get("handling_mode")
+            if pc.startswith("booking_manager") and (not mode or mode == "ai_handles"):
+                takes_bookings = True
             if pc.startswith("booking_manager") and mode and mode != "ai_handles":
                 replacement = {
                     "transfer_to_human": "transfer_booking_call",
@@ -978,6 +985,25 @@ def _ensure_fragments_and_compose(
             template_data = get_tool_prompt_template()
             template = template_data["template_text"]
             template_sort_order = template_data["sort_order"]
+
+            # The shared "Use of Tools" preamble hardcodes booking guidance — how
+            # to pass duration_minutes to check_availabilities / make_booking.
+            # For a location that does not take bookings those tools do not
+            # exist, and the line contradicts the transfer prompt telling the
+            # agent to collect nothing.
+            if not takes_bookings:
+                lines = template.split("\n")
+                kept = [
+                    ln for ln in lines
+                    if not any(tool in ln for tool in BOOKING_TOOL_KEYS)
+                ]
+                if len(kept) != len(lines):
+                    logger.info(
+                        f"[publish_openai] No booking tools — dropped "
+                        f"{len(lines) - len(kept)} booking line(s) from the Use of "
+                        f"Tools template"
+                    )
+                    template = "\n".join(kept)
 
             tool_prompts_data = get_tool_service_prompts(unique_tool_ids)
             extracted = []
@@ -1287,18 +1313,41 @@ def _compose_native_agent_config(
         str(tenant_id), str(location_id), all_params
     )
 
+    # Which tools this location publishes decides whether the booking
+    # instructions below belong in the prompt at all. _build_enabled_tools is
+    # pure, so computing it here (rather than at step 5) is free.
+    tools, enabled_tool_keys = _build_enabled_tools(tool_params)
+    _takes_bookings = publishes_booking_tools(enabled_tool_keys)
+
     # Append the hardcoded booking-rules suffix BEFORE both `instructions`
     # is assigned and hash_inputs is built, so source_hash changes when
     # this constant is updated and re-publishes are not skipped by the
     # idempotency check.
-    system_prompt = system_prompt + _BOOKING_RULES_SUPPLEMENT
+    #
+    # Skipped when the location does not take bookings itself: it instructs the
+    # agent to collect a name and duration for tools it will not be given.
+    if _takes_bookings:
+        system_prompt = system_prompt + _BOOKING_RULES_SUPPLEMENT
+    else:
+        logger.info(
+            "[publish_openai] No booking tools for this location — omitting the "
+            "booking-rules suffix"
+        )
 
     # Option B — append the auto-derived per-location flexible-duration line for a
     # flexible `rest` location (None otherwise). Added here, before `instructions`
     # and hash_inputs, so it flows into source_hash and a config change re-publishes.
     _flex_line = build_flexible_activity_prompt_line(tenant_id, location_id)
     if _flex_line:
-        system_prompt = system_prompt + _flex_line
+        # Same reasoning: telling the agent to ask how long and pass
+        # duration_minutes is nonsense without a booking tool to pass it to.
+        if _takes_bookings:
+            system_prompt = system_prompt + _flex_line
+        else:
+            logger.info(
+                "[publish_openai] No booking tools for this location — omitting the "
+                "flexible-activity line"
+            )
 
     # ── 4. Extract voice/speed/temperature/azure-specific settings ──
     voice = _extract_voice_id(voice_dict_params, provider=provider)
@@ -1329,8 +1378,7 @@ def _compose_native_agent_config(
         elif pc == "volume" and p.get("value_text"):
             volume = p["value_text"]
 
-    # ── 5. Build enabled tools ──
-    tools, enabled_tool_keys = _build_enabled_tools(tool_params)
+    # ── 5. Enabled tools (computed above, before the prompt suffixes) ──
 
     # ── 5b. Add search_knowledge tool for Tier 2 (large knowledge, >= 30KB) ──
     # Tier 1 (< 30KB): already inlined into system prompt by _ensure_fragments_and_compose

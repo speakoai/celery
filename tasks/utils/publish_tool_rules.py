@@ -73,3 +73,29 @@ def prompt_tool_gate_passes(required_tool, enabled_param_codes) -> bool:
     if not required_tool:
         return True
     return required_tool in (enabled_param_codes or set())
+
+
+# Tools that mean "this agent takes bookings itself". Parity with
+# BOOKING_TOOL_KEYS in speako-web src/lib/publish/native/tools.ts.
+#
+# When Booking Manager is set to "Transfer to Staff" or "Send Booking Link" the
+# bundle resolves to a single tool and none of these are published — at which
+# point every instruction about collecting a name, a duration, or checking
+# availability is not merely redundant but actively harmful. A real dev call
+# showed the agent collecting a name and a karaoke duration, saying "I'll check
+# availability now, please hold", then sitting silent until the watchdog hung up,
+# because the tool it had been told to call did not exist.
+BOOKING_TOOL_KEYS = frozenset({
+    "check_availabilities",
+    "check_availabilities_service",
+    "make_booking",
+    "make_booking_service",
+    "modify_booking",
+    "cancel_booking",
+    "check_modify_availabilities",
+    "check_modify_availabilities_service",
+})
+
+
+def publishes_booking_tools(enabled_tool_keys) -> bool:
+    return any(k in BOOKING_TOOL_KEYS for k in (enabled_tool_keys or ()))
