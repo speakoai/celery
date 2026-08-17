@@ -1075,7 +1075,7 @@ def api_send_sms():
         "booking_id": 123,
         "action": "new" | "modify" | "cancel",
         "business_type": "service" | "rest",
-        "notify_customer": true | false,  // Optional, defaults to true
+        "notify_customer": true | false,  // Optional, defaults to FALSE (no customer SMS)
         "original_booking_id": 456  // Required only for "modify" action
     }
     """
@@ -1098,13 +1098,31 @@ def api_send_sms():
         action = data['action']
         business_type = data['business_type']
         
-        # Handle notify_customer - default to True if not provided or empty string
-        notify_customer_raw = data.get('notify_customer', True)
+        # notify_customer: absent means NOT REQUESTED, so no customer SMS.
+        #
+        # This used to default to True, which put it at odds with speako-web:
+        # its email path reads a missing flag as "don't send". A caller that
+        # omitted the flag therefore got the customer a text but no email —
+        # half a notification, chosen by nobody. Failing closed here matches
+        # the email side, and means an unknown caller can never make us text
+        # someone else's customer by saying nothing.
+        #
+        # Empty string keeps its old meaning of "not provided" rather than
+        # erroring on the isinstance check below.
+        notify_customer_raw = data.get('notify_customer', False)
         if notify_customer_raw == "":
-            notify_customer = True  # Treat empty string as True
+            notify_customer = False
         else:
             notify_customer = notify_customer_raw
-        
+
+        if 'notify_customer' not in data:
+            app.logger.warning(
+                "[send_sms] notify_customer absent for booking_id=%s action=%s — "
+                "treating as False (no customer SMS). Callers must send the flag "
+                "explicitly.",
+                data.get('booking_id'), action
+            )
+
         original_booking_id = data.get('original_booking_id')
         
         # Validate booking_id is an integer
