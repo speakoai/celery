@@ -13,7 +13,7 @@ import requests
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 from tasks.email_template_utils import render_booking_confirmation_template, render_customer_booking_confirmation_template, format_time_12hour
-from tasks.utils.display_format import format_display_datetime
+from tasks.utils.display_format import format_display_datetime, format_display_booking_window
 
 def create_tiny_url(long_url: str) -> str:
     """
@@ -126,7 +126,11 @@ def send_sms_confirmation_new(booking_id: int):
                 l.location_type,
                 s.name AS staff_name,
                 sv.name AS service_name,
-                bp.alias AS booking_page_alias
+                bp.alias AS booking_page_alias,
+                b.end_time,
+                b.duration,
+                l.flexible_booking_enabled,
+                sv.is_flexible_duration
             FROM bookings b
             JOIN locations l
               ON b.tenant_id = l.tenant_id AND b.location_id = l.location_id
@@ -156,8 +160,22 @@ def send_sms_confirmation_new(booking_id: int):
             location_type,
             staff_name,
             service_name,
-            booking_page_alias
+            booking_page_alias,
+            end_time,
+            duration_minutes,
+            location_flexible_enabled,
+            service_is_flexible,
         ) = row
+
+        # A flexible booking's length was the customer's choice, so the message
+        # must say when it ends and how long it runs. Fixed bookings are
+        # unaffected and their wording is unchanged.
+        is_flexible_booking = bool(
+            (location_type == "rest" and location_flexible_enabled) or service_is_flexible
+        )
+        booking_when = format_display_booking_window(
+            start_time, end_time, duration_minutes, is_flexible_booking
+        )
         
         # Get booking access token for manage booking URL
         booking_access_token = None
@@ -229,12 +247,12 @@ def send_sms_confirmation_new(booking_id: int):
         if location_type == "rest":
             message = (
                 f"Hi {customer_name}, your booking (Ref: {clean_ref}) for {party_num} "
-                f"is confirmed at {location_name} on {format_display_datetime(start_time)}."
+                f"is confirmed at {location_name} on {booking_when}."
             )
         else:
             message = (
                 f"Hi {customer_name}, your booking (Ref: {clean_ref}) "
-                f"is confirmed at {location_name} on {format_display_datetime(start_time)} "
+                f"is confirmed at {location_name} on {booking_when} "
                 f"with {staff_name} for {service_name}."
             )
 
@@ -363,7 +381,8 @@ def send_reminder(booking_id: int, offset_minutes: int):
             SELECT
                 b.tenant_id, b.customer_name, b.start_time, b.booking_ref, b.party_num,
                 b.customer_phone, l.name AS location_name, l.location_type,
-                s.name AS staff_name, sv.name AS service_name, bp.alias AS booking_page_alias
+                s.name AS staff_name, sv.name AS service_name, bp.alias AS booking_page_alias,
+                b.end_time, b.duration, l.flexible_booking_enabled, sv.is_flexible_duration
             FROM bookings b
             JOIN locations l ON b.tenant_id = l.tenant_id AND b.location_id = l.location_id
             LEFT JOIN staff s ON b.tenant_id = s.tenant_id AND b.staff_id = s.staff_id
@@ -377,7 +396,15 @@ def send_reminder(booking_id: int, offset_minutes: int):
             print(f"[REMINDER] Booking {booking_id} details vanished.")
             return
         (_tid, customer_name, start_time, booking_ref, party_num, customer_phone,
-         location_name, location_type, staff_name, service_name, booking_page_alias) = row
+         location_name, location_type, staff_name, service_name, booking_page_alias,
+         end_time, duration_minutes, location_flexible_enabled, service_is_flexible) = row
+
+        booking_when = format_display_booking_window(
+            start_time,
+            end_time,
+            duration_minutes,
+            bool((location_type == "rest" and location_flexible_enabled) or service_is_flexible),
+        )
 
         if not customer_phone:
             _mark({"status": "suppressed", "reason": "no_phone"})
@@ -407,12 +434,12 @@ def send_reminder(booking_id: int, offset_minutes: int):
         if location_type == "rest":
             message = (
                 f"Reminder: Hi {customer_name}, your booking (Ref: {clean_ref}) for {party_num} "
-                f"at {location_name} is on {format_display_datetime(start_time)}."
+                f"at {location_name} is on {booking_when}."
             )
         else:
             message = (
                 f"Reminder: Hi {customer_name}, your booking (Ref: {clean_ref}) "
-                f"at {location_name} is on {format_display_datetime(start_time)} "
+                f"at {location_name} is on {booking_when} "
                 f"with {staff_name} for {service_name}."
             )
 
@@ -545,7 +572,11 @@ def send_sms_confirmation_mod(booking_id: int):
                 l.location_type,
                 s.name AS staff_name,
                 sv.name AS service_name,
-                bp.alias AS booking_page_alias
+                bp.alias AS booking_page_alias,
+                b.end_time,
+                b.duration,
+                l.flexible_booking_enabled,
+                sv.is_flexible_duration
             FROM bookings b
             JOIN locations l
               ON b.tenant_id = l.tenant_id AND b.location_id = l.location_id
@@ -575,8 +606,22 @@ def send_sms_confirmation_mod(booking_id: int):
             location_type,
             staff_name,
             service_name,
-            booking_page_alias
+            booking_page_alias,
+            end_time,
+            duration_minutes,
+            location_flexible_enabled,
+            service_is_flexible,
         ) = row
+
+        # A flexible booking's length was the customer's choice, so the message
+        # must say when it ends and how long it runs. Fixed bookings are
+        # unaffected and their wording is unchanged.
+        is_flexible_booking = bool(
+            (location_type == "rest" and location_flexible_enabled) or service_is_flexible
+        )
+        booking_when = format_display_booking_window(
+            start_time, end_time, duration_minutes, is_flexible_booking
+        )
         
         # Get booking access token for manage booking URL
         booking_access_token = None
@@ -607,12 +652,12 @@ def send_sms_confirmation_mod(booking_id: int):
         if location_type == "rest":
             message = (
                 f"Hi {customer_name}, your booking (Ref: {clean_ref}) for {party_num} "
-                f"has been successfully updated at {location_name} to {format_display_datetime(start_time)}."
+                f"has been successfully updated at {location_name} to {booking_when}."
             )
         else:
             message = (
                 f"Hi {customer_name}, your booking (Ref: {clean_ref}) "
-                f"has been successfully updated at {location_name} to {format_display_datetime(start_time)} "
+                f"has been successfully updated at {location_name} to {booking_when} "
                 f"with {staff_name} for {service_name}."
             )
 
@@ -683,7 +728,11 @@ def send_sms_confirmation_can(booking_id: int):
                 l.location_type,
                 s.name AS staff_name,
                 sv.name AS service_name,
-                bp.alias AS booking_page_alias
+                bp.alias AS booking_page_alias,
+                b.end_time,
+                b.duration,
+                l.flexible_booking_enabled,
+                sv.is_flexible_duration
             FROM bookings b
             JOIN locations l
               ON b.tenant_id = l.tenant_id AND b.location_id = l.location_id
@@ -713,8 +762,22 @@ def send_sms_confirmation_can(booking_id: int):
             location_type,
             staff_name,
             service_name,
-            booking_page_alias
+            booking_page_alias,
+            end_time,
+            duration_minutes,
+            location_flexible_enabled,
+            service_is_flexible,
         ) = row
+
+        # A flexible booking's length was the customer's choice, so the message
+        # must say when it ends and how long it runs. Fixed bookings are
+        # unaffected and their wording is unchanged.
+        is_flexible_booking = bool(
+            (location_type == "rest" and location_flexible_enabled) or service_is_flexible
+        )
+        booking_when = format_display_booking_window(
+            start_time, end_time, duration_minutes, is_flexible_booking
+        )
         
         # Get booking access token for manage booking URL
         booking_access_token = None
@@ -745,12 +808,12 @@ def send_sms_confirmation_can(booking_id: int):
         if location_type == "rest":
             message = (
                 f"Hi {customer_name}, your booking (Ref: {booking_ref}) for {party_num} "
-                f"at {location_name} on {format_display_datetime(start_time)} has been cancelled."
+                f"at {location_name} on {booking_when} has been cancelled."
             )
         else:
             message = (
                 f"Hi {customer_name}, your booking (Ref: {clean_ref}) "
-                f"at {location_name} on {format_display_datetime(start_time)} "
+                f"at {location_name} on {booking_when} "
                 f"with {staff_name} for {service_name} has been cancelled."
             )
 
@@ -835,6 +898,10 @@ def send_sms_merchant(booking_id: int, action: str):
             location_type,
             staff_name,
             service_name,
+            end_time,
+            duration_minutes,
+            location_flexible_enabled,
+            service_is_flexible,
         ) = row
 
         cur.execute("""
@@ -852,7 +919,13 @@ def send_sms_merchant(booking_id: int, action: str):
             return
 
         clean_ref = booking_ref[3:] if booking_ref and booking_ref.startswith("REF") else (booking_ref or "")
-        when = format_display_datetime(start_time)
+        # The merchant is the one holding the room, so the window matters most here.
+        when = format_display_booking_window(
+            start_time,
+            end_time,
+            duration_minutes,
+            bool((location_type == "rest" and location_flexible_enabled) or service_is_flexible),
+        )
 
         event = {
             "new": "New booking",
