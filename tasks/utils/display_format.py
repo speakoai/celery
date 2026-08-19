@@ -62,3 +62,60 @@ def format_display_datetime(value: Optional[_datetime]) -> str:
     if value is None:
         return ""
     return f"{format_display_date(value)} {format_display_time(value)}"
+
+
+def format_display_duration(total_minutes: Optional[int]) -> str:
+    """
+    Format a length as "2h 30min" / "1h" / "45min". Returns "" for None or a
+    non-positive value.
+
+    Mirrors `formatDurationLabel` in speako-web's `src/lib/flexible-duration.ts`
+    so a customer sees the same wording in an SMS and in the confirmation email.
+    """
+    if total_minutes is None:
+        return ""
+    try:
+        minutes = int(total_minutes)
+    except (TypeError, ValueError):
+        return ""
+    if minutes <= 0:
+        return ""
+    if minutes < 60:
+        return f"{minutes}min"
+    hours, rem = divmod(minutes, 60)
+    return f"{hours}h" if rem == 0 else f"{hours}h {rem}min"
+
+
+def format_display_booking_window(
+    start_time: Optional[_datetime],
+    end_time: Optional[_datetime],
+    duration_minutes: Optional[int],
+    is_flexible: bool,
+) -> str:
+    """
+    How a booking's time is stated to the customer.
+
+    A FIXED booking says "21 Aug 2026 (Fri) 12:15PM" and always has — the length
+    belongs to the venue or the service and the customer never chose it.
+
+    A FLEXIBLE booking is the opposite: the customer picked how long, so the
+    start alone does not say when the room stops being theirs. Those read
+    "21 Aug 2026 (Fri) 12:15PM - 02:45PM (2h 30min)".
+
+    Falls back to the fixed form whenever the extra parts cannot be derived, so
+    a missing end time can never produce a half-finished sentence.
+    """
+    base = format_display_datetime(start_time)
+    if not is_flexible or start_time is None:
+        return base
+
+    minutes = duration_minutes
+    if not minutes and end_time is not None:
+        minutes = int((end_time - start_time).total_seconds() // 60)
+
+    length = format_display_duration(minutes)
+    end_label = format_display_time(end_time)
+    if not length or not end_label:
+        return base
+
+    return f"{base} - {end_label} ({length})"
