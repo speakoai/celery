@@ -872,7 +872,11 @@ def send_sms_merchant(booking_id: int, action: str):
                 l.name AS location_name,
                 l.location_type,
                 s.name AS staff_name,
-                sv.name AS service_name
+                sv.name AS service_name,
+                b.end_time,
+                b.duration,
+                l.flexible_booking_enabled,
+                sv.is_flexible_duration
             FROM bookings b
             JOIN locations l
               ON b.tenant_id = l.tenant_id AND b.location_id = l.location_id
