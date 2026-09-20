@@ -113,6 +113,46 @@ def test_a_null_short_name_still_beats_the_old_template():
     assert sms_segments(old) == 4
 
 
+def test_the_short_link_is_exactly_as_long_as_the_tinyurl_it_replaces():
+    """
+    The point worth pinning: WP3 is NOT a segment saving. An 8-character code
+    on speako.ai is the same 28 characters as a TinyURL, so if someone later
+    "optimises" the code length to claw back characters, they are trading
+    enumeration resistance for about $6/month. 8 characters was a deliberate
+    security choice over a 6-character code a botnet reaches in ~2 days.
+    """
+    assert len(URL) == len("https://tinyurl.com/mr2jvuy7") == 28
+
+
+def _manage_link_or_skip():
+    try:
+        from tasks.sms import _manage_booking_link
+    except ImportError as exc:                      # pragma: no cover
+        pytest.skip(f"tasks.sms not importable here: {exc}")
+    return _manage_booking_link
+
+
+def test_manage_link_prefers_the_first_party_short_code(monkeypatch):
+    build = _manage_link_or_skip()
+    monkeypatch.setenv("BOOKING_LINK_BASE_URL", "https://speako.ai")
+    assert build("hrt-sunnybank", "a-uuid", "k4m2p9xr") == "https://speako.ai/m/k4m2p9xr"
+
+
+def test_manage_link_falls_back_for_tokens_minted_before_short_codes(monkeypatch):
+    """Existing rows have short_code NULL and must keep working."""
+    build = _manage_link_or_skip()
+    monkeypatch.setenv("BOOKING_LINK_BASE_URL", "https://speako.ai")
+    monkeypatch.setattr("tasks.sms.create_tiny_url", lambda url: f"tiny::{url}")
+    out = build("hrt-sunnybank", "a-uuid", None)
+    assert out.startswith("tiny::https://speako.ai/customer/booking/hrt-sunnybank/view?token=a-uuid")
+
+
+def test_manage_link_is_empty_without_a_booking_page():
+    build = _manage_link_or_skip()
+    assert build(None, "a-uuid", "k4m2p9xr") == ""
+    assert build("   ", "a-uuid", "k4m2p9xr") == ""
+
+
 def test_restoring_any_one_dropped_element_costs_a_segment():
     """
     The budget has no slack: each of the pieces removed in WP2 is on its own
