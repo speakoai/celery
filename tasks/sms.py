@@ -147,7 +147,7 @@ def send_sms_confirmation_new(booking_id: int):
                 b.booking_ref,
                 b.party_num,
                 b.customer_phone,
-                l.name AS location_name,
+                COALESCE(NULLIF(btrim(l.sms_display_name), ''), l.name) AS location_name,
                 l.location_type,
                 s.name AS staff_name,
                 sv.name AS service_name,
@@ -203,7 +203,8 @@ def send_sms_confirmation_new(booking_id: int):
             (location_type == "rest" and location_flexible_enabled) or service_is_flexible
         )
         booking_when = format_display_booking_window(
-            start_time, end_time, duration_minutes, is_flexible_booking
+            start_time, end_time, duration_minutes, is_flexible_booking,
+            compact=True,
         )
         
         # Get booking access token for manage booking URL
@@ -259,7 +260,7 @@ def send_sms_confirmation_new(booking_id: int):
             amount_str = f" of {_guarantee_amount}" if _guarantee_amount is not None else ""
             pending_message = (
                 f"Hi {customer_name}, your booking (Ref: {clean_ref}) at {location_name} on "
-                f"{format_display_datetime(start_time)} is pending. Secure your reservation by adding a "
+                f"{format_display_datetime(start_time, compact=True)} is pending. Secure your reservation by adding a "
                 f"payment card{amount_str} here: {payment_link} Your card will not be charged unless you "
                 f"fail to arrive. Complete within {hold_minutes} minutes or the booking will be cancelled. "
                 f"[Speako AI]"
@@ -275,13 +276,12 @@ def send_sms_confirmation_new(booking_id: int):
 
         if location_type == "rest":
             message = (
-                f"Hi {customer_name}, your booking (Ref: {clean_ref}) for {party_num} "
-                f"is confirmed at {location_name} on {booking_when}."
+                f"Ref {clean_ref} for {party_num} confirmed: "
+                f"{location_name} on {booking_when}."
             )
         else:
             message = (
-                f"Hi {customer_name}, your booking (Ref: {clean_ref}) "
-                f"is confirmed at {location_name} on {booking_when} "
+                f"Ref {clean_ref} confirmed: {location_name} on {booking_when} "
                 f"with {staff_name} for {service_name}."
             )
 
@@ -300,13 +300,13 @@ def send_sms_confirmation_new(booking_id: int):
         _mrow = cur.fetchone()
         meeting_link = _mrow[0] if _mrow else None
         if meeting_link:
-            message += f" Join your meeting: {meeting_link}"
+            message += f" Join: {meeting_link}"
 
         # Append manage booking link if available
         if manage_booking_url:
             # Create shortened URL for SMS
             tiny_url = create_tiny_url(manage_booking_url)
-            message += f" Manage your booking: {tiny_url}"
+            message += f" {tiny_url}"
 
         # Add Speako AI signature
         message += " [Speako AI]"
@@ -409,7 +409,7 @@ def send_reminder(booking_id: int, offset_minutes: int):
         cur.execute("""
             SELECT
                 b.tenant_id, b.customer_name, b.start_time, b.booking_ref, b.party_num,
-                b.customer_phone, l.name AS location_name, l.location_type,
+                b.customer_phone, COALESCE(NULLIF(btrim(l.sms_display_name), ''), l.name) AS location_name, l.location_type,
                 s.name AS staff_name, sv.name AS service_name, bp.alias AS booking_page_alias,
                 b.end_time, b.duration, l.flexible_booking_enabled, sv.is_flexible_duration
             FROM bookings b
@@ -437,6 +437,7 @@ def send_reminder(booking_id: int, offset_minutes: int):
             end_time,
             duration_minutes,
             bool((location_type == "rest" and location_flexible_enabled) or service_is_flexible),
+            compact=True,
         )
 
         if not customer_phone:
@@ -466,13 +467,12 @@ def send_reminder(booking_id: int, offset_minutes: int):
 
         if location_type == "rest":
             message = (
-                f"Reminder: Hi {customer_name}, your booking (Ref: {clean_ref}) for {party_num} "
-                f"at {location_name} is on {booking_when}."
+                f"Reminder: Ref {clean_ref} for {party_num} at {location_name} "
+                f"on {booking_when}."
             )
         else:
             message = (
-                f"Reminder: Hi {customer_name}, your booking (Ref: {clean_ref}) "
-                f"at {location_name} is on {booking_when} "
+                f"Reminder: Ref {clean_ref} at {location_name} on {booking_when} "
                 f"with {staff_name} for {service_name}."
             )
 
@@ -490,10 +490,10 @@ def send_reminder(booking_id: int, offset_minutes: int):
         _mrow = cur.fetchone()
         meeting_link = _mrow[0] if _mrow else None
         if meeting_link:
-            message += f" Join your meeting: {meeting_link}"
+            message += f" Join: {meeting_link}"
 
         if manage_booking_url:
-            message += f" Manage your booking: {create_tiny_url(manage_booking_url)}"
+            message += f" {create_tiny_url(manage_booking_url)}"
 
         message += " [Speako AI]"
 
@@ -545,7 +545,7 @@ def send_sms_guarantee_cancelled(booking_id: int):
         if _skip_sms_for_source(cur, booking_id, "send_sms_guarantee_cancelled"):
             return
         cur.execute("""
-            SELECT b.customer_name, b.booking_ref, b.start_time, b.customer_phone, l.name
+            SELECT b.customer_name, b.booking_ref, b.start_time, b.customer_phone, COALESCE(NULLIF(btrim(l.sms_display_name), ''), l.name)
             FROM bookings b
             JOIN locations l
               ON b.tenant_id = l.tenant_id AND b.location_id = l.location_id
@@ -564,7 +564,7 @@ def send_sms_guarantee_cancelled(booking_id: int):
         clean_ref = booking_ref[3:] if booking_ref and booking_ref.startswith("REF") else booking_ref
         message = (
             f"Hi {customer_name}, your booking (Ref: {clean_ref}) at {location_name} on "
-            f"{format_display_datetime(start_time)} has been cancelled because the booking "
+            f"{format_display_datetime(start_time, compact=True)} has been cancelled because the booking "
             f"guarantee was not secured in time. You're welcome to book again anytime. [Speako AI]"
         )
 
@@ -605,7 +605,7 @@ def send_sms_confirmation_mod(booking_id: int):
                 b.booking_ref,
                 b.party_num,
                 b.customer_phone,
-                l.name AS location_name,
+                COALESCE(NULLIF(btrim(l.sms_display_name), ''), l.name) AS location_name,
                 l.location_type,
                 s.name AS staff_name,
                 sv.name AS service_name,
@@ -661,7 +661,8 @@ def send_sms_confirmation_mod(booking_id: int):
             (location_type == "rest" and location_flexible_enabled) or service_is_flexible
         )
         booking_when = format_display_booking_window(
-            start_time, end_time, duration_minutes, is_flexible_booking
+            start_time, end_time, duration_minutes, is_flexible_booking,
+            compact=True,
         )
         
         # Get booking access token for manage booking URL
@@ -692,13 +693,12 @@ def send_sms_confirmation_mod(booking_id: int):
 
         if location_type == "rest":
             message = (
-                f"Hi {customer_name}, your booking (Ref: {clean_ref}) for {party_num} "
-                f"has been successfully updated at {location_name} to {booking_when}."
+                f"Ref {clean_ref} for {party_num} moved: "
+                f"{location_name} on {booking_when}."
             )
         else:
             message = (
-                f"Hi {customer_name}, your booking (Ref: {clean_ref}) "
-                f"has been successfully updated at {location_name} to {booking_when} "
+                f"Ref {clean_ref} moved: {location_name} on {booking_when} "
                 f"with {staff_name} for {service_name}."
             )
 
@@ -717,13 +717,13 @@ def send_sms_confirmation_mod(booking_id: int):
         _mrow = cur.fetchone()
         meeting_link = _mrow[0] if _mrow else None
         if meeting_link:
-            message += f" Join your meeting: {meeting_link}"
+            message += f" Join: {meeting_link}"
 
         # Append manage booking link if available
         if manage_booking_url:
             # Create shortened URL for SMS
             tiny_url = create_tiny_url(manage_booking_url)
-            message += f" Manage your booking: {tiny_url}"
+            message += f" {tiny_url}"
 
         # Add Speako AI signature
         message += " [Speako AI]"
@@ -765,7 +765,7 @@ def send_sms_confirmation_can(booking_id: int):
                 b.booking_ref,
                 b.party_num,
                 b.customer_phone,
-                l.name AS location_name,
+                COALESCE(NULLIF(btrim(l.sms_display_name), ''), l.name) AS location_name,
                 l.location_type,
                 s.name AS staff_name,
                 sv.name AS service_name,
@@ -821,7 +821,8 @@ def send_sms_confirmation_can(booking_id: int):
             (location_type == "rest" and location_flexible_enabled) or service_is_flexible
         )
         booking_when = format_display_booking_window(
-            start_time, end_time, duration_minutes, is_flexible_booking
+            start_time, end_time, duration_minutes, is_flexible_booking,
+            compact=True,
         )
         
         # Get booking access token for manage booking URL
@@ -850,23 +851,25 @@ def send_sms_confirmation_can(booking_id: int):
         
         clean_ref = booking_ref[3:] if booking_ref.startswith("REF") else booking_ref
 
+        # Both branches use clean_ref. The rest branch used to print the raw
+        # booking_ref ("REF2467") while every other message says "2467" —
+        # inconsistent for the customer and three characters dearer.
         if location_type == "rest":
             message = (
-                f"Hi {customer_name}, your booking (Ref: {booking_ref}) for {party_num} "
-                f"at {location_name} on {booking_when} has been cancelled."
+                f"Ref {clean_ref} for {party_num} at {location_name} "
+                f"on {booking_when} CANCELLED."
             )
         else:
             message = (
-                f"Hi {customer_name}, your booking (Ref: {clean_ref}) "
-                f"at {location_name} on {booking_when} "
-                f"with {staff_name} for {service_name} has been cancelled."
+                f"Ref {clean_ref} at {location_name} on {booking_when} "
+                f"with {staff_name} for {service_name} CANCELLED."
             )
 
         # Append manage booking link if available
         if manage_booking_url:
             # Create shortened URL for SMS
             tiny_url = create_tiny_url(manage_booking_url)
-            message += f" View details: {tiny_url}"
+            message += f" {tiny_url}"
 
         # Add Speako AI signature
         message += " [Speako AI]"
@@ -914,7 +917,7 @@ def send_sms_merchant(booking_id: int, action: str):
                 b.start_time,
                 b.booking_ref,
                 b.party_num,
-                l.name AS location_name,
+                COALESCE(NULLIF(btrim(l.sms_display_name), ''), l.name) AS location_name,
                 l.location_type,
                 s.name AS staff_name,
                 sv.name AS service_name,
@@ -978,6 +981,7 @@ def send_sms_merchant(booking_id: int, action: str):
             end_time,
             duration_minutes,
             bool((location_type == "rest" and location_flexible_enabled) or service_is_flexible),
+            compact=True,
         )
 
         event = {
