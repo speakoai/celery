@@ -14,6 +14,7 @@ from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 from tasks.email_template_utils import render_booking_confirmation_template, render_customer_booking_confirmation_template, format_time_12hour
 from tasks.utils.display_format import format_display_datetime, format_display_booking_window
+from tasks.utils.gsm7 import to_gsm7
 
 def create_tiny_url(long_url: str) -> str:
     """
@@ -64,6 +65,61 @@ def create_tiny_url(long_url: str) -> str:
 # number. Those bookings are confirmed in-chat by the text brain instead.
 # Web-widget bookings DO carry a real phone (contact form) and send as normal.
 CHAT_SMS_SKIP_SOURCES = ("facebook", "instagram")
+
+def _manage_booking_link(booking_page_alias, booking_access_token, short_code):
+    """
+    The customer-facing "manage booking" link for an SMS, already shortened.
+
+    Prefers the first-party short link `speako.ai/m/<code>`, written by
+    speako-web in the same transaction that minted the access token. It is the
+    SAME LENGTH as a TinyURL (28 characters), so this is not a segment saving —
+    the reason to prefer it is that it needs no third-party HTTP call on the
+    send path, and therefore cannot fall back to the raw 133-character URL and
+    silently add a segment to every message when that call fails.
+
+    Falls back to TinyURL for tokens minted before short codes existed, and to
+    the raw URL if TinyURL is unavailable. Returns "" when there is no booking
+    page to link to.
+    """
+    if not booking_page_alias or not booking_page_alias.strip():
+        return ""
+
+    base = os.getenv("BOOKING_LINK_BASE_URL", "https://speako.ai").rstrip("/")
+
+    if short_code and str(short_code).strip():
+        return f"{base}/m/{str(short_code).strip()}"
+
+    alias = booking_page_alias.strip()
+    if booking_access_token and booking_access_token.strip():
+        long_url = f"{base}/customer/booking/{alias}/view?token={booking_access_token.strip()}"
+    else:
+        long_url = f"{base}/customer/booking/{alias}/view"
+    return create_tiny_url(long_url)
+
+
+def _sms_safe_fields(customer_name, location_name, staff_name, service_name):
+    """
+    Fold the four DB-sourced fields that get interpolated into an SMS body into
+    the GSM-7 alphabet. SMS ONLY — the same values go to emails and the
+    dashboard unfolded, because only SMS is billed per segment.
+
+    One non-GSM character (a Chinese honorific in a staff name, a curly
+    apostrophe pasted into a service name) re-encodes the WHOLE message as
+    UCS-2 and cuts its capacity from 153 to 67 characters per segment, so a
+    249-character confirmation costs 4 segments instead of 2. See
+    tasks/utils/gsm7.py for the arithmetic.
+
+    Only `staff_name` takes a title prefix: "Cindy Cheng 鄭醫師" -> "Dr Cindy
+    Cheng". A "Dr" in front of a customer, location or service name would be
+    nonsense, so those fold without it. Pass None freely — it comes back None.
+    """
+    return (
+        to_gsm7(customer_name, titles=False),
+        to_gsm7(location_name, titles=False),
+        to_gsm7(staff_name),
+        to_gsm7(service_name, titles=False),
+    )
+
 
 def _skip_sms_for_source(cur, booking_id: int, task: str) -> bool:
     cur.execute("SELECT source FROM bookings WHERE booking_id = %s", (booking_id,))
@@ -122,7 +178,7 @@ def send_sms_confirmation_new(booking_id: int):
                 b.booking_ref,
                 b.party_num,
                 b.customer_phone,
-                l.name AS location_name,
+                COALESCE(NULLIF(btrim(l.sms_display_name), ''), l.name) AS location_name,
                 l.location_type,
                 s.name AS staff_name,
                 sv.name AS service_name,
@@ -167,6 +223,10 @@ def send_sms_confirmation_new(booking_id: int):
             service_is_flexible,
         ) = row
 
+        customer_name, location_name, staff_name, service_name = _sms_safe_fields(
+            customer_name, location_name, staff_name, service_name
+        )
+
         # A flexible booking's length was the customer's choice, so the message
         # must say when it ends and how long it runs. Fixed bookings are
         # unaffected and their wording is unchanged.
@@ -174,13 +234,15 @@ def send_sms_confirmation_new(booking_id: int):
             (location_type == "rest" and location_flexible_enabled) or service_is_flexible
         )
         booking_when = format_display_booking_window(
-            start_time, end_time, duration_minutes, is_flexible_booking
+            start_time, end_time, duration_minutes, is_flexible_booking,
+            compact=True,
         )
         
-        # Get booking access token for manage booking URL
+        # Get booking access token (and its short code) for the manage-booking URL
         booking_access_token = None
+        booking_short_code = None
         cur.execute("""
-            SELECT token_id 
+            SELECT token_id, short_code
             FROM booking_access_tokens 
             WHERE tenant_id = %s AND booking_id = %s AND purpose = 'view'
             ORDER BY created_at DESC
@@ -190,16 +252,13 @@ def send_sms_confirmation_new(booking_id: int):
         token_row = cur.fetchone()
         if token_row:
             booking_access_token = str(token_row[0])
+            booking_short_code = token_row[1]
 
-        # Construct manage booking URL
-        manage_booking_url = ""
-        if booking_page_alias and booking_page_alias.strip():
-            if booking_access_token and booking_access_token.strip():
-                # Construct URL with token parameter
-                manage_booking_url = f"{os.getenv('BOOKING_LINK_BASE_URL', 'https://speako.ai')}/customer/booking/{booking_page_alias.strip()}/view?token={booking_access_token.strip()}"
-            else:
-                # Fallback URL without token
-                manage_booking_url = f"{os.getenv('BOOKING_LINK_BASE_URL', 'https://speako.ai')}/customer/booking/{booking_page_alias.strip()}/view"
+        # The final, already-short manage-booking link (first-party /m/<code>
+        # when one exists, otherwise TinyURL over the full tokened URL).
+        manage_booking_link = _manage_booking_link(
+            booking_page_alias, booking_access_token, booking_short_code
+        )
         
         clean_ref = booking_ref[3:] if booking_ref.startswith("REF") else booking_ref
 
@@ -230,7 +289,7 @@ def send_sms_confirmation_new(booking_id: int):
             amount_str = f" of {_guarantee_amount}" if _guarantee_amount is not None else ""
             pending_message = (
                 f"Hi {customer_name}, your booking (Ref: {clean_ref}) at {location_name} on "
-                f"{format_display_datetime(start_time)} is pending. Secure your reservation by adding a "
+                f"{format_display_datetime(start_time, compact=True)} is pending. Secure your reservation by adding a "
                 f"payment card{amount_str} here: {payment_link} Your card will not be charged unless you "
                 f"fail to arrive. Complete within {hold_minutes} minutes or the booking will be cancelled. "
                 f"[Speako AI]"
@@ -246,13 +305,12 @@ def send_sms_confirmation_new(booking_id: int):
 
         if location_type == "rest":
             message = (
-                f"Hi {customer_name}, your booking (Ref: {clean_ref}) for {party_num} "
-                f"is confirmed at {location_name} on {booking_when}."
+                f"Ref {clean_ref} for {party_num} confirmed: "
+                f"{location_name} on {booking_when}."
             )
         else:
             message = (
-                f"Hi {customer_name}, your booking (Ref: {clean_ref}) "
-                f"is confirmed at {location_name} on {booking_when} "
+                f"Ref {clean_ref} confirmed: {location_name} on {booking_when} "
                 f"with {staff_name} for {service_name}."
             )
 
@@ -271,13 +329,10 @@ def send_sms_confirmation_new(booking_id: int):
         _mrow = cur.fetchone()
         meeting_link = _mrow[0] if _mrow else None
         if meeting_link:
-            message += f" Join your meeting: {meeting_link}"
+            message += f" Join: {meeting_link}"
 
-        # Append manage booking link if available
-        if manage_booking_url:
-            # Create shortened URL for SMS
-            tiny_url = create_tiny_url(manage_booking_url)
-            message += f" Manage your booking: {tiny_url}"
+        if manage_booking_link:
+            message += f" {manage_booking_link}"
 
         # Add Speako AI signature
         message += " [Speako AI]"
@@ -380,7 +435,7 @@ def send_reminder(booking_id: int, offset_minutes: int):
         cur.execute("""
             SELECT
                 b.tenant_id, b.customer_name, b.start_time, b.booking_ref, b.party_num,
-                b.customer_phone, l.name AS location_name, l.location_type,
+                b.customer_phone, COALESCE(NULLIF(btrim(l.sms_display_name), ''), l.name) AS location_name, l.location_type,
                 s.name AS staff_name, sv.name AS service_name, bp.alias AS booking_page_alias,
                 b.end_time, b.duration, l.flexible_booking_enabled, sv.is_flexible_duration
             FROM bookings b
@@ -399,11 +454,16 @@ def send_reminder(booking_id: int, offset_minutes: int):
          location_name, location_type, staff_name, service_name, booking_page_alias,
          end_time, duration_minutes, location_flexible_enabled, service_is_flexible) = row
 
+        customer_name, location_name, staff_name, service_name = _sms_safe_fields(
+            customer_name, location_name, staff_name, service_name
+        )
+
         booking_when = format_display_booking_window(
             start_time,
             end_time,
             duration_minutes,
             bool((location_type == "rest" and location_flexible_enabled) or service_is_flexible),
+            compact=True,
         )
 
         if not customer_phone:
@@ -411,35 +471,32 @@ def send_reminder(booking_id: int, offset_minutes: int):
             print(f"[REMINDER] booking {booking_id} has no phone — skip.")
             return
 
-        # Manage-booking URL (same construction as the confirmation SMS).
-        manage_booking_url = ""
+        # Manage-booking link (same construction as the confirmation SMS).
         booking_access_token = None
+        booking_short_code = None
         cur.execute("""
-            SELECT token_id FROM booking_access_tokens
+            SELECT token_id, short_code FROM booking_access_tokens
             WHERE tenant_id = %s AND booking_id = %s AND purpose = 'view'
             ORDER BY created_at DESC LIMIT 1
         """, (tenant_id, booking_id))
         token_row = cur.fetchone()
         if token_row:
             booking_access_token = str(token_row[0])
-        if booking_page_alias and booking_page_alias.strip():
-            base = os.getenv("BOOKING_LINK_BASE_URL", "https://speako.ai")
-            if booking_access_token and booking_access_token.strip():
-                manage_booking_url = f"{base}/customer/booking/{booking_page_alias.strip()}/view?token={booking_access_token.strip()}"
-            else:
-                manage_booking_url = f"{base}/customer/booking/{booking_page_alias.strip()}/view"
+            booking_short_code = token_row[1]
+        manage_booking_link = _manage_booking_link(
+            booking_page_alias, booking_access_token, booking_short_code
+        )
 
         clean_ref = booking_ref[3:] if booking_ref.startswith("REF") else booking_ref
 
         if location_type == "rest":
             message = (
-                f"Reminder: Hi {customer_name}, your booking (Ref: {clean_ref}) for {party_num} "
-                f"at {location_name} is on {booking_when}."
+                f"Reminder: Ref {clean_ref} for {party_num} at {location_name} "
+                f"on {booking_when}."
             )
         else:
             message = (
-                f"Reminder: Hi {customer_name}, your booking (Ref: {clean_ref}) "
-                f"at {location_name} is on {booking_when} "
+                f"Reminder: Ref {clean_ref} at {location_name} on {booking_when} "
                 f"with {staff_name} for {service_name}."
             )
 
@@ -457,10 +514,10 @@ def send_reminder(booking_id: int, offset_minutes: int):
         _mrow = cur.fetchone()
         meeting_link = _mrow[0] if _mrow else None
         if meeting_link:
-            message += f" Join your meeting: {meeting_link}"
+            message += f" Join: {meeting_link}"
 
-        if manage_booking_url:
-            message += f" Manage your booking: {create_tiny_url(manage_booking_url)}"
+        if manage_booking_link:
+            message += f" {manage_booking_link}"
 
         message += " [Speako AI]"
 
@@ -512,7 +569,7 @@ def send_sms_guarantee_cancelled(booking_id: int):
         if _skip_sms_for_source(cur, booking_id, "send_sms_guarantee_cancelled"):
             return
         cur.execute("""
-            SELECT b.customer_name, b.booking_ref, b.start_time, b.customer_phone, l.name
+            SELECT b.customer_name, b.booking_ref, b.start_time, b.customer_phone, COALESCE(NULLIF(btrim(l.sms_display_name), ''), l.name)
             FROM bookings b
             JOIN locations l
               ON b.tenant_id = l.tenant_id AND b.location_id = l.location_id
@@ -524,10 +581,14 @@ def send_sms_guarantee_cancelled(booking_id: int):
             return
 
         customer_name, booking_ref, start_time, customer_phone, location_name = row
+
+        customer_name, location_name, _, _ = _sms_safe_fields(
+            customer_name, location_name, None, None
+        )
         clean_ref = booking_ref[3:] if booking_ref and booking_ref.startswith("REF") else booking_ref
         message = (
             f"Hi {customer_name}, your booking (Ref: {clean_ref}) at {location_name} on "
-            f"{format_display_datetime(start_time)} has been cancelled because the booking "
+            f"{format_display_datetime(start_time, compact=True)} has been cancelled because the booking "
             f"guarantee was not secured in time. You're welcome to book again anytime. [Speako AI]"
         )
 
@@ -568,7 +629,7 @@ def send_sms_confirmation_mod(booking_id: int):
                 b.booking_ref,
                 b.party_num,
                 b.customer_phone,
-                l.name AS location_name,
+                COALESCE(NULLIF(btrim(l.sms_display_name), ''), l.name) AS location_name,
                 l.location_type,
                 s.name AS staff_name,
                 sv.name AS service_name,
@@ -613,6 +674,10 @@ def send_sms_confirmation_mod(booking_id: int):
             service_is_flexible,
         ) = row
 
+        customer_name, location_name, staff_name, service_name = _sms_safe_fields(
+            customer_name, location_name, staff_name, service_name
+        )
+
         # A flexible booking's length was the customer's choice, so the message
         # must say when it ends and how long it runs. Fixed bookings are
         # unaffected and their wording is unchanged.
@@ -620,13 +685,15 @@ def send_sms_confirmation_mod(booking_id: int):
             (location_type == "rest" and location_flexible_enabled) or service_is_flexible
         )
         booking_when = format_display_booking_window(
-            start_time, end_time, duration_minutes, is_flexible_booking
+            start_time, end_time, duration_minutes, is_flexible_booking,
+            compact=True,
         )
         
-        # Get booking access token for manage booking URL
+        # Get booking access token (and its short code) for the manage-booking URL
         booking_access_token = None
+        booking_short_code = None
         cur.execute("""
-            SELECT token_id 
+            SELECT token_id, short_code
             FROM booking_access_tokens 
             WHERE tenant_id = %s AND booking_id = %s AND purpose = 'view'
             ORDER BY created_at DESC
@@ -636,28 +703,24 @@ def send_sms_confirmation_mod(booking_id: int):
         token_row = cur.fetchone()
         if token_row:
             booking_access_token = str(token_row[0])
+            booking_short_code = token_row[1]
 
-        # Construct manage booking URL
-        manage_booking_url = ""
-        if booking_page_alias and booking_page_alias.strip():
-            if booking_access_token and booking_access_token.strip():
-                # Construct URL with token parameter
-                manage_booking_url = f"{os.getenv('BOOKING_LINK_BASE_URL', 'https://speako.ai')}/customer/booking/{booking_page_alias.strip()}/view?token={booking_access_token.strip()}"
-            else:
-                # Fallback URL without token
-                manage_booking_url = f"{os.getenv('BOOKING_LINK_BASE_URL', 'https://speako.ai')}/customer/booking/{booking_page_alias.strip()}/view"
+        # The final, already-short manage-booking link (first-party /m/<code>
+        # when one exists, otherwise TinyURL over the full tokened URL).
+        manage_booking_link = _manage_booking_link(
+            booking_page_alias, booking_access_token, booking_short_code
+        )
         
         clean_ref = booking_ref[3:] if booking_ref.startswith("REF") else booking_ref
 
         if location_type == "rest":
             message = (
-                f"Hi {customer_name}, your booking (Ref: {clean_ref}) for {party_num} "
-                f"has been successfully updated at {location_name} to {booking_when}."
+                f"Ref {clean_ref} for {party_num} moved: "
+                f"{location_name} on {booking_when}."
             )
         else:
             message = (
-                f"Hi {customer_name}, your booking (Ref: {clean_ref}) "
-                f"has been successfully updated at {location_name} to {booking_when} "
+                f"Ref {clean_ref} moved: {location_name} on {booking_when} "
                 f"with {staff_name} for {service_name}."
             )
 
@@ -676,13 +739,10 @@ def send_sms_confirmation_mod(booking_id: int):
         _mrow = cur.fetchone()
         meeting_link = _mrow[0] if _mrow else None
         if meeting_link:
-            message += f" Join your meeting: {meeting_link}"
+            message += f" Join: {meeting_link}"
 
-        # Append manage booking link if available
-        if manage_booking_url:
-            # Create shortened URL for SMS
-            tiny_url = create_tiny_url(manage_booking_url)
-            message += f" Manage your booking: {tiny_url}"
+        if manage_booking_link:
+            message += f" {manage_booking_link}"
 
         # Add Speako AI signature
         message += " [Speako AI]"
@@ -724,7 +784,7 @@ def send_sms_confirmation_can(booking_id: int):
                 b.booking_ref,
                 b.party_num,
                 b.customer_phone,
-                l.name AS location_name,
+                COALESCE(NULLIF(btrim(l.sms_display_name), ''), l.name) AS location_name,
                 l.location_type,
                 s.name AS staff_name,
                 sv.name AS service_name,
@@ -769,6 +829,10 @@ def send_sms_confirmation_can(booking_id: int):
             service_is_flexible,
         ) = row
 
+        customer_name, location_name, staff_name, service_name = _sms_safe_fields(
+            customer_name, location_name, staff_name, service_name
+        )
+
         # A flexible booking's length was the customer's choice, so the message
         # must say when it ends and how long it runs. Fixed bookings are
         # unaffected and their wording is unchanged.
@@ -776,13 +840,15 @@ def send_sms_confirmation_can(booking_id: int):
             (location_type == "rest" and location_flexible_enabled) or service_is_flexible
         )
         booking_when = format_display_booking_window(
-            start_time, end_time, duration_minutes, is_flexible_booking
+            start_time, end_time, duration_minutes, is_flexible_booking,
+            compact=True,
         )
         
-        # Get booking access token for manage booking URL
+        # Get booking access token (and its short code) for the manage-booking URL
         booking_access_token = None
+        booking_short_code = None
         cur.execute("""
-            SELECT token_id 
+            SELECT token_id, short_code
             FROM booking_access_tokens 
             WHERE tenant_id = %s AND booking_id = %s AND purpose = 'view'
             ORDER BY created_at DESC
@@ -792,36 +858,32 @@ def send_sms_confirmation_can(booking_id: int):
         token_row = cur.fetchone()
         if token_row:
             booking_access_token = str(token_row[0])
+            booking_short_code = token_row[1]
 
-        # Construct manage booking URL
-        manage_booking_url = ""
-        if booking_page_alias and booking_page_alias.strip():
-            if booking_access_token and booking_access_token.strip():
-                # Construct URL with token parameter
-                manage_booking_url = f"{os.getenv('BOOKING_LINK_BASE_URL', 'https://speako.ai')}/customer/booking/{booking_page_alias.strip()}/view?token={booking_access_token.strip()}"
-            else:
-                # Fallback URL without token
-                manage_booking_url = f"{os.getenv('BOOKING_LINK_BASE_URL', 'https://speako.ai')}/customer/booking/{booking_page_alias.strip()}/view"
+        # The final, already-short manage-booking link (first-party /m/<code>
+        # when one exists, otherwise TinyURL over the full tokened URL).
+        manage_booking_link = _manage_booking_link(
+            booking_page_alias, booking_access_token, booking_short_code
+        )
         
         clean_ref = booking_ref[3:] if booking_ref.startswith("REF") else booking_ref
 
+        # Both branches use clean_ref. The rest branch used to print the raw
+        # booking_ref ("REF2467") while every other message says "2467" —
+        # inconsistent for the customer and three characters dearer.
         if location_type == "rest":
             message = (
-                f"Hi {customer_name}, your booking (Ref: {booking_ref}) for {party_num} "
-                f"at {location_name} on {booking_when} has been cancelled."
+                f"Ref {clean_ref} for {party_num} at {location_name} "
+                f"on {booking_when} CANCELLED."
             )
         else:
             message = (
-                f"Hi {customer_name}, your booking (Ref: {clean_ref}) "
-                f"at {location_name} on {booking_when} "
-                f"with {staff_name} for {service_name} has been cancelled."
+                f"Ref {clean_ref} at {location_name} on {booking_when} "
+                f"with {staff_name} for {service_name} CANCELLED."
             )
 
-        # Append manage booking link if available
-        if manage_booking_url:
-            # Create shortened URL for SMS
-            tiny_url = create_tiny_url(manage_booking_url)
-            message += f" View details: {tiny_url}"
+        if manage_booking_link:
+            message += f" {manage_booking_link}"
 
         # Add Speako AI signature
         message += " [Speako AI]"
@@ -869,7 +931,7 @@ def send_sms_merchant(booking_id: int, action: str):
                 b.start_time,
                 b.booking_ref,
                 b.party_num,
-                l.name AS location_name,
+                COALESCE(NULLIF(btrim(l.sms_display_name), ''), l.name) AS location_name,
                 l.location_type,
                 s.name AS staff_name,
                 sv.name AS service_name,
@@ -908,6 +970,10 @@ def send_sms_merchant(booking_id: int, action: str):
             service_is_flexible,
         ) = row
 
+        customer_name, location_name, staff_name, service_name = _sms_safe_fields(
+            customer_name, location_name, staff_name, service_name
+        )
+
         cur.execute("""
             SELECT phone_number
             FROM tenant_users
@@ -929,6 +995,7 @@ def send_sms_merchant(booking_id: int, action: str):
             end_time,
             duration_minutes,
             bool((location_type == "rest" and location_flexible_enabled) or service_is_flexible),
+            compact=True,
         )
 
         event = {
@@ -2143,7 +2210,7 @@ def send_email_confirmation_customer_new(booking_id: int) -> str:
             location_website
         ) = row
 
-        # Get booking access token for manage booking URL
+        # Get booking access token (and its short code) for the manage-booking URL
         booking_access_token = None
         cur.execute("""
             SELECT token_id 
@@ -2448,7 +2515,7 @@ def send_email_confirmation_customer_mod(booking_id: int, original_booking_id: i
             location_website
         ) = new_booking
 
-        # Get booking access token for manage booking URL
+        # Get booking access token (and its short code) for the manage-booking URL
         booking_access_token = None
         cur.execute("""
             SELECT token_id 
@@ -2858,7 +2925,7 @@ def send_email_confirmation_customer_can(booking_id: int) -> str:
             location_website
         ) = row
 
-        # Get booking access token for manage booking URL
+        # Get booking access token (and its short code) for the manage-booking URL
         booking_access_token = None
         cur.execute("""
             SELECT token_id 

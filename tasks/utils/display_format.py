@@ -5,6 +5,21 @@ House display format for customer- and merchant-facing text (SMS bodies).
     time      -> "07:00PM"
     datetime  -> "15 Jul 2026 (Tue) 07:00PM"
 
+COMPACT MODE (`compact=True`) drops the YEAR and nothing else:
+
+    date      -> "15 Jul (Tue)"
+    datetime  -> "15 Jul (Tue) 07:00PM"
+
+It exists for SMS, which is billed per segment. Five characters decide whether
+a confirmation fits in one segment or costs two, and a booking's year is the
+one part a customer can always infer — an appointment is days or weeks away,
+never years. The weekday is deliberately KEPT: it is how people sanity-check
+an appointment, and it was measured at only ~$5/month.
+
+Compact is for SMS ONLY. Emails and the demo-lead alert keep the full house
+format, so do not thread `compact=True` into them for consistency's sake —
+the divergence is the point.
+
 ⚠️ DISPLAY ONLY. Never use these for Redis keys, cache payloads, DB writes,
 metric bucket keys, R2 object names, or anything the AI agent reads — those
 are wire formats and must keep their existing `strftime` patterns. In
@@ -32,12 +47,18 @@ _MONTHS_SHORT = (
 _WEEKDAYS_SHORT = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
 
-def format_display_date(value: Optional[Union[_datetime, _date]]) -> str:
-    """Format a date as "15 Jul 2026 (Tue)". Returns "" for None."""
+def format_display_date(
+    value: Optional[Union[_datetime, _date]], *, compact: bool = False
+) -> str:
+    """
+    Format a date as "15 Jul 2026 (Tue)", or "15 Jul (Tue)" when `compact`.
+    Returns "" for None.
+    """
     if value is None:
         return ""
+    year = "" if compact else f"{value.year:04d} "
     return (
-        f"{value.day:02d} {_MONTHS_SHORT[value.month - 1]} {value.year:04d} "
+        f"{value.day:02d} {_MONTHS_SHORT[value.month - 1]} {year}"
         f"({_WEEKDAYS_SHORT[value.weekday()]})"
     )
 
@@ -57,11 +78,14 @@ def format_display_time(value: Optional[_datetime]) -> str:
     return f"{hour12:02d}:{value.minute:02d}{meridiem}"
 
 
-def format_display_datetime(value: Optional[_datetime]) -> str:
-    """Format as "15 Jul 2026 (Tue) 07:00PM". Returns "" for None."""
+def format_display_datetime(value: Optional[_datetime], *, compact: bool = False) -> str:
+    """
+    Format as "15 Jul 2026 (Tue) 07:00PM", or "15 Jul (Tue) 07:00PM" when
+    `compact`. Returns "" for None.
+    """
     if value is None:
         return ""
-    return f"{format_display_date(value)} {format_display_time(value)}"
+    return f"{format_display_date(value, compact=compact)} {format_display_time(value)}"
 
 
 def format_display_duration(total_minutes: Optional[int]) -> str:
@@ -91,6 +115,8 @@ def format_display_booking_window(
     end_time: Optional[_datetime],
     duration_minutes: Optional[int],
     is_flexible: bool,
+    *,
+    compact: bool = False,
 ) -> str:
     """
     How a booking's time is stated to the customer.
@@ -105,7 +131,7 @@ def format_display_booking_window(
     Falls back to the fixed form whenever the extra parts cannot be derived, so
     a missing end time can never produce a half-finished sentence.
     """
-    base = format_display_datetime(start_time)
+    base = format_display_datetime(start_time, compact=compact)
     if not is_flexible or start_time is None:
         return base
 
