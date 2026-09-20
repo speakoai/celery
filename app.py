@@ -281,18 +281,22 @@ def send_demo_agent_notification(conversation_id: str, agent_config: dict) -> di
     # Call type for SMS (use summary_title or default)
     call_type = summary_title if summary_title and summary_title != 'Call completed' else 'Cannot analysis call type'
     
-    # Build SMS message
+    # Build SMS message.
+    # Deliberately emoji-free: a single non-GSM-7 character re-encodes the whole
+    # SMS as UCS-2, dropping its capacity from 153 to 67 characters per segment.
+    # The 🤖/✅/🎧 in this alert were costing 5 segments where 3 would do. The
+    # email below keeps its emoji — HTML mail is not billed by the segment.
     sms_body = (
-        f"🤖 Speako AI - New Call\n\n"
+        f"Speako AI - New Call\n\n"
         f"From: {caller_phone}\n"
         f"Name: {caller_name}\n"
         f"Company: {caller_company}\n"
         f"Duration: {duration_str}\n"
-        f"Status: {status} {status_emoji}\n"
+        f"Status: {status}\n"
         f"Call Type: {call_type}\n"
     )
     if audio_url:
-        sms_body += f"\n🎧 Listen: {audio_url}\n"
+        sms_body += f"\nListen: {audio_url}\n"
     sms_body += f"\nID: {conversation_id}"
     
     # Build email HTML

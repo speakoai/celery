@@ -14,6 +14,7 @@ from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 from tasks.email_template_utils import render_booking_confirmation_template, render_customer_booking_confirmation_template, format_time_12hour
 from tasks.utils.display_format import format_display_datetime, format_display_booking_window
+from tasks.utils.gsm7 import to_gsm7
 
 def create_tiny_url(long_url: str) -> str:
     """
@@ -64,6 +65,30 @@ def create_tiny_url(long_url: str) -> str:
 # number. Those bookings are confirmed in-chat by the text brain instead.
 # Web-widget bookings DO carry a real phone (contact form) and send as normal.
 CHAT_SMS_SKIP_SOURCES = ("facebook", "instagram")
+
+def _sms_safe_fields(customer_name, location_name, staff_name, service_name):
+    """
+    Fold the four DB-sourced fields that get interpolated into an SMS body into
+    the GSM-7 alphabet. SMS ONLY — the same values go to emails and the
+    dashboard unfolded, because only SMS is billed per segment.
+
+    One non-GSM character (a Chinese honorific in a staff name, a curly
+    apostrophe pasted into a service name) re-encodes the WHOLE message as
+    UCS-2 and cuts its capacity from 153 to 67 characters per segment, so a
+    249-character confirmation costs 4 segments instead of 2. See
+    tasks/utils/gsm7.py for the arithmetic.
+
+    Only `staff_name` takes a title prefix: "Cindy Cheng 鄭醫師" -> "Dr Cindy
+    Cheng". A "Dr" in front of a customer, location or service name would be
+    nonsense, so those fold without it. Pass None freely — it comes back None.
+    """
+    return (
+        to_gsm7(customer_name, titles=False),
+        to_gsm7(location_name, titles=False),
+        to_gsm7(staff_name),
+        to_gsm7(service_name, titles=False),
+    )
+
 
 def _skip_sms_for_source(cur, booking_id: int, task: str) -> bool:
     cur.execute("SELECT source FROM bookings WHERE booking_id = %s", (booking_id,))
@@ -166,6 +191,10 @@ def send_sms_confirmation_new(booking_id: int):
             location_flexible_enabled,
             service_is_flexible,
         ) = row
+
+        customer_name, location_name, staff_name, service_name = _sms_safe_fields(
+            customer_name, location_name, staff_name, service_name
+        )
 
         # A flexible booking's length was the customer's choice, so the message
         # must say when it ends and how long it runs. Fixed bookings are
@@ -399,6 +428,10 @@ def send_reminder(booking_id: int, offset_minutes: int):
          location_name, location_type, staff_name, service_name, booking_page_alias,
          end_time, duration_minutes, location_flexible_enabled, service_is_flexible) = row
 
+        customer_name, location_name, staff_name, service_name = _sms_safe_fields(
+            customer_name, location_name, staff_name, service_name
+        )
+
         booking_when = format_display_booking_window(
             start_time,
             end_time,
@@ -524,6 +557,10 @@ def send_sms_guarantee_cancelled(booking_id: int):
             return
 
         customer_name, booking_ref, start_time, customer_phone, location_name = row
+
+        customer_name, location_name, _, _ = _sms_safe_fields(
+            customer_name, location_name, None, None
+        )
         clean_ref = booking_ref[3:] if booking_ref and booking_ref.startswith("REF") else booking_ref
         message = (
             f"Hi {customer_name}, your booking (Ref: {clean_ref}) at {location_name} on "
@@ -612,6 +649,10 @@ def send_sms_confirmation_mod(booking_id: int):
             location_flexible_enabled,
             service_is_flexible,
         ) = row
+
+        customer_name, location_name, staff_name, service_name = _sms_safe_fields(
+            customer_name, location_name, staff_name, service_name
+        )
 
         # A flexible booking's length was the customer's choice, so the message
         # must say when it ends and how long it runs. Fixed bookings are
@@ -769,6 +810,10 @@ def send_sms_confirmation_can(booking_id: int):
             service_is_flexible,
         ) = row
 
+        customer_name, location_name, staff_name, service_name = _sms_safe_fields(
+            customer_name, location_name, staff_name, service_name
+        )
+
         # A flexible booking's length was the customer's choice, so the message
         # must say when it ends and how long it runs. Fixed bookings are
         # unaffected and their wording is unchanged.
@@ -907,6 +952,10 @@ def send_sms_merchant(booking_id: int, action: str):
             location_flexible_enabled,
             service_is_flexible,
         ) = row
+
+        customer_name, location_name, staff_name, service_name = _sms_safe_fields(
+            customer_name, location_name, staff_name, service_name
+        )
 
         cur.execute("""
             SELECT phone_number
