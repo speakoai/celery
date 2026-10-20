@@ -10,6 +10,8 @@ Key:    booking_metrics:<CACHE_VERSION>:<tenant_id>          (speako-cache, REDI
 Fields: <location_id>|<YYYY-MM-DD>|ch|<band>      counted bookings that day, by channel band
         <location_id>|<YYYY-MM-DD>|ref|<referral> counted bookings whose ORIGIN is the booking
                                                   page, by where the guest came from
+        _tz|<location_id>                         the location's IANA timezone, so the web
+                                                  can tell the venue's "today" without a DB call
         _meta                                     {"version", "built_at"}
 
 Who writes it:
@@ -19,7 +21,7 @@ Who writes it:
     reach it; the other three are covered by small snippets in voice-ai and
     speako-web, see docs/plans/restaurant-booking-maturity.md §S1.5)
   - the midnight full availability rebuild (next 60 days)
-  - the 3am dashboard metrics job (past 90 days, then prune)
+  - the 3am dashboard metrics job (past 180 days, then prune)
 
 Totals, not increments: each refresh RECOUNTS the given dates and overwrites
 their fields, so a missed, duplicated or retried trigger self-heals on the next
@@ -52,7 +54,7 @@ CHANNEL_BANDS = (
 BANDS = tuple(band for band, _ in CHANNEL_BANDS)
 REFERRALS = ("google", "instagram", "facebook", "website", "unknown")
 
-PAST_DAYS = 90       # booking-page sources panel, Past mode
+PAST_DAYS = 180      # booking-page sources panel: 90-day Past view + the 90 days before it (change figure)
 UPCOMING_DAYS = 60   # matches the full availability rebuild horizon
 
 # Counted bookings in a date range for one location, grouped by what the cache
@@ -153,7 +155,7 @@ def compute_cells(location_id, rows):
     return cells
 
 
-def write_cells(redis_client, tenant_id, location_id, days, cells, now=None):
+def write_cells(redis_client, tenant_id, location_id, days, cells, now=None, location_tz=None):
     """Atomically replace the given dates' fields for one location."""
     key = cache_key(tenant_id)
     stale = [f for day in days for f in field_names(location_id, day)]
@@ -162,12 +164,14 @@ def write_cells(redis_client, tenant_id, location_id, days, cells, now=None):
         pipe.hdel(key, *stale)
     if cells:
         pipe.hset(key, mapping={f: int(v) for f, v in cells.items()})
+    if location_tz:
+        pipe.hset(key, f"_tz|{location_id}", str(location_tz))
     built_at = (now or datetime.now(timezone.utc)).isoformat()
     pipe.hset(key, "_meta", json.dumps({"version": CACHE_VERSION, "built_at": built_at}))
     pipe.execute()
 
 
-def refresh_booking_metrics(cur, redis_client, tenant_id, location_id, start, end):
+def refresh_booking_metrics(cur, redis_client, tenant_id, location_id, start, end, location_tz=None):
     """
     Recount [start, end] (inclusive, local dates) for one location and overwrite
     those dates in the tenant's hash. Returns the number of non-zero cells.
@@ -178,7 +182,7 @@ def refresh_booking_metrics(cur, redis_client, tenant_id, location_id, start, en
         return 0
     cur.execute(COUNT_SQL, (tenant_id, location_id, days[0], days[-1]))
     cells = compute_cells(location_id, cur.fetchall())
-    write_cells(redis_client, tenant_id, location_id, days, cells)
+    write_cells(redis_client, tenant_id, location_id, days, cells, location_tz=location_tz)
     return len(cells)
 
 
@@ -189,6 +193,8 @@ def prune_booking_metrics(redis_client, tenant_id, oldest_day):
     doomed = []
     for field, _ in redis_client.hscan_iter(key, count=500):
         parts = str(field).split("|")
+        if field.startswith("_"):
+            continue  # _meta, _tz|<location>
         if len(parts) >= 2 and parts[1] < oldest:
             doomed.append(field)
     for i in range(0, len(doomed), 500):

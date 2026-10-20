@@ -342,7 +342,7 @@ def gen_availability(self, tenant_id, location_id, location_tz, affected_date=No
         try:
             metrics_start = start_date.date()
             metrics_end = (start_date + timedelta(days=days_range - 1)).date()
-            cells = refresh_booking_metrics(cur, valkey_client, tenant_id, location_id, metrics_start, metrics_end)
+            cells = refresh_booking_metrics(cur, valkey_client, tenant_id, location_id, metrics_start, metrics_end, location_tz)
             logger.info(f"[BOOKING METRICS] tenant={tenant_id} location={location_id} {metrics_start}..{metrics_end}: {cells} cells")
         except Exception as metrics_e:
             pg_conn.rollback()
@@ -747,7 +747,7 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
         try:
             metrics_start = start_date.date()
             metrics_end = (start_date + timedelta(days=days_range - 1)).date()
-            cells = refresh_booking_metrics(cur, valkey_client, tenant_id, location_id, metrics_start, metrics_end)
+            cells = refresh_booking_metrics(cur, valkey_client, tenant_id, location_id, metrics_start, metrics_end, location_tz)
             logger.info(f"[BOOKING METRICS] tenant={tenant_id} location={location_id} {metrics_start}..{metrics_end}: {cells} cells")
         except Exception as metrics_e:
             pg_conn.rollback()

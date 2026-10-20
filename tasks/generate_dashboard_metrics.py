@@ -922,7 +922,7 @@ def generate_dashboard_metrics_for_tenant(self, tenant_id):
         # Step 4: Save to database
         save_metrics_to_database(tenant_id, metrics)
 
-        # Booking metrics cache (S1.5): fill the past 90 days of the dashboard's
+        # Booking metrics cache (S1.5): fill the past 180 days of the dashboard's
         # Redis cache (booking-page sources panel) and prune what has aged out.
         # Upcoming dates are kept current by the availability rebuilds. Never
         # allowed to fail the metrics run.
@@ -985,7 +985,7 @@ def _local_today(tz):
 
 def refresh_booking_metrics_past(tenant_id, locations=None):
     """
-    Recount yesterday back to 90 days ago for every active location into the
+    Recount yesterday back to 180 days ago for every active location into the
     dashboard's Redis cache, then prune older fields. Today and the future are
     owned by the availability rebuilds (per-date and the nightly full one).
     """
@@ -1005,7 +1005,7 @@ def refresh_booking_metrics_past(tenant_id, locations=None):
                 today = _local_today(tz)
                 start = today - timedelta(days=PAST_DAYS - 1)
                 total += refresh_booking_metrics(
-                    cur, redis_client, tenant_id, location_id, start, today - timedelta(days=1)
+                    cur, redis_client, tenant_id, location_id, start, today - timedelta(days=1), tz
                 )
                 oldest_kept = start if oldest_kept is None else min(oldest_kept, start)
     finally:

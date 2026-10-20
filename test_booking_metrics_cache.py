@@ -124,7 +124,7 @@ def test_refresh_overwrites_totals_and_clears_dates_that_emptied():
     r.store[key] = {"34|2026-11-11|ch|web": "5", "35|2026-11-11|ch|web": "7"}
     cur = FakeCursor([("2026-11-12", "voice-ai", "voice-ai", None, 1)])
 
-    cells = bmc.refresh_booking_metrics(cur, r, 2, 34, date(2026, 11, 11), date(2026, 11, 13))
+    cells = bmc.refresh_booking_metrics(cur, r, 2, 34, date(2026, 11, 11), date(2026, 11, 13), "Australia/Sydney")
 
     assert cells == 1
     assert cur.executed == [(2, 34, "2026-11-11", "2026-11-13")]
@@ -133,6 +133,7 @@ def test_refresh_overwrites_totals_and_clears_dates_that_emptied():
     assert h["34|2026-11-12|ch|ai"] == "1"
     assert h["35|2026-11-11|ch|web"] == "7"  # other location untouched
     assert json.loads(h["_meta"])["version"] == bmc.CACHE_VERSION
+    assert h["_tz|34"] == "Australia/Sydney"
 
 
 def test_refresh_is_idempotent():
@@ -151,9 +152,10 @@ def test_prune_removes_only_older_dates():
         "34|2026-07-23|ch|ai": "1",
         "34|2026-11-11|ref|google": "1",
         "_meta": "{}",
+        "_tz|34": "Australia/Sydney",
     }
     assert bmc.prune_booking_metrics(r, 2, "2026-07-23") == 1
-    assert set(r.store[key]) == {"34|2026-07-23|ch|ai", "34|2026-11-11|ref|google", "_meta"}
+    assert set(r.store[key]) == {"34|2026-07-23|ch|ai", "34|2026-11-11|ref|google", "_meta", "_tz|34"}
 
 
 def test_date_range_is_inclusive_and_crosses_years():
