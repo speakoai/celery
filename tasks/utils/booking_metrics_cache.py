@@ -50,6 +50,7 @@ CHANNEL_BANDS = (
     ("web", ("web",)),
     ("dashboard", ("dashboard", "onboarding")),
     ("chat", ("facebook", "instagram", "web-widget")),
+    ("walkin", ("walk-in",)),
 )
 BANDS = tuple(band for band, _ in CHANNEL_BANDS)
 REFERRALS = ("google", "instagram", "facebook", "website", "unknown")

@@ -91,7 +91,8 @@ def test_band_and_referral_mapping():
     assert bmc.band_for_source("voice-ai") == "ai"
     assert bmc.band_for_source("onboarding") == "dashboard"
     assert bmc.band_for_source("web-widget") == "chat"
-    assert bmc.band_for_source("walk-in") is None  # not a chart band yet — same as the chart
+    assert bmc.band_for_source("walk-in") == "walkin"  # S3: own band
+    assert bmc.band_for_source("not-a-source") is None  # unmapped → no band, same as the chart
     assert bmc.referral_key("other") == "website"
     assert bmc.referral_key(None) == "unknown"
 

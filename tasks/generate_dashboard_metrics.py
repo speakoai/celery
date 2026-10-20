@@ -41,11 +41,18 @@ logger = get_task_logger(__name__)
 #
 # 'onboarding' is mapped for completeness only -- obsolete, zero rows on dev and
 # prod.
+#
+# The band SQL compares source::text, not the enum: a literal that isn't (yet) a
+# booking_source value would make the whole query fail, so a band can ship
+# before its enum value exists on a database.
 CHANNEL_BANDS = [
     ("bookings_ai", ("voice-ai",)),
     ("bookings_web", ("web",)),
     ("bookings_dashboard", ("dashboard", "onboarding")),
     ("bookings_chat", ("facebook", "instagram", "web-widget")),
+    # Restaurant booking maturity S3: staff-seated walk-ins are their own band
+    # (Owner, 2026-10-20), not "Staff".
+    ("bookings_walkin", ("walk-in",)),
 ]
 
 BAND_FIELDS = [field for field, _ in CHANNEL_BANDS]
@@ -61,12 +68,12 @@ COUNTED_STATUSES = "('confirmed','completed')"
 
 # Bumped when the cached JSON shape changes. Without a bump, tenants keep
 # appending to an old-shaped tally and any new band stays empty forever.
-TRENDS_CACHE_VERSION = "v3"
+TRENDS_CACHE_VERSION = "v4"
 
 
 def _band_count_sql(prefix=""):
     """One COUNT per band, so the SQL can never drift from CHANNEL_BANDS."""
-    col = f"{prefix}source" if prefix else "source"
+    col = f"{prefix}source::text" if prefix else "source::text"
     return ",\n                    ".join(
         "COUNT(*) FILTER (WHERE {} IN ({})) as {}".format(
             col, ", ".join("'{}'".format(src) for src in sources), field
