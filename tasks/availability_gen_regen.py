@@ -11,6 +11,7 @@ from tasks.utils.availability_helpers import (
     annotate_bookable_starts,
 )
 from tasks.utils.task_db import mark_task_running, mark_task_failed, mark_task_succeeded
+from tasks.utils.booking_metrics_cache import refresh_booking_metrics
 
 import os
 import psycopg2
@@ -331,6 +332,21 @@ def gen_availability(self, tenant_id, location_id, location_tz, affected_date=No
             # ✅ Set current chunk's key
             valkey_client.set(cache_key, json.dumps(response))
             logger.info(f"🗝️ [CACHE WRITE] Writing cache key: {cache_key}")
+
+        # Booking metrics cache (restaurant booking maturity S1.5): every booking
+        # make/modify/cancel triggers this rebuild for the affected date, so
+        # recount exactly the dates it just covered (the 3-day regen chunk, or 60
+        # days on the full rebuild) into the dashboard's Redis cache. Totals are
+        # overwritten, so a missed or repeated trigger self-heals. Never allowed
+        # to fail the availability rebuild itself.
+        try:
+            metrics_start = start_date.date()
+            metrics_end = (start_date + timedelta(days=days_range - 1)).date()
+            cells = refresh_booking_metrics(cur, valkey_client, tenant_id, location_id, metrics_start, metrics_end)
+            logger.info(f"[BOOKING METRICS] tenant={tenant_id} location={location_id} {metrics_start}..{metrics_end}: {cells} cells")
+        except Exception as metrics_e:
+            pg_conn.rollback()
+            logger.warning(f"[BOOKING METRICS] refresh failed for tenant={tenant_id} location={location_id}: {metrics_e}")
 
         # Update availability_change_log to mark changes as published
         try:
@@ -721,6 +737,21 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
 
             valkey_client.set(cache_key, json.dumps(response))
             logger.info(f"🗝️ [CACHE WRITE] Writing cache key: {cache_key}")
+
+        # Booking metrics cache (restaurant booking maturity S1.5): every booking
+        # make/modify/cancel triggers this rebuild for the affected date, so
+        # recount exactly the dates it just covered (the 3-day regen chunk, or 60
+        # days on the full rebuild) into the dashboard's Redis cache. Totals are
+        # overwritten, so a missed or repeated trigger self-heals. Never allowed
+        # to fail the availability rebuild itself.
+        try:
+            metrics_start = start_date.date()
+            metrics_end = (start_date + timedelta(days=days_range - 1)).date()
+            cells = refresh_booking_metrics(cur, valkey_client, tenant_id, location_id, metrics_start, metrics_end)
+            logger.info(f"[BOOKING METRICS] tenant={tenant_id} location={location_id} {metrics_start}..{metrics_end}: {cells} cells")
+        except Exception as metrics_e:
+            pg_conn.rollback()
+            logger.warning(f"[BOOKING METRICS] refresh failed for tenant={tenant_id} location={location_id}: {metrics_e}")
 
         # Update availability_change_log to mark changes as published
         try:
