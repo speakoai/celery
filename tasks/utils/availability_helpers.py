@@ -7,6 +7,55 @@ import copy
 DEFAULT_SLOT_INTERVAL_MINUTES = 15
 
 
+# ─── Occupancy: which bookings hold a table / staff member, when ─────────────
+#
+# Restaurant booking maturity S4: the ONE place availability generation learns
+# what is booked. Later sections change only this — S6 (a booking holding
+# several tables), S7 (turnover buffer; seated parties past their end time
+# keep the table) — instead of patching each generator.
+#
+# Occupying statuses mirror the DB EXCLUDE constraints (no_double_booking_*)
+# and speako-web's OCCUPYING_BOOKING_STATUSES.
+OCCUPYING_STATUSES_SQL = "('confirmed', 'pending_guarantee')"
+
+_OCCUPANCY_COLUMNS = ("venue_unit_id", "staff_id")
+
+
+def fetch_occupancy(cur, tenant_id, location_id, day, resource_column):
+    """Bookings that occupy a resource on `day` ("YYYY-MM-DD", location wall
+    clock), as the dicts reconstruct_*_availability consume:
+    {resource_column, customer_id, start_time, end_time} with wall-clock
+    "YYYY-MM-DD HH:MM:SS" strings."""
+    if resource_column not in _OCCUPANCY_COLUMNS:
+        raise ValueError(f"unsupported occupancy column: {resource_column}")
+    cur.execute(f"""
+                    SELECT {resource_column}, customer_id, start_time, end_time
+                    FROM bookings
+                    WHERE tenant_id = %s AND location_id = %s
+                    AND start_time >= %s AND start_time < %s::date + INTERVAL '1 day'
+                    AND status IN {OCCUPYING_STATUSES_SQL}
+                """, (tenant_id, location_id, day, day))
+    return [
+        {
+            resource_column: r[0],
+            "customer_id": r[1],
+            "start_time": r[2].strftime("%Y-%m-%d %H:%M:%S"),
+            "end_time": r[3].strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        for r in cur.fetchall()
+    ]
+
+
+def fetch_table_occupancy(cur, tenant_id, location_id, day):
+    """Restaurant tables (venue units) held on `day`."""
+    return fetch_occupancy(cur, tenant_id, location_id, day, "venue_unit_id")
+
+
+def fetch_staff_occupancy(cur, tenant_id, location_id, day):
+    """Staff members booked on `day` (service businesses)."""
+    return fetch_occupancy(cur, tenant_id, location_id, day, "staff_id")
+
+
 def annotate_bookable_starts(venue_dict, slot_interval_minutes=DEFAULT_SLOT_INTERVAL_MINUTES):
     """Add bookable_starts (list of "HH:MM") to each slot in a venue_dict.
 

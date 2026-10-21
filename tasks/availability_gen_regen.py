@@ -5,6 +5,8 @@ from tasks.celery_app import app
 from tasks.utils.redact import redact_url
 from celery.utils.log import get_task_logger
 from tasks.utils.availability_helpers import (
+    fetch_staff_occupancy,
+    fetch_table_occupancy,
     reconstruct_staff_availability,
     reconstruct_venue_availability,
     intersect_slots_with_open_hours,
@@ -242,15 +244,7 @@ def gen_availability(self, tenant_id, location_id, location_tz, affected_date=No
                 """, (tenant_id, location_id, db_day, current_date_str, current_date_str))
                 recurring_staff_rows = cur.fetchall()
 
-                cur.execute("""
-                    SELECT staff_id, customer_id, start_time, end_time
-                    FROM bookings
-                    WHERE tenant_id = %s AND location_id = %s
-                    AND start_time >= %s AND start_time < %s::date + INTERVAL '1 day'
-                    AND status IN ('confirmed', 'pending_guarantee')
-                """, (tenant_id, location_id, current_date_str, current_date_str))
-                booking_rows = cur.fetchall()
-                bookings = [{"staff_id": r[0], "customer_id": r[1], "start_time": r[2].strftime("%Y-%m-%d %H:%M:%S"), "end_time": r[3].strftime("%Y-%m-%d %H:%M:%S")} for r in booking_rows]
+                bookings = fetch_staff_occupancy(cur, tenant_id, location_id, current_date_str)
 
                 staff_dict = {}
                 
@@ -622,15 +616,7 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
                     """, (tenant_id, location_id, db_day, current_date_str))
                 recurring_venue_rows = cur.fetchall()
 
-                cur.execute("""
-                    SELECT venue_unit_id, customer_id, start_time, end_time
-                    FROM bookings
-                    WHERE tenant_id = %s AND location_id = %s
-                    AND start_time >= %s AND start_time < %s::date + INTERVAL '1 day'
-                    AND status IN ('confirmed', 'pending_guarantee')
-                """, (tenant_id, location_id, current_date_str, current_date_str))
-                booking_rows = cur.fetchall()
-                bookings = [{"venue_unit_id": r[0], "customer_id": r[1], "start_time": r[2].strftime("%Y-%m-%d %H:%M:%S"), "end_time": r[3].strftime("%Y-%m-%d %H:%M:%S")} for r in booking_rows]
+                bookings = fetch_table_occupancy(cur, tenant_id, location_id, current_date_str)
 
                 venue_dict = {}
                 is_dining_table = False
