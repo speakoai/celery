@@ -27,11 +27,12 @@ class FakeCursor:
 ROWS = [(41, 7, datetime(2026, 10, 21, 12, 0), datetime(2026, 10, 21, 12, 45))]
 
 
-def test_table_occupancy_shape_and_query():
-    cur = FakeCursor(ROWS)
+def test_table_occupancy_reads_every_table_a_booking_holds():
+    # S6a: booking_venue_units (primary table + a combination's other tables).
+    cur = FakeCursor([(41, None, datetime(2026, 10, 21, 12, 0), datetime(2026, 10, 21, 12, 45))])
     out = fetch_table_occupancy(cur, 2, 34, "2026-10-21")
-    assert out == [{"venue_unit_id": 41, "customer_id": 7, "start_time": "2026-10-21 12:00:00", "end_time": "2026-10-21 12:45:00"}]
-    assert "SELECT venue_unit_id, customer_id, start_time, end_time" in cur.sql
+    assert out == [{"venue_unit_id": 41, "customer_id": None, "start_time": "2026-10-21 12:00:00", "end_time": "2026-10-21 12:45:00"}]
+    assert "FROM booking_venue_units" in cur.sql
     assert f"status IN {OCCUPYING_STATUSES_SQL}" in cur.sql
     assert cur.params == (2, 34, "2026-10-21", "2026-10-21")
 

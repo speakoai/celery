@@ -47,8 +47,29 @@ def fetch_occupancy(cur, tenant_id, location_id, day, resource_column):
 
 
 def fetch_table_occupancy(cur, tenant_id, location_id, day):
-    """Restaurant tables (venue units) held on `day`."""
-    return fetch_occupancy(cur, tenant_id, location_id, day, "venue_unit_id")
+    """Restaurant tables (venue units) held on `day`.
+
+    Reads booking_venue_units (S6a): every table a booking holds — its primary
+    table AND a combination's other tables — with the booking's time and status
+    kept in sync by trg_sync_booking_venue_units. Same row shape as
+    fetch_occupancy, so reconstruct_venue_availability is unchanged.
+    """
+    cur.execute(f"""
+                    SELECT venue_unit_id, NULL AS customer_id, start_time, end_time
+                    FROM booking_venue_units
+                    WHERE tenant_id = %s AND location_id = %s
+                    AND start_time >= %s AND start_time < %s::date + INTERVAL '1 day'
+                    AND status IN {OCCUPYING_STATUSES_SQL}
+                """, (tenant_id, location_id, day, day))
+    return [
+        {
+            "venue_unit_id": r[0],
+            "customer_id": r[1],
+            "start_time": r[2].strftime("%Y-%m-%d %H:%M:%S"),
+            "end_time": r[3].strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        for r in cur.fetchall()
+    ]
 
 
 def fetch_staff_occupancy(cur, tenant_id, location_id, day):

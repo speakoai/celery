@@ -13,6 +13,7 @@ from tasks.utils.availability_helpers import (
     annotate_bookable_starts,
 )
 from tasks.utils.task_db import mark_task_running, mark_task_failed, mark_task_succeeded
+from tasks.utils.combination_availability import combinations_for_day, load_bookable_combinations
 from tasks.utils.booking_metrics_cache import refresh_booking_metrics
 
 import os
@@ -555,6 +556,11 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
                 "slug": tag_slug
             })
 
+        # Table combinations (restaurant booking maturity S6a): loaded once;
+        # written per date under "combinations" only when the location has any,
+        # so other locations' cache is byte-identical.
+        bookable_combinations = load_bookable_combinations(cur, tenant_id, location_id)
+
         for chunk_start in range(0, days_range, chunk_size):
             response = {
                 "tenant_id": tenant_id,
@@ -682,6 +688,11 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
                 updated_venue_dict = annotate_bookable_starts(updated_venue_dict)
                 venue_key_name = "tables" if is_dining_table else "venue_units"
                 availability[venue_key_name] = list(updated_venue_dict.values())
+                if bookable_combinations:
+                    availability["combinations"] = combinations_for_day(
+                        cur, tenant_id, location_id, current_date_str, db_day,
+                        bookable_combinations, bookings, location_flex_bounds,
+                    )
 
                 cur.execute("""
                     SELECT COUNT(*)
