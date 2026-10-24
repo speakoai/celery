@@ -556,6 +556,16 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
                 "slug": tag_slug
             })
 
+        # Table turnover (restaurant booking maturity S7): 0 when switched off.
+        # "now" lets an overrunning seated party keep its table (today only).
+        cur.execute(
+            "SELECT table_turnover_enabled, table_turnover_minutes FROM locations WHERE tenant_id = %s AND location_id = %s",
+            (tenant_id, location_id),
+        )
+        _turnover_row = cur.fetchone()
+        turnover_minutes = int(_turnover_row[1]) if _turnover_row and _turnover_row[0] else 0
+        now_wall = datetime.now(ZoneInfo(location_tz)).strftime("%Y-%m-%d %H:%M:%S")
+
         # Table combinations (restaurant booking maturity S6a): loaded once;
         # written per date under "combinations" only when the location has any,
         # so other locations' cache is byte-identical.
@@ -622,7 +632,7 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
                     """, (tenant_id, location_id, db_day, current_date_str))
                 recurring_venue_rows = cur.fetchall()
 
-                bookings = fetch_table_occupancy(cur, tenant_id, location_id, current_date_str)
+                bookings = fetch_table_occupancy(cur, tenant_id, location_id, current_date_str, turnover_minutes, now_wall)
 
                 venue_dict = {}
                 is_dining_table = False

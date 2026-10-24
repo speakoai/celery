@@ -46,30 +46,90 @@ def fetch_occupancy(cur, tenant_id, location_id, day, resource_column):
     ]
 
 
-def fetch_table_occupancy(cur, tenant_id, location_id, day):
+# ─── S7: turnover, needs-clearing, overrunning seated parties ──────────────
+#
+# Owner 2026-10-24 (restaurant booking maturity S7):
+#  - turnover T (locations.table_turnover_*; 0 when off): a live booking holds
+#    its tables over [start - T, end + T);
+#  - a finished booking (status completed) holds them for [end, end + T)
+#    ("Needs clearing"; "Cleared" moves end back so the tail ends at once);
+#  - a seated, not finished party past its end keeps them until now + 15 min
+#    (+ T) — independent of turnover (it's what stops the AI giving away a
+#    table that's still in use). Nothing is written to the booking.
+# With T = 0 and no overrunning party, the output equals the S6a occupancy.
+OVERRUN_HOLD_MINUTES = 15
+# A party nobody finished stops holding the table this long after its booked
+# end (forgotten Finish), so it can't block the AI for the rest of the night.
+OVERRUN_CAP_MINUTES = 180
+
+
+def apply_table_hold_rules(rows, day, turnover_minutes=0, now_wall=None):
+    """rows: dicts {venue_unit_id, start_time, end_time ("YYYY-MM-DD HH:MM:SS"),
+    status, seated}. Returns occupancy dicts {venue_unit_id, customer_id,
+    start_time, end_time}, clipped to `day` (reconstruct_venue_availability
+    reads the date from the bookings)."""
+    fmt = "%Y-%m-%d %H:%M:%S"
+    t = timedelta(minutes=int(turnover_minutes or 0))
+    day_start = datetime.strptime(f"{day} 00:00:00", fmt)
+    day_end = datetime.strptime(f"{day} 23:59:59", fmt)
+    now = datetime.strptime(now_wall, fmt) if now_wall else None
+    out = []
+    for r in rows:
+        start = datetime.strptime(r["start_time"], fmt)
+        end = datetime.strptime(r["end_time"], fmt)
+        if r["status"] == "completed":
+            if not t:
+                continue
+            hold_start, hold_end = end, end + t  # needs clearing
+        else:
+            if r.get("seated") and now is not None and end <= now < end + timedelta(minutes=OVERRUN_CAP_MINUTES):
+                end = now + timedelta(minutes=OVERRUN_HOLD_MINUTES)  # still there
+            hold_start, hold_end = start - t, end + t
+        hold_start, hold_end = max(hold_start, day_start), min(hold_end, day_end)
+        if hold_end <= hold_start:
+            continue
+        out.append({
+            "venue_unit_id": r["venue_unit_id"],
+            "customer_id": None,
+            "start_time": hold_start.strftime(fmt),
+            "end_time": hold_end.strftime(fmt),
+        })
+    return out
+
+
+def fetch_table_occupancy(cur, tenant_id, location_id, day, turnover_minutes=0, now_wall=None):
     """Restaurant tables (venue units) held on `day`.
 
     Reads booking_venue_units (S6a): every table a booking holds — its primary
     table AND a combination's other tables — with the booking's time and status
-    kept in sync by trg_sync_booking_venue_units. Same row shape as
-    fetch_occupancy, so reconstruct_venue_availability is unchanged.
+    kept in sync by trg_sync_booking_venue_units. S7 adds the turnover, the
+    needs-clearing tail of finished bookings and overrunning seated parties
+    (apply_table_hold_rules). Same row shape as fetch_occupancy, so
+    reconstruct_venue_availability is unchanged.
     """
+    statuses = "('confirmed', 'pending_guarantee', 'completed')" if turnover_minutes else OCCUPYING_STATUSES_SQL
     cur.execute(f"""
-                    SELECT venue_unit_id, NULL AS customer_id, start_time, end_time
-                    FROM booking_venue_units
-                    WHERE tenant_id = %s AND location_id = %s
-                    AND start_time >= %s AND start_time < %s::date + INTERVAL '1 day'
-                    AND status IN {OCCUPYING_STATUSES_SQL}
+                    SELECT x.venue_unit_id, x.start_time, x.end_time, x.status,
+                           COALESCE(b.service_status_tag_ids && ARRAY(
+                               SELECT lt.tag_id::int FROM location_tag lt
+                                WHERE lt.tenant_id = x.tenant_id AND lt.category_id = 6 AND lt.slug = 'seated'), false) AS seated
+                    FROM booking_venue_units x
+                    JOIN bookings b ON b.tenant_id = x.tenant_id AND b.booking_id = x.booking_id
+                    WHERE x.tenant_id = %s AND x.location_id = %s
+                    AND x.start_time >= %s AND x.start_time < %s::date + INTERVAL '1 day'
+                    AND x.status IN {statuses}
                 """, (tenant_id, location_id, day, day))
-    return [
+    rows = [
         {
             "venue_unit_id": r[0],
-            "customer_id": r[1],
-            "start_time": r[2].strftime("%Y-%m-%d %H:%M:%S"),
-            "end_time": r[3].strftime("%Y-%m-%d %H:%M:%S"),
+            "start_time": r[1].strftime("%Y-%m-%d %H:%M:%S"),
+            "end_time": r[2].strftime("%Y-%m-%d %H:%M:%S"),
+            "status": r[3],
+            "seated": bool(r[4]),
         }
         for r in cur.fetchall()
     ]
+    return apply_table_hold_rules(rows, day, turnover_minutes, now_wall)
 
 
 def fetch_staff_occupancy(cur, tenant_id, location_id, day):
