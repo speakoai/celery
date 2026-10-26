@@ -600,12 +600,13 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
                 # Step 1: Get one-time venue availability entries for this specific date
                 # Walk-in units are excluded from the cache — they're not bookable via voice-AI or the public page.
                 cur.execute("""
-                    SELECT vu.venue_unit_id, vu.name, vu.venue_unit_type, vu.capacity, vu.min_capacity, va.service_duration, va.start_time, va.end_time, va.availability_id, va.is_closed, vu.zone_tag_ids
+                    SELECT vu.venue_unit_id, vu.name, vu.venue_unit_type, vu.capacity, vu.min_capacity, va.service_duration, va.start_time, va.end_time, va.availability_id, va.is_closed, vu.zone_tag_ids, vu.booking_rank
                     FROM venue_unit vu
                     JOIN venue_availability va ON vu.tenant_id = va.tenant_id AND vu.venue_unit_id = va.venue_unit_id
                     WHERE vu.tenant_id = %s AND va.location_id = %s AND va.type = 'one_time'
                     AND va.specific_date = %s AND va.is_active = TRUE AND vu.is_active = TRUE
                     AND vu.is_walk_in = FALSE
+                    ORDER BY vu.booking_rank NULLS LAST, vu.capacity, vu.name, va.start_time
                 """, (tenant_id, location_id, current_date_str))
                 one_time_venue_rows = cur.fetchall()
                 
@@ -615,7 +616,7 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
                 # Step 2: Get recurring availability for venues who don't have one-time entries
                 if venues_with_one_time:
                     cur.execute("""
-                        SELECT vu.venue_unit_id, vu.name, vu.venue_unit_type, vu.capacity, vu.min_capacity, va.service_duration, va.start_time, va.end_time, va.availability_id, vu.zone_tag_ids
+                        SELECT vu.venue_unit_id, vu.name, vu.venue_unit_type, vu.capacity, vu.min_capacity, va.service_duration, va.start_time, va.end_time, va.availability_id, vu.zone_tag_ids, vu.booking_rank
                         FROM venue_unit vu
                         JOIN venue_availability va ON vu.tenant_id = va.tenant_id AND vu.venue_unit_id = va.venue_unit_id
                         WHERE vu.tenant_id = %s AND va.location_id = %s AND va.type = 'recurring'
@@ -623,16 +624,18 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
                         AND va.is_active = TRUE AND vu.is_active = TRUE
                         AND vu.is_walk_in = FALSE
                         AND vu.venue_unit_id NOT IN %s
+                        ORDER BY vu.booking_rank NULLS LAST, vu.capacity, vu.name, va.start_time
                     """, (tenant_id, location_id, db_day, current_date_str, tuple(venues_with_one_time)))
                 else:
                     cur.execute("""
-                        SELECT vu.venue_unit_id, vu.name, vu.venue_unit_type, vu.capacity, vu.min_capacity, va.service_duration, va.start_time, va.end_time, va.availability_id, vu.zone_tag_ids
+                        SELECT vu.venue_unit_id, vu.name, vu.venue_unit_type, vu.capacity, vu.min_capacity, va.service_duration, va.start_time, va.end_time, va.availability_id, vu.zone_tag_ids, vu.booking_rank
                         FROM venue_unit vu
                         JOIN venue_availability va ON vu.tenant_id = va.tenant_id AND vu.venue_unit_id = va.venue_unit_id
                         WHERE vu.tenant_id = %s AND va.location_id = %s AND va.type = 'recurring'
                         AND va.day_of_week = %s AND (va.specific_date IS NULL OR va.specific_date <> %s)
                         AND va.is_active = TRUE AND vu.is_active = TRUE
                         AND vu.is_walk_in = FALSE
+                        ORDER BY vu.booking_rank NULLS LAST, vu.capacity, vu.name, va.start_time
                     """, (tenant_id, location_id, db_day, current_date_str))
                 recurring_venue_rows = cur.fetchall()
 
@@ -642,7 +645,7 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
                 is_dining_table = False
 
                 # Process one-time venue availability first (highest priority)
-                for vuid, name, venue_unit_type, capacity, min_capacity, service_duration, start, end, va_availability_id, is_closed, zone_tag_ids in one_time_venue_rows:
+                for vuid, name, venue_unit_type, capacity, min_capacity, service_duration, start, end, va_availability_id, is_closed, zone_tag_ids, booking_rank in one_time_venue_rows:
                     if venue_unit_type == "dining_table":
                         is_dining_table = True
                     if not is_closed:  # Only add if not closed for the day
@@ -655,12 +658,14 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
                             "service": [svc for svc in venue_unit_services.get(vuid, []) if svc in location_services],
                             "zone_tags": zone_tags,
                             "zone_tag_ids": zone_tag_ids or [],
+                            # S9: table priority (lower first; None = unranked)
+                            "booking_rank": booking_rank,
                             "slots": []
                         })["slots"].append({"start": str(start), "end": str(end), "service_duration": str(service_duration)})
                     # If is_closed = true, venue is completely unavailable (don't add to venue_dict)
 
                 # Process recurring availability for venues without one-time entries
-                for vuid, name, venue_unit_type, capacity, min_capacity, service_duration, start, end, va_availability_id, zone_tag_ids in recurring_venue_rows:
+                for vuid, name, venue_unit_type, capacity, min_capacity, service_duration, start, end, va_availability_id, zone_tag_ids, booking_rank in recurring_venue_rows:
                     if venue_unit_type == "dining_table":
                         is_dining_table = True
                     zone_tags = resolve_tag_names(zone_tag_ids, venue_tags)
@@ -672,6 +677,8 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
                         "service": [svc for svc in venue_unit_services.get(vuid, []) if svc in location_services],
                         "zone_tags": zone_tags,
                         "zone_tag_ids": zone_tag_ids or [],
+                        # S9: table priority (lower first; None = unranked)
+                        "booking_rank": booking_rank,
                         "slots": []
                     })["slots"].append({"start": str(start), "end": str(end), "service_duration": str(service_duration)})
 
@@ -705,7 +712,11 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
                     updated_venue_dict, slot_interval, align_to_clock=True, periods=period_rules
                 )
                 venue_key_name = "tables" if is_dining_table else "venue_units"
-                availability[venue_key_name] = list(updated_venue_dict.values())
+                # S9: tables in priority order (ranked first, then smallest, then name)
+                availability[venue_key_name] = sorted(
+                    updated_venue_dict.values(),
+                    key=lambda v: (v.get("booking_rank") is None, v.get("booking_rank") or 0, v.get("capacity") or 0, v.get("name") or ""),
+                )
                 if bookable_combinations:
                     availability["combinations"] = combinations_for_day(
                         cur, tenant_id, location_id, current_date_str, db_day,
