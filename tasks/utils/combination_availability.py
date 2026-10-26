@@ -126,7 +126,7 @@ def intersect_slots(slot_lists):
     return [{"start": _hms(a), "end": _hms(b), "service_duration": d} for a, b, d in acc]
 
 
-def combination_entries(combos, free_by_unit, flex_bounds=None, slot_interval_minutes=None):
+def combination_entries(combos, free_by_unit, flex_bounds=None, slot_interval_minutes=None, periods=None):
     """Cache entries for one date. `free_by_unit` is each member's free slots
     after bookings. Combinations with no common free time are still listed
     (empty slots), like a fully booked table."""
@@ -151,17 +151,17 @@ def combination_entries(combos, free_by_unit, flex_bounds=None, slot_interval_mi
         venue_like[c["id"]] = entry
     if slot_interval_minutes:
         # S7.1: the location's clock grid, same as single tables
-        annotate_bookable_starts(venue_like, slot_interval_minutes, align_to_clock=True)
+        annotate_bookable_starts(venue_like, slot_interval_minutes, align_to_clock=True, periods=periods)
     else:
         annotate_bookable_starts(venue_like)
     return list(venue_like.values())
 
 
-def combinations_for_day(cur, tenant_id, location_id, day, db_day, combos, bookings, flex_bounds=None, slot_interval_minutes=None):
+def combinations_for_day(cur, tenant_id, location_id, day, db_day, combos, bookings, flex_bounds=None, slot_interval_minutes=None, periods=None):
     """Everything for one date: member hours, minus bookings, intersected per combination."""
     if not combos:
         return []
     unit_ids = sorted({uid for c in combos for uid in c["member_ids"]})
     hours = member_hours(cur, tenant_id, location_id, day, db_day, unit_ids)
     free = reconstruct_venue_availability(bookings, {uid: {"slots": hours.get(uid, [])} for uid in unit_ids})
-    return combination_entries(combos, {uid: v["slots"] for uid, v in free.items()}, flex_bounds, slot_interval_minutes)
+    return combination_entries(combos, {uid: v["slots"] for uid, v in free.items()}, flex_bounds, slot_interval_minutes, periods)

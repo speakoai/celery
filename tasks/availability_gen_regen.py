@@ -12,6 +12,7 @@ from tasks.utils.availability_helpers import (
     intersect_slots_with_open_hours,
     annotate_bookable_starts,
     location_slot_interval,
+    load_period_rules,
 )
 from tasks.utils.task_db import mark_task_running, mark_task_failed, mark_task_succeeded
 from tasks.utils.combination_availability import combinations_for_day, load_bookable_combinations
@@ -698,13 +699,17 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
                 # consumers don't have to re-derive fitness from slot width
                 # at request time. Single source of truth for "what starts
                 # actually work" lives here.
-                updated_venue_dict = annotate_bookable_starts(updated_venue_dict, slot_interval, align_to_clock=True)
+                # S8: per-period "Last booking at" / "Shorten to closing time"
+                period_rules = load_period_rules(cur, tenant_id, location_id, db_day, current_date_str)
+                updated_venue_dict = annotate_bookable_starts(
+                    updated_venue_dict, slot_interval, align_to_clock=True, periods=period_rules
+                )
                 venue_key_name = "tables" if is_dining_table else "venue_units"
                 availability[venue_key_name] = list(updated_venue_dict.values())
                 if bookable_combinations:
                     availability["combinations"] = combinations_for_day(
                         cur, tenant_id, location_id, current_date_str, db_day,
-                        bookable_combinations, bookings, location_flex_bounds, slot_interval,
+                        bookable_combinations, bookings, location_flex_bounds, slot_interval, period_rules,
                     )
 
                 cur.execute("""

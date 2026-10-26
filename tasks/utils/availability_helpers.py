@@ -158,7 +158,74 @@ def location_slot_interval(cur, tenant_id, location_id):
     return int(row[0]) if row and row[0] else DEFAULT_SLOT_INTERVAL_MINUTES
 
 
-def annotate_bookable_starts(venue_dict, slot_interval_minutes=DEFAULT_SLOT_INTERVAL_MINUTES, align_to_clock=False):
+def _hm_minutes(value):
+    """time / "HH:MM[:SS]" -> minutes since midnight (None stays None)."""
+    if value is None:
+        return None
+    if hasattr(value, "hour"):
+        return value.hour * 60 + value.minute
+    parts = str(value).split(":")
+    return int(parts[0]) * 60 + int(parts[1])
+
+
+def load_period_rules(cur, tenant_id, location_id, db_day, date_str):
+    """The day's opening periods that carry an S8 rule ("Last booking at" /
+    "Shorten to closing time"). Same rows as the cache's open_hours. Periods
+    with neither setting are left out, so the cache is exactly as before."""
+    cur.execute(
+        """
+        SELECT start_time, end_time, last_start_time, shorten_to_close, min_duration_minutes
+          FROM location_availability
+         WHERE tenant_id = %s AND location_id = %s AND is_active = true AND is_closed = false
+           AND ((type = 'recurring' AND day_of_week = %s) OR (type = 'one_time' AND specific_date = %s))
+           AND (last_start_time IS NOT NULL OR shorten_to_close)
+        """,
+        (tenant_id, location_id, db_day, date_str),
+    )
+    return [
+        {
+            "start": _hm_minutes(r[0]),
+            "end": _hm_minutes(r[1]),
+            "last_start": _hm_minutes(r[2]),
+            "shorten": bool(r[3]),
+            "min": int(r[4]) if r[4] is not None else None,
+        }
+        for r in cur.fetchall()
+    ]
+
+
+def period_for(periods, start_min):
+    """The rule-carrying period a free range starting at start_min belongs to."""
+    for p in periods or []:
+        if p["start"] <= start_min < p["end"]:
+            return p
+    return None
+
+
+def period_length(start_min, normal, period):
+    """S8 — the booking length for a start, or None when it isn't offered.
+
+    1. after the period's last booking time -> None
+    2. the normal length fits before closing -> normal
+    3. shorten on and time left >= the minimum (if set) -> time left
+    4. otherwise -> normal (the caller's fit check refuses it, as today)
+    The length depends only on the start and the period, never the free gap,
+    so a late booking is never squeezed in front of another booking.
+    """
+    if period is None:
+        return normal
+    if period["last_start"] is not None and start_min > period["last_start"]:
+        return None
+    if start_min + normal <= period["end"]:
+        return normal
+    if period["shorten"]:
+        left = period["end"] - start_min
+        if left > 0 and (period["min"] is None or left >= period["min"]):
+            return left
+    return normal
+
+
+def annotate_bookable_starts(venue_dict, slot_interval_minutes=DEFAULT_SLOT_INTERVAL_MINUTES, align_to_clock=False, periods=None):
     """Add bookable_starts (list of "HH:MM") to each slot in a venue_dict.
 
     Fixed venues (the default): a start is bookable when
@@ -185,6 +252,11 @@ def annotate_bookable_starts(venue_dict, slot_interval_minutes=DEFAULT_SLOT_INTE
     grid (17:00, 17:15 ...) instead of counting from each free range's start,
     so every channel offers the same times after an off-grid booking end or a
     turnover gap.
+
+    periods (restaurants, S8): load_period_rules() for the day. Starts after a
+    period's last booking time are dropped; with "shorten to closing time" a
+    late start that fits only until closing is kept and its length goes in the
+    slot's ``durations`` map ({"20:00": 90}). No rules -> unchanged output.
     """
     interval = timedelta(minutes=int(slot_interval_minutes or DEFAULT_SLOT_INTERVAL_MINUTES))
     for venue in venue_dict.values():
@@ -196,11 +268,16 @@ def annotate_bookable_starts(venue_dict, slot_interval_minutes=DEFAULT_SLOT_INTE
                 # Flexible: fit the minimum; expose bounds for request-time validation.
                 min_d = int(bounds['min'])
                 latest = slot_end - timedelta(minutes=min_d)
+                # S8: the last booking time applies; shortening doesn't (the
+                # guest already picks a length).
+                period = period_for(periods, _hm_minutes(slot['start']))
+                last = period["last_start"] if period else None
                 starts = []
                 if min_d > 0 and latest >= slot_start:
                     t = _first_tick(slot_start, interval, align_to_clock)
                     while t <= latest:
-                        starts.append(t.strftime("%H:%M"))
+                        if last is None or t.hour * 60 + t.minute <= last:
+                            starts.append(t.strftime("%H:%M"))
                         t += interval
                 slot['flexible'] = True
                 slot['min_duration'] = min_d
@@ -212,12 +289,29 @@ def annotate_bookable_starts(venue_dict, slot_interval_minutes=DEFAULT_SLOT_INTE
                 duration_raw = slot.get('service_duration')
                 duration = int(duration_raw) if duration_raw is not None else 0
                 latest = slot_end - timedelta(minutes=duration)
+                period = period_for(periods, _hm_minutes(slot['start']))
                 starts = []
-                if duration > 0 and latest >= slot_start:
+                if period is None:
+                    if duration > 0 and latest >= slot_start:
+                        t = _first_tick(slot_start, interval, align_to_clock)
+                        while t <= latest:
+                            starts.append(t.strftime("%H:%M"))
+                            t += interval
+                elif duration > 0:
+                    # S8: last booking time / shorten to closing time
+                    durations = {}
+                    end_min = slot_end.hour * 60 + slot_end.minute
                     t = _first_tick(slot_start, interval, align_to_clock)
-                    while t <= latest:
-                        starts.append(t.strftime("%H:%M"))
+                    while t < slot_end:
+                        t_min = t.hour * 60 + t.minute
+                        length = period_length(t_min, duration, period)
+                        if length is not None and t_min + length <= end_min:
+                            starts.append(t.strftime("%H:%M"))
+                            if length != duration:
+                                durations[t.strftime("%H:%M")] = length
                         t += interval
+                    if durations:
+                        slot['durations'] = durations
                 slot['bookable_starts'] = starts
     return venue_dict
 
