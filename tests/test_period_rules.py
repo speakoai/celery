@@ -55,3 +55,9 @@ def test_no_squeeze_before_a_booking():
     slot = _ann([_p(last_start=20 * 60, shorten=True, min=60)], end="21:00:00")
     assert "20:00" not in slot["bookable_starts"]
     assert slot["bookable_starts"][-1] == "19:15"
+
+
+def test_slot_carries_the_rule_only_when_set():
+    slot = _ann([_p(last_start=20 * 60, shorten=True, min=60)])
+    assert slot["period_rule"] == {"last_start": "20:00", "end": "21:30", "shorten": True, "min": 60}
+    assert "period_rule" not in _ann([])

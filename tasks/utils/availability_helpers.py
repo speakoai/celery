@@ -225,6 +225,21 @@ def period_length(start_min, normal, period):
     return normal
 
 
+def _hhmm(minutes):
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def period_rule_json(period):
+    """The rule as the cache carries it on a slot, for consumers that check a
+    requested (possibly off-grid) time themselves — voice-ai, speako-web."""
+    return {
+        "last_start": _hhmm(period["last_start"]) if period["last_start"] is not None else None,
+        "end": _hhmm(period["end"]),
+        "shorten": period["shorten"],
+        "min": period["min"],
+    }
+
+
 def annotate_bookable_starts(venue_dict, slot_interval_minutes=DEFAULT_SLOT_INTERVAL_MINUTES, align_to_clock=False, periods=None):
     """Add bookable_starts (list of "HH:MM") to each slot in a venue_dict.
 
@@ -272,6 +287,8 @@ def annotate_bookable_starts(venue_dict, slot_interval_minutes=DEFAULT_SLOT_INTE
                 # guest already picks a length).
                 period = period_for(periods, _hm_minutes(slot['start']))
                 last = period["last_start"] if period else None
+                if period:
+                    slot['period_rule'] = period_rule_json(period)
                 starts = []
                 if min_d > 0 and latest >= slot_start:
                     t = _first_tick(slot_start, interval, align_to_clock)
@@ -299,6 +316,7 @@ def annotate_bookable_starts(venue_dict, slot_interval_minutes=DEFAULT_SLOT_INTE
                             t += interval
                 elif duration > 0:
                     # S8: last booking time / shorten to closing time
+                    slot['period_rule'] = period_rule_json(period)
                     durations = {}
                     end_min = slot_end.hour * 60 + slot_end.minute
                     t = _first_tick(slot_start, interval, align_to_clock)
