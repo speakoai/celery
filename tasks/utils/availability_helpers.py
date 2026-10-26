@@ -137,7 +137,28 @@ def fetch_staff_occupancy(cur, tenant_id, location_id, day):
     return fetch_occupancy(cur, tenant_id, location_id, day, "staff_id")
 
 
-def annotate_bookable_starts(venue_dict, slot_interval_minutes=DEFAULT_SLOT_INTERVAL_MINUTES):
+def _first_tick(slot_start, interval, align_to_clock):
+    """First start in a free range: the range start, or (S7.1) the first
+    clock-grid tick at or after it (12:40 on a 15-min grid -> 12:45)."""
+    if not align_to_clock:
+        return slot_start
+    step = int(interval.total_seconds() // 60)
+    mins = slot_start.hour * 60 + slot_start.minute + (1 if slot_start.second else 0)
+    up = -(-mins // step) * step
+    return slot_start.replace(hour=0, minute=0, second=0) + timedelta(minutes=up)
+
+
+def location_slot_interval(cur, tenant_id, location_id):
+    """The location's booking-time grid (S7.1): 10 / 15 / 30, NULL = 15."""
+    cur.execute(
+        "SELECT slot_interval_minutes FROM locations WHERE tenant_id = %s AND location_id = %s",
+        (tenant_id, location_id),
+    )
+    row = cur.fetchone()
+    return int(row[0]) if row and row[0] else DEFAULT_SLOT_INTERVAL_MINUTES
+
+
+def annotate_bookable_starts(venue_dict, slot_interval_minutes=DEFAULT_SLOT_INTERVAL_MINUTES, align_to_clock=False):
     """Add bookable_starts (list of "HH:MM") to each slot in a venue_dict.
 
     Fixed venues (the default): a start is bookable when
@@ -159,6 +180,11 @@ def annotate_bookable_starts(venue_dict, slot_interval_minutes=DEFAULT_SLOT_INTE
 
     Mutates and returns venue_dict; caller already owns a fresh copy from
     reconstruct_venue_availability so in-place mutation is safe.
+
+    align_to_clock (restaurants, S7.1): starts sit on the location's clock
+    grid (17:00, 17:15 ...) instead of counting from each free range's start,
+    so every channel offers the same times after an off-grid booking end or a
+    turnover gap.
     """
     interval = timedelta(minutes=int(slot_interval_minutes or DEFAULT_SLOT_INTERVAL_MINUTES))
     for venue in venue_dict.values():
@@ -172,7 +198,7 @@ def annotate_bookable_starts(venue_dict, slot_interval_minutes=DEFAULT_SLOT_INTE
                 latest = slot_end - timedelta(minutes=min_d)
                 starts = []
                 if min_d > 0 and latest >= slot_start:
-                    t = slot_start
+                    t = _first_tick(slot_start, interval, align_to_clock)
                     while t <= latest:
                         starts.append(t.strftime("%H:%M"))
                         t += interval
@@ -188,7 +214,7 @@ def annotate_bookable_starts(venue_dict, slot_interval_minutes=DEFAULT_SLOT_INTE
                 latest = slot_end - timedelta(minutes=duration)
                 starts = []
                 if duration > 0 and latest >= slot_start:
-                    t = slot_start
+                    t = _first_tick(slot_start, interval, align_to_clock)
                     while t <= latest:
                         starts.append(t.strftime("%H:%M"))
                         t += interval

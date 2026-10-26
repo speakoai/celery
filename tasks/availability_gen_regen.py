@@ -11,6 +11,7 @@ from tasks.utils.availability_helpers import (
     reconstruct_venue_availability,
     intersect_slots_with_open_hours,
     annotate_bookable_starts,
+    location_slot_interval,
 )
 from tasks.utils.task_db import mark_task_running, mark_task_failed, mark_task_succeeded
 from tasks.utils.combination_availability import combinations_for_day, load_bookable_combinations
@@ -565,6 +566,8 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
         _turnover_row = cur.fetchone()
         turnover_minutes = int(_turnover_row[1]) if _turnover_row and _turnover_row[0] else 0
         now_wall = datetime.now(ZoneInfo(location_tz)).strftime("%Y-%m-%d %H:%M:%S")
+        # S7.1: one booking-time grid per location, clock-aligned
+        slot_interval = location_slot_interval(cur, tenant_id, location_id)
 
         # Table combinations (restaurant booking maturity S6a): loaded once;
         # written per date under "combinations" only when the location has any,
@@ -695,13 +698,13 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
                 # consumers don't have to re-derive fitness from slot width
                 # at request time. Single source of truth for "what starts
                 # actually work" lives here.
-                updated_venue_dict = annotate_bookable_starts(updated_venue_dict)
+                updated_venue_dict = annotate_bookable_starts(updated_venue_dict, slot_interval, align_to_clock=True)
                 venue_key_name = "tables" if is_dining_table else "venue_units"
                 availability[venue_key_name] = list(updated_venue_dict.values())
                 if bookable_combinations:
                     availability["combinations"] = combinations_for_day(
                         cur, tenant_id, location_id, current_date_str, db_day,
-                        bookable_combinations, bookings, location_flex_bounds,
+                        bookable_combinations, bookings, location_flex_bounds, slot_interval,
                     )
 
                 cur.execute("""
