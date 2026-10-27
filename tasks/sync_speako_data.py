@@ -1465,7 +1465,9 @@ def _format_location_details_markdown(location: dict) -> str:
     
     # Booking Info
     booking_info = location.get('booking_info', {})
-    min_advance = booking_info.get('min_advance_minutes', 0)
+    # FU-4 / BUG-8 (Owner 2026-10-27): guests always need at least 30 minutes'
+    # notice (platform floor; NULL = the floor), longer if the location sets it.
+    min_advance = max(30, int(booking_info.get('min_advance_minutes', 0) or 0))
     slot_interval = booking_info.get('slot_interval_minutes', 0)
     
     if min_advance > 0 or slot_interval > 0:
