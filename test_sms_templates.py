@@ -174,3 +174,36 @@ def test_restoring_any_one_dropped_element_costs_a_segment():
         ("long ref phrase", with_long_ref),
     ]:
         assert sms_segments(variant) == 2, f"{name} unexpectedly still fits"
+
+
+# --- S12: reminders that ask the guest to confirm ---------------------------
+# Duplicated from tasks/sms.py REMINDER_CONFIRM_ASK (see the module docstring).
+CONFIRM_ASK = " Reply YES to confirm or NO to cancel."
+
+
+def _restaurant_reminder(location, party=4, ask=True):
+    body = f"Reminder: Ref {REF} for {party} at {location} on {_when()}."
+    return body + (CONFIRM_ASK if ask else "") + f" {URL}{SIGNATURE}"
+
+
+@pytest.mark.parametrize("location", ["Beyond Chinese", "Wonder Sushi Parramatta"])
+def test_a_restaurant_reminder_that_asks_to_confirm_fits_one_segment(location):
+    body = _restaurant_reminder(location, party=12)
+    assert sms_segments(body) == 1, f"{len(body)} chars: {body}"
+
+
+def test_the_ask_is_plain_gsm7():
+    assert to_gsm7(CONFIRM_ASK) == CONFIRM_ASK
+
+
+def test_a_service_reminder_that_asks_to_confirm_is_two_segments():
+    """
+    The known cost, reported to the Owner: a service reminder already sits at
+    ~156 characters, so the ask makes it two segments for locations that turn
+    "Ask guest to confirm" on. Once the guest confirms, later reminders drop
+    the ask and go back to one segment.
+    """
+    asked = _service_body("remind").replace(f". {URL}", f".{CONFIRM_ASK} {URL}")
+    assert CONFIRM_ASK in asked
+    assert sms_segments(asked) == 2
+    assert sms_segments(_service_body("remind")) == 1

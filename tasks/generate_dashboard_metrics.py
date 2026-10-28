@@ -10,6 +10,11 @@ load_dotenv()
 
 from tasks.celery_app import app
 from celery.utils.log import get_task_logger
+from tasks.utils.booking_metrics_cache import (
+    PAST_DAYS,
+    prune_booking_metrics,
+    refresh_booking_metrics,
+)
 
 import os
 import psycopg2
@@ -17,6 +22,7 @@ import psycopg2.extras
 import redis
 import json
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from decimal import Decimal
 
 logger = get_task_logger(__name__)
@@ -35,11 +41,18 @@ logger = get_task_logger(__name__)
 #
 # 'onboarding' is mapped for completeness only -- obsolete, zero rows on dev and
 # prod.
+#
+# The band SQL compares source::text, not the enum: a literal that isn't (yet) a
+# booking_source value would make the whole query fail, so a band can ship
+# before its enum value exists on a database.
 CHANNEL_BANDS = [
     ("bookings_ai", ("voice-ai",)),
     ("bookings_web", ("web",)),
     ("bookings_dashboard", ("dashboard", "onboarding")),
     ("bookings_chat", ("facebook", "instagram", "web-widget")),
+    # Restaurant booking maturity S3: staff-seated walk-ins are their own band
+    # (Owner, 2026-10-20), not "Staff".
+    ("bookings_walkin", ("walk-in",)),
 ]
 
 BAND_FIELDS = [field for field, _ in CHANNEL_BANDS]
@@ -55,12 +68,12 @@ COUNTED_STATUSES = "('confirmed','completed')"
 
 # Bumped when the cached JSON shape changes. Without a bump, tenants keep
 # appending to an old-shaped tally and any new band stays empty forever.
-TRENDS_CACHE_VERSION = "v3"
+TRENDS_CACHE_VERSION = "v4"
 
 
 def _band_count_sql(prefix=""):
     """One COUNT per band, so the SQL can never drift from CHANNEL_BANDS."""
-    col = f"{prefix}source" if prefix else "source"
+    col = f"{prefix}source::text" if prefix else "source::text"
     return ",\n                    ".join(
         "COUNT(*) FILTER (WHERE {} IN ({})) as {}".format(
             col, ", ".join("'{}'".format(src) for src in sources), field
@@ -915,6 +928,15 @@ def generate_dashboard_metrics_for_tenant(self, tenant_id):
         
         # Step 4: Save to database
         save_metrics_to_database(tenant_id, metrics)
+
+        # Booking metrics cache (S1.5): fill the past 180 days of the dashboard's
+        # Redis cache (booking-page sources panel) and prune what has aged out.
+        # Upcoming dates are kept current by the availability rebuilds. Never
+        # allowed to fail the metrics run.
+        try:
+            refresh_booking_metrics_past(tenant_id)
+        except Exception as cache_e:
+            logger.warning(f"[Tenant {tenant_id}] booking metrics cache past fill failed: {cache_e}")
         
         # Step 5: Return success
         result = {
@@ -938,3 +960,86 @@ def generate_dashboard_metrics_for_tenant(self, tenant_id):
         
         # Re-raise so Celery marks task as failed
         raise
+
+
+# ─── Booking metrics cache (restaurant booking maturity S1.5) ─────────────────
+
+def _active_locations_with_tz(tenant_id):
+    """(location_id, timezone, location_type) for the tenant's active locations."""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT location_id, timezone, location_type
+                  FROM locations
+                 WHERE tenant_id = %s AND is_active = true
+                 ORDER BY location_id
+                """,
+                (tenant_id,),
+            )
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
+def _local_today(tz):
+    try:
+        return datetime.now(ZoneInfo(tz or "Australia/Sydney")).date()
+    except Exception:
+        return datetime.utcnow().date()
+
+
+def refresh_booking_metrics_past(tenant_id, locations=None):
+    """
+    Recount yesterday back to 180 days ago for every active location into the
+    dashboard's Redis cache, then prune older fields. Today and the future are
+    owned by the availability rebuilds (per-date and the nightly full one).
+    """
+    locations = locations if locations is not None else _active_locations_with_tz(tenant_id)
+    if not locations:
+        return 0
+    redis_client = get_redis_client()
+    if redis_client is None:
+        logger.warning(f"[Tenant {tenant_id}] booking metrics cache: no REDIS_URL, skipped")
+        return 0
+    conn = get_db_connection()
+    total = 0
+    oldest_kept = None
+    try:
+        with conn.cursor() as cur:
+            for location_id, tz, _ in locations:
+                today = _local_today(tz)
+                start = today - timedelta(days=PAST_DAYS - 1)
+                total += refresh_booking_metrics(
+                    cur, redis_client, tenant_id, location_id, start, today - timedelta(days=1), tz
+                )
+                oldest_kept = start if oldest_kept is None else min(oldest_kept, start)
+    finally:
+        conn.close()
+    pruned = prune_booking_metrics(redis_client, tenant_id, oldest_kept) if oldest_kept else 0
+    logger.info(f"[Tenant {tenant_id}] booking metrics cache: past fill {total} cells, pruned {pruned}")
+    return total
+
+
+@app.task
+def rebuild_booking_metrics_for_tenant(tenant_id):
+    """
+    Rebuild a tenant's whole booking metrics cache on demand — used when the
+    dashboard finds it missing (POST /api/booking-metrics/rebuild). Past dates
+    are filled here; upcoming dates by dispatching the normal full availability
+    rebuild per location, which recounts its 60 days as it goes.
+    """
+    from tasks.availability_gen_regen import gen_availability, gen_availability_venue
+
+    locations = _active_locations_with_tz(tenant_id)
+    past_cells = refresh_booking_metrics_past(tenant_id, locations)
+    dispatched = []
+    for location_id, tz, location_type in locations:
+        tz = tz or "Australia/Sydney"
+        if location_type == "rest":
+            gen_availability_venue.delay(tenant_id, location_id, tz)
+        else:
+            gen_availability.delay(tenant_id, location_id, tz)
+        dispatched.append(location_id)
+    return {"tenant_id": tenant_id, "past_cells": past_cells, "upcoming_rebuilds": dispatched}

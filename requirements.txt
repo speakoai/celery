@@ -46,6 +46,11 @@ pandas
 openpyxl
 xlrd
 trafilatura
+# trafilatura → htmldate → dateparser. dateparser 1.4.3 (released after the last
+# green build, 2026-09-20) requires pytz>=2024.2, which conflicts with the pytz==2022.1
+# pin above and made every celery build fail with ResolutionImpossible (2026-10-20).
+# Capping it restores the previously resolved set; lift once pytz is bumped.
+dateparser<1.4.3
 readability-lxml
 beautifulsoup4
 markdownify

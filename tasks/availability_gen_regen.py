@@ -5,12 +5,18 @@ from tasks.celery_app import app
 from tasks.utils.redact import redact_url
 from celery.utils.log import get_task_logger
 from tasks.utils.availability_helpers import (
+    fetch_staff_occupancy,
+    fetch_table_occupancy,
     reconstruct_staff_availability,
     reconstruct_venue_availability,
     intersect_slots_with_open_hours,
     annotate_bookable_starts,
+    location_slot_interval,
+    load_period_rules,
 )
 from tasks.utils.task_db import mark_task_running, mark_task_failed, mark_task_succeeded
+from tasks.utils.combination_availability import combinations_for_day, load_bookable_combinations
+from tasks.utils.booking_metrics_cache import refresh_booking_metrics
 
 import os
 import psycopg2
@@ -241,15 +247,7 @@ def gen_availability(self, tenant_id, location_id, location_tz, affected_date=No
                 """, (tenant_id, location_id, db_day, current_date_str, current_date_str))
                 recurring_staff_rows = cur.fetchall()
 
-                cur.execute("""
-                    SELECT staff_id, customer_id, start_time, end_time
-                    FROM bookings
-                    WHERE tenant_id = %s AND location_id = %s
-                    AND start_time >= %s AND start_time < %s::date + INTERVAL '1 day'
-                    AND status IN ('confirmed', 'pending_guarantee')
-                """, (tenant_id, location_id, current_date_str, current_date_str))
-                booking_rows = cur.fetchall()
-                bookings = [{"staff_id": r[0], "customer_id": r[1], "start_time": r[2].strftime("%Y-%m-%d %H:%M:%S"), "end_time": r[3].strftime("%Y-%m-%d %H:%M:%S")} for r in booking_rows]
+                bookings = fetch_staff_occupancy(cur, tenant_id, location_id, current_date_str)
 
                 staff_dict = {}
                 
@@ -331,6 +329,21 @@ def gen_availability(self, tenant_id, location_id, location_tz, affected_date=No
             # ✅ Set current chunk's key
             valkey_client.set(cache_key, json.dumps(response))
             logger.info(f"🗝️ [CACHE WRITE] Writing cache key: {cache_key}")
+
+        # Booking metrics cache (restaurant booking maturity S1.5): every booking
+        # make/modify/cancel triggers this rebuild for the affected date, so
+        # recount exactly the dates it just covered (the 3-day regen chunk, or 60
+        # days on the full rebuild) into the dashboard's Redis cache. Totals are
+        # overwritten, so a missed or repeated trigger self-heals. Never allowed
+        # to fail the availability rebuild itself.
+        try:
+            metrics_start = start_date.date()
+            metrics_end = (start_date + timedelta(days=days_range - 1)).date()
+            cells = refresh_booking_metrics(cur, valkey_client, tenant_id, location_id, metrics_start, metrics_end, location_tz)
+            logger.info(f"[BOOKING METRICS] tenant={tenant_id} location={location_id} {metrics_start}..{metrics_end}: {cells} cells")
+        except Exception as metrics_e:
+            pg_conn.rollback()
+            logger.warning(f"[BOOKING METRICS] refresh failed for tenant={tenant_id} location={location_id}: {metrics_e}")
 
         # Update availability_change_log to mark changes as published
         try:
@@ -545,6 +558,23 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
                 "slug": tag_slug
             })
 
+        # Table turnover (restaurant booking maturity S7): 0 when switched off.
+        # "now" lets an overrunning seated party keep its table (today only).
+        cur.execute(
+            "SELECT table_turnover_enabled, table_turnover_minutes FROM locations WHERE tenant_id = %s AND location_id = %s",
+            (tenant_id, location_id),
+        )
+        _turnover_row = cur.fetchone()
+        turnover_minutes = int(_turnover_row[1]) if _turnover_row and _turnover_row[0] else 0
+        now_wall = datetime.now(ZoneInfo(location_tz)).strftime("%Y-%m-%d %H:%M:%S")
+        # S7.1: one booking-time grid per location, clock-aligned
+        slot_interval = location_slot_interval(cur, tenant_id, location_id)
+
+        # Table combinations (restaurant booking maturity S6a): loaded once;
+        # written per date under "combinations" only when the location has any,
+        # so other locations' cache is byte-identical.
+        bookable_combinations = load_bookable_combinations(cur, tenant_id, location_id)
+
         for chunk_start in range(0, days_range, chunk_size):
             response = {
                 "tenant_id": tenant_id,
@@ -570,12 +600,13 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
                 # Step 1: Get one-time venue availability entries for this specific date
                 # Walk-in units are excluded from the cache — they're not bookable via voice-AI or the public page.
                 cur.execute("""
-                    SELECT vu.venue_unit_id, vu.name, vu.venue_unit_type, vu.capacity, vu.min_capacity, va.service_duration, va.start_time, va.end_time, va.availability_id, va.is_closed, vu.zone_tag_ids
+                    SELECT vu.venue_unit_id, vu.name, vu.venue_unit_type, vu.capacity, vu.min_capacity, va.service_duration, va.start_time, va.end_time, va.availability_id, va.is_closed, vu.zone_tag_ids, vu.booking_rank
                     FROM venue_unit vu
                     JOIN venue_availability va ON vu.tenant_id = va.tenant_id AND vu.venue_unit_id = va.venue_unit_id
                     WHERE vu.tenant_id = %s AND va.location_id = %s AND va.type = 'one_time'
                     AND va.specific_date = %s AND va.is_active = TRUE AND vu.is_active = TRUE
                     AND vu.is_walk_in = FALSE
+                    ORDER BY vu.booking_rank NULLS LAST, vu.capacity, vu.name, va.start_time
                 """, (tenant_id, location_id, current_date_str))
                 one_time_venue_rows = cur.fetchall()
                 
@@ -585,7 +616,7 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
                 # Step 2: Get recurring availability for venues who don't have one-time entries
                 if venues_with_one_time:
                     cur.execute("""
-                        SELECT vu.venue_unit_id, vu.name, vu.venue_unit_type, vu.capacity, vu.min_capacity, va.service_duration, va.start_time, va.end_time, va.availability_id, vu.zone_tag_ids
+                        SELECT vu.venue_unit_id, vu.name, vu.venue_unit_type, vu.capacity, vu.min_capacity, va.service_duration, va.start_time, va.end_time, va.availability_id, vu.zone_tag_ids, vu.booking_rank
                         FROM venue_unit vu
                         JOIN venue_availability va ON vu.tenant_id = va.tenant_id AND vu.venue_unit_id = va.venue_unit_id
                         WHERE vu.tenant_id = %s AND va.location_id = %s AND va.type = 'recurring'
@@ -593,34 +624,28 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
                         AND va.is_active = TRUE AND vu.is_active = TRUE
                         AND vu.is_walk_in = FALSE
                         AND vu.venue_unit_id NOT IN %s
+                        ORDER BY vu.booking_rank NULLS LAST, vu.capacity, vu.name, va.start_time
                     """, (tenant_id, location_id, db_day, current_date_str, tuple(venues_with_one_time)))
                 else:
                     cur.execute("""
-                        SELECT vu.venue_unit_id, vu.name, vu.venue_unit_type, vu.capacity, vu.min_capacity, va.service_duration, va.start_time, va.end_time, va.availability_id, vu.zone_tag_ids
+                        SELECT vu.venue_unit_id, vu.name, vu.venue_unit_type, vu.capacity, vu.min_capacity, va.service_duration, va.start_time, va.end_time, va.availability_id, vu.zone_tag_ids, vu.booking_rank
                         FROM venue_unit vu
                         JOIN venue_availability va ON vu.tenant_id = va.tenant_id AND vu.venue_unit_id = va.venue_unit_id
                         WHERE vu.tenant_id = %s AND va.location_id = %s AND va.type = 'recurring'
                         AND va.day_of_week = %s AND (va.specific_date IS NULL OR va.specific_date <> %s)
                         AND va.is_active = TRUE AND vu.is_active = TRUE
                         AND vu.is_walk_in = FALSE
+                        ORDER BY vu.booking_rank NULLS LAST, vu.capacity, vu.name, va.start_time
                     """, (tenant_id, location_id, db_day, current_date_str))
                 recurring_venue_rows = cur.fetchall()
 
-                cur.execute("""
-                    SELECT venue_unit_id, customer_id, start_time, end_time
-                    FROM bookings
-                    WHERE tenant_id = %s AND location_id = %s
-                    AND start_time >= %s AND start_time < %s::date + INTERVAL '1 day'
-                    AND status IN ('confirmed', 'pending_guarantee')
-                """, (tenant_id, location_id, current_date_str, current_date_str))
-                booking_rows = cur.fetchall()
-                bookings = [{"venue_unit_id": r[0], "customer_id": r[1], "start_time": r[2].strftime("%Y-%m-%d %H:%M:%S"), "end_time": r[3].strftime("%Y-%m-%d %H:%M:%S")} for r in booking_rows]
+                bookings = fetch_table_occupancy(cur, tenant_id, location_id, current_date_str, turnover_minutes, now_wall)
 
                 venue_dict = {}
                 is_dining_table = False
 
                 # Process one-time venue availability first (highest priority)
-                for vuid, name, venue_unit_type, capacity, min_capacity, service_duration, start, end, va_availability_id, is_closed, zone_tag_ids in one_time_venue_rows:
+                for vuid, name, venue_unit_type, capacity, min_capacity, service_duration, start, end, va_availability_id, is_closed, zone_tag_ids, booking_rank in one_time_venue_rows:
                     if venue_unit_type == "dining_table":
                         is_dining_table = True
                     if not is_closed:  # Only add if not closed for the day
@@ -633,12 +658,14 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
                             "service": [svc for svc in venue_unit_services.get(vuid, []) if svc in location_services],
                             "zone_tags": zone_tags,
                             "zone_tag_ids": zone_tag_ids or [],
+                            # S9: table priority (lower first; None = unranked)
+                            "booking_rank": booking_rank,
                             "slots": []
                         })["slots"].append({"start": str(start), "end": str(end), "service_duration": str(service_duration)})
                     # If is_closed = true, venue is completely unavailable (don't add to venue_dict)
 
                 # Process recurring availability for venues without one-time entries
-                for vuid, name, venue_unit_type, capacity, min_capacity, service_duration, start, end, va_availability_id, zone_tag_ids in recurring_venue_rows:
+                for vuid, name, venue_unit_type, capacity, min_capacity, service_duration, start, end, va_availability_id, zone_tag_ids, booking_rank in recurring_venue_rows:
                     if venue_unit_type == "dining_table":
                         is_dining_table = True
                     zone_tags = resolve_tag_names(zone_tag_ids, venue_tags)
@@ -650,6 +677,8 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
                         "service": [svc for svc in venue_unit_services.get(vuid, []) if svc in location_services],
                         "zone_tags": zone_tags,
                         "zone_tag_ids": zone_tag_ids or [],
+                        # S9: table priority (lower first; None = unranked)
+                        "booking_rank": booking_rank,
                         "slots": []
                     })["slots"].append({"start": str(start), "end": str(end), "service_duration": str(service_duration)})
 
@@ -677,9 +706,22 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
                 # consumers don't have to re-derive fitness from slot width
                 # at request time. Single source of truth for "what starts
                 # actually work" lives here.
-                updated_venue_dict = annotate_bookable_starts(updated_venue_dict)
+                # S8: per-period "Last booking at" / "Shorten to closing time"
+                period_rules = load_period_rules(cur, tenant_id, location_id, db_day, current_date_str)
+                updated_venue_dict = annotate_bookable_starts(
+                    updated_venue_dict, slot_interval, align_to_clock=True, periods=period_rules
+                )
                 venue_key_name = "tables" if is_dining_table else "venue_units"
-                availability[venue_key_name] = list(updated_venue_dict.values())
+                # S9: tables in priority order (ranked first, then smallest, then name)
+                availability[venue_key_name] = sorted(
+                    updated_venue_dict.values(),
+                    key=lambda v: (v.get("booking_rank") is None, v.get("booking_rank") or 0, v.get("capacity") or 0, v.get("name") or ""),
+                )
+                if bookable_combinations:
+                    availability["combinations"] = combinations_for_day(
+                        cur, tenant_id, location_id, current_date_str, db_day,
+                        bookable_combinations, bookings, location_flex_bounds, slot_interval, period_rules,
+                    )
 
                 cur.execute("""
                     SELECT COUNT(*)
@@ -721,6 +763,21 @@ def gen_availability_venue(self, tenant_id, location_id, location_tz, affected_d
 
             valkey_client.set(cache_key, json.dumps(response))
             logger.info(f"🗝️ [CACHE WRITE] Writing cache key: {cache_key}")
+
+        # Booking metrics cache (restaurant booking maturity S1.5): every booking
+        # make/modify/cancel triggers this rebuild for the affected date, so
+        # recount exactly the dates it just covered (the 3-day regen chunk, or 60
+        # days on the full rebuild) into the dashboard's Redis cache. Totals are
+        # overwritten, so a missed or repeated trigger self-heals. Never allowed
+        # to fail the availability rebuild itself.
+        try:
+            metrics_start = start_date.date()
+            metrics_end = (start_date + timedelta(days=days_range - 1)).date()
+            cells = refresh_booking_metrics(cur, valkey_client, tenant_id, location_id, metrics_start, metrics_end, location_tz)
+            logger.info(f"[BOOKING METRICS] tenant={tenant_id} location={location_id} {metrics_start}..{metrics_end}: {cells} cells")
+        except Exception as metrics_e:
+            pg_conn.rollback()
+            logger.warning(f"[BOOKING METRICS] refresh failed for tenant={tenant_id} location={location_id}: {metrics_e}")
 
         # Update availability_change_log to mark changes as published
         try:

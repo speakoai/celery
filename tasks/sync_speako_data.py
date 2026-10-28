@@ -114,8 +114,13 @@ def _format_recurring_hours(hours_data: list) -> dict:
         end = _format_time(row['end_time'])
         slot = f"{start}–{end}"
         
-        if row.get('slot_name'):
-            slot += f" ({row['slot_name']})"
+        # S8: "Last booking at" — only when set, so other knowledge is unchanged
+        last = row.get('last_start_time')
+        notes = [row['slot_name']] if row.get('slot_name') else []
+        if last:
+            notes.append(f"last booking {_format_time(last)}")
+        if notes:
+            slot += f" ({', '.join(notes)})"
         
         hours[day_name].append(slot)
     
@@ -544,7 +549,8 @@ def _query_business_info(tenant_id: str, location_id: str) -> dict:
                 day_of_week,
                 start_time,
                 end_time,
-                slot_name
+                slot_name,
+                last_start_time
             FROM location_availability
             WHERE tenant_id = %s
               AND location_id = %s
@@ -1264,7 +1270,7 @@ def _query_locations(tenant_id: str, location_id: str) -> dict:
         cursor.execute("""
             SELECT 
                 location_id, day_of_week, start_time, end_time, 
-                slot_name, is_active, is_closed
+                slot_name, is_active, is_closed, last_start_time
             FROM location_availability
             WHERE tenant_id = %s 
               AND type = 'recurring' 
@@ -1459,7 +1465,9 @@ def _format_location_details_markdown(location: dict) -> str:
     
     # Booking Info
     booking_info = location.get('booking_info', {})
-    min_advance = booking_info.get('min_advance_minutes', 0)
+    # FU-4 / BUG-8 (Owner 2026-10-27): guests always need at least 30 minutes'
+    # notice (platform floor; NULL = the floor), longer if the location sets it.
+    min_advance = max(30, int(booking_info.get('min_advance_minutes', 0) or 0))
     slot_interval = booking_info.get('slot_interval_minutes', 0)
     
     if min_advance > 0 or slot_interval > 0:

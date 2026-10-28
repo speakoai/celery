@@ -43,6 +43,7 @@ SELECT b.booking_id, off.offset_minutes
     ON bn.tenant_id = b.tenant_id AND bn.booking_id = b.booking_id
  WHERE l.customer_reminders_enabled = true
    AND b.status = 'confirmed'
+   AND b.source::text <> 'walk-in'                                                                 -- seated on arrival; nothing to remind
    AND (b.start_time AT TIME ZONE b.time_zone) > now()                                            -- still upcoming
    AND (b.start_time AT TIME ZONE b.time_zone) - make_interval(mins => off.offset_minutes) <= now()          -- due
    AND (b.start_time AT TIME ZONE b.time_zone) - make_interval(mins => off.offset_minutes) > now() - interval '1 day'  -- bound catch-up

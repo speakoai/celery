@@ -10,6 +10,7 @@ from flask import Flask, flash, render_template, redirect, request, jsonify
 from tasks.utils.redact import redact_url
 from tasks.demo_task import add
 from tasks.availability_gen_regen import gen_availability, gen_availability_venue
+from tasks.generate_dashboard_metrics import rebuild_booking_metrics_for_tenant
 from tasks.sms import (
     send_sms_confirmation_new, send_sms_confirmation_mod, send_sms_confirmation_can,
     send_sms_merchant,
@@ -970,6 +971,25 @@ def api_generate_availability():
             'error': 'Internal server error',
             'message': str(e)
         }), 500
+
+
+@app.route('/api/booking-metrics/rebuild', methods=['POST'])
+@require_api_key
+def api_rebuild_booking_metrics():
+    """
+    Rebuild one tenant's dashboard booking metrics cache (restaurant booking
+    maturity S1.5). speako-web calls this when the cache is missing, so the
+    dashboard never falls back to querying `bookings` on page load.
+
+    JSON: { "tenant_id": "123" }  →  202 { task_id }
+    """
+    data = request.get_json(silent=True) or {}
+    try:
+        tenant_id = int(data.get("tenant_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "tenant_id (integer) is required"}), 400
+    task = rebuild_booking_metrics_for_tenant.delay(tenant_id)
+    return jsonify({"task_id": task.id, "status": "pending", "tenant_id": tenant_id}), 202
 
 
 @app.route('/api/availability/generate-venue', methods=['POST'])

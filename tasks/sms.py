@@ -355,6 +355,40 @@ def send_sms_confirmation_new(booking_id: int):
             conn.close()
 
 
+# S12 (restaurant booking maturity, Owner 2026-10-27): reminders may ask the guest
+# to confirm. Replies to TWILIO_SEND_SMS_NUMBER reach speako-web's
+# /api/webhooks/twilio-sms-reply (YES confirms, NO cancels, anything else ignored).
+REMINDER_CONFIRM_ASK = " Reply YES to confirm or NO to cancel."
+
+
+def _trigger_reminder_email(booking_id: int, location_type: str) -> bool:
+    """Ask speako-web to send the reminder email (booking-notifications action
+    'reminder'; it adds the Confirm button when the location asks). Best-effort."""
+    base = (os.getenv("SPEAKO_WEB_BASE_URL") or "").rstrip("/")
+    secret = os.getenv("BOOKING_WEBHOOK_SECRET")
+    if not base or not secret:
+        print("[REMINDER] email skipped: SPEAKO_WEB_BASE_URL / BOOKING_WEBHOOK_SECRET not set")
+        return False
+    try:
+        r = requests.post(
+            f"{base}/api/webhooks/booking-notifications",
+            headers={"x-webhook-secret": secret},
+            json={
+                "booking_id": booking_id,
+                "action": "reminder",
+                "business_type": "rest" if location_type == "rest" else "service",
+                "notify_customer": True,
+            },
+            timeout=20,
+        )
+        result = (r.json().get("results") or {}).get("customer_email") if r.ok else None
+        print(f"[REMINDER] email for booking {booking_id}: HTTP {r.status_code}, {result}")
+        return result == "success"
+    except Exception as e:
+        print(f"[REMINDER] email for booking {booking_id} failed: {e}")
+        return False
+
+
 @app.task
 def send_reminder(booking_id: int, offset_minutes: int):
     """Send ONE customer reminder SMS for a booking, at a given offset (minutes before
@@ -437,12 +471,14 @@ def send_reminder(booking_id: int, offset_minutes: int):
                 b.tenant_id, b.customer_name, b.start_time, b.booking_ref, b.party_num,
                 b.customer_phone, COALESCE(NULLIF(btrim(l.sms_display_name), ''), l.name) AS location_name, l.location_type,
                 s.name AS staff_name, sv.name AS service_name, bp.alias AS booking_page_alias,
-                b.end_time, b.duration, l.flexible_booking_enabled, sv.is_flexible_duration
+                b.end_time, b.duration, l.flexible_booking_enabled, sv.is_flexible_duration,
+                l.reminder_request_confirmation, l.reminder_email_enabled, bn.guest_confirmed_at
             FROM bookings b
             JOIN locations l ON b.tenant_id = l.tenant_id AND b.location_id = l.location_id
             LEFT JOIN staff s ON b.tenant_id = s.tenant_id AND b.staff_id = s.staff_id
             LEFT JOIN services sv ON b.tenant_id = sv.tenant_id AND b.service_id = sv.service_id
             LEFT JOIN booking_page bp ON b.tenant_id = bp.tenant_id AND b.location_id = bp.location_id AND bp.is_active = true
+            LEFT JOIN booking_notification bn ON bn.tenant_id = b.tenant_id AND bn.booking_id = b.booking_id
             WHERE b.booking_id = %s
         """, (booking_id,))
         row = cur.fetchone()
@@ -452,7 +488,22 @@ def send_reminder(booking_id: int, offset_minutes: int):
             return
         (_tid, customer_name, start_time, booking_ref, party_num, customer_phone,
          location_name, location_type, staff_name, service_name, booking_page_alias,
-         end_time, duration_minutes, location_flexible_enabled, service_is_flexible) = row
+         end_time, duration_minutes, location_flexible_enabled, service_is_flexible,
+         request_confirmation, email_enabled, guest_confirmed_at) = row
+
+        # S12: ask the guest to confirm until they have (any channel).
+        ask_confirm = bool(request_confirmation) and guest_confirmed_at is None
+
+        def _mark_confirm_requested():
+            # The reply handler matches a YES/NO to the most recently asked request.
+            cur.execute(
+                """
+                UPDATE booking_notification SET guest_confirm_requested_at = now(), updated_at = now()
+                 WHERE tenant_id = %s AND booking_id = %s
+                """,
+                (tenant_id, booking_id),
+            )
+            conn.commit()
 
         customer_name, location_name, staff_name, service_name = _sms_safe_fields(
             customer_name, location_name, staff_name, service_name
@@ -467,6 +518,12 @@ def send_reminder(booking_id: int, offset_minutes: int):
         )
 
         if not customer_phone:
+            # S12: no phone, but the email reminder can still go out.
+            if email_enabled and _trigger_reminder_email(booking_id, location_type):
+                _mark({"status": "sent", "channel": "email", "sent_at": datetime.now(timezone.utc).isoformat()})
+                if ask_confirm:
+                    _mark_confirm_requested()
+                return
             _mark({"status": "suppressed", "reason": "no_phone"})
             print(f"[REMINDER] booking {booking_id} has no phone — skip.")
             return
@@ -499,6 +556,8 @@ def send_reminder(booking_id: int, offset_minutes: int):
                 f"Reminder: Ref {clean_ref} at {location_name} on {booking_when} "
                 f"with {staff_name} for {service_name}."
             )
+        if ask_confirm:
+            message += REMINDER_CONFIRM_ASK
 
         # Latest meeting link for online bookings — keyed by booking_ref so a reschedule
         # (new booking_id, stable ref) still resolves the current link. No artifact → no-op.
@@ -531,7 +590,14 @@ def send_reminder(booking_id: int, offset_minutes: int):
             "sent_at": datetime.now(timezone.utc).isoformat(),
             "provider_message_id": getattr(msg, "sid", None),
         })
+        if ask_confirm:
+            _mark_confirm_requested()
         print(f"[REMINDER] Sent to {customer_phone} (booking {booking_id}, offset {offset_key}m): {message}")
+
+        # S12: the same reminder by email (after the SMS is recorded — an email
+        # failure must never release the claim and re-send the SMS).
+        if email_enabled:
+            _trigger_reminder_email(booking_id, location_type)
 
     except Exception as e:
         print(f"[REMINDER] Error for booking {booking_id} offset {offset_key}m: {e}")
