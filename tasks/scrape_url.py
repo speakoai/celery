@@ -546,7 +546,8 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
                         tenant_integration_param=tenant_integration_param,
                         analysis_result=analysis_to_save,
                         ai_description=ai_description,
-                        value_text=markdown_to_save
+                        value_text=markdown_to_save,
+                        revision_source="url",  # version history (knowledge_revisions)
                     )
                     if param_id:
                         if analysis_to_save:

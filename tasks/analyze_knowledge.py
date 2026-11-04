@@ -415,7 +415,8 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
                     tenant_integration_param=tenant_integration_param,
                     analysis_result=payload,  # Save the OpenAI analysis JSON
                     ai_description=ai_description,  # Save the AI-generated description
-                    value_text=markdown_text  # Save the extracted markdown text
+                    value_text=markdown_text,  # Save the extracted markdown text
+                    revision_source="file",  # version history (knowledge_revisions)
                 )
                 if param_id:
                     desc_msg = " with AI description" if ai_description else ""

@@ -2477,6 +2477,7 @@ def sync_speako_data(self, *,
                     analysis_result=json_output,
                     value_text=markdown_output,
                     ai_description=ai_description,
+                    revision_source="sync",
                 )
                 logger.info(f"✅ [sync_speako_data] Saved tenant-wide Other Locations doc (param_id={_ol_pid})")
                 try:
@@ -2533,7 +2534,8 @@ def sync_speako_data(self, *,
                     tenant_integration_param=tenant_integration_param,
                     analysis_result=json_output,
                     value_text=markdown_output or "",
-                    ai_description=ai_description
+                    ai_description=ai_description,
+                    revision_source="sync",
                 )
                 if param_id:
                     logger.info(f"✅ [sync_speako_data] Saved to tenant_integration_param (param_id={param_id})")

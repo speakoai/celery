@@ -14,6 +14,10 @@ Chat maintenance sweep — runs with summarize_chat_sessions on the existing 30-
    captured name/phone/email), and AI memory summaries (customer_episodes) older than N days.
    Sessions a team member is handling are never deleted. Bookings and consent records are untouched.
 
+4. purge_knowledge_revisions — knowledge version history is kept 18 months (Owner K3,
+   docs/plans/knowledge-approval.md). Older revisions are deleted, never the current live one
+   or a pending draft, so every item keeps a restorable baseline.
+
 3. release_stale_takeovers — asks speako-web to hand expired human take-overs back to the AI
    (no staff reply for 30 min, or the tenant switched take-over off). speako-web does it so the
    visitor notice reuses its channel adapters. Uses SPEAKO_WEB_BASE_URL + BOOKING_WEBHOOK_SECRET,
@@ -147,6 +151,33 @@ def apply_chat_retention(self):
     except Exception:
         conn.rollback()
         logger.exception("[apply_chat_retention] failed (%s)", summary)
+        raise
+    finally:
+        conn.close()
+
+
+@app.task(bind=True, name="tasks.purge_chat_client_metadata.purge_knowledge_revisions")
+def purge_knowledge_revisions(self):
+    conn = _get_conn()
+    try:
+        total = _batched(
+            conn,
+            """
+            DELETE FROM knowledge_revisions
+             WHERE revision_id IN (
+                   SELECT revision_id FROM knowledge_revisions
+                    WHERE created_at < now() - interval '18 months'
+                      AND state NOT IN ('live', 'pending')
+                    LIMIT %s)
+            """,
+            (BATCH_SIZE,),
+        )
+        if total:
+            logger.info("[purge_knowledge_revisions] deleted %s revision(s) older than 18 months", total)
+        return {"deleted": total}
+    except Exception:
+        conn.rollback()
+        logger.exception("[purge_knowledge_revisions] failed")
         raise
     finally:
         conn.close()

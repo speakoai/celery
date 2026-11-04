@@ -479,6 +479,7 @@ def scrape_business_profile(self, *, tenant_id: str, location_id: str, url: str,
             tenant_integration_param=param_dict,
             value_text=narrative,
             ai_description="Business profile scraped from the tenant's website (prospect scrape pilot)",
+            revision_source="scrape",
         )
     except Exception as e:
         return _fail("knowledge_write_failed", f"custom_message knowledge write failed: {e}")

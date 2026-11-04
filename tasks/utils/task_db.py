@@ -1,8 +1,11 @@
+import logging
 import os
 import psycopg2
 from psycopg2.extras import Json
 from typing import Optional, Dict, Any
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 def _get_conn():
@@ -219,10 +222,51 @@ def record_task_artifact(*, task_id: str, kind: str, uri: str,
             pass
 
 
+def _record_knowledge_revision(cur, tenant_id, location_id, param_code, new_text, source, old_text):
+    """Version history for Speako knowledge (knowledge_revisions). Runs inside the caller's
+    transaction. On an item's first recorded change, the previous text is kept as a 'backfill'
+    baseline so it can be restored. Unchanged text (e.g. a routine auto-sync) records nothing.
+    Best-effort: a missing table (pre-DDL env) is ignored."""
+    if old_text is not None and old_text == new_text:
+        return
+    try:
+        cur.execute("SAVEPOINT knowledge_rev")
+        item = (tenant_id, location_id, param_code)
+        cur.execute(
+            """SELECT 1 FROM public.knowledge_revisions
+                WHERE tenant_id = %s AND location_id IS NOT DISTINCT FROM %s AND param_code = %s LIMIT 1""",
+            item,
+        )
+        if cur.fetchone() is None and old_text and old_text != new_text:
+            cur.execute(
+                """INSERT INTO public.knowledge_revisions
+                     (tenant_id, location_id, param_code, value_text, state, source)
+                   VALUES (%s, %s, %s, %s, 'superseded', 'backfill')""",
+                item + (old_text,),
+            )
+        cur.execute(
+            """UPDATE public.knowledge_revisions SET state = 'superseded'
+                WHERE tenant_id = %s AND location_id IS NOT DISTINCT FROM %s AND param_code = %s
+                  AND state = 'live'""",
+            item,
+        )
+        cur.execute(
+            """INSERT INTO public.knowledge_revisions
+                 (tenant_id, location_id, param_code, value_text, state, source)
+               VALUES (%s, %s, %s, %s, 'live', %s)""",
+            item + (new_text, source),
+        )
+        cur.execute("RELEASE SAVEPOINT knowledge_rev")
+    except Exception as e:
+        cur.execute("ROLLBACK TO SAVEPOINT knowledge_rev")
+        logger.warning(f"[knowledge_revisions] not recorded for {param_code}: {e}")
+
+
 def upsert_tenant_integration_param(*, tenant_integration_param: Optional[Dict[str, Any]] = None,
                                     analysis_result: Optional[Dict[str, Any]] = None,
                                     ai_description: Optional[str] = None,
-                                    value_text: Optional[str] = None) -> Optional[int]:
+                                    value_text: Optional[str] = None,
+                                    revision_source: Optional[str] = None) -> Optional[int]:
     """Upsert tenant_integration_params table based on the provided parameter dict.
     
     If param_id is present: UPDATE the existing row and set status='configured', optionally update value_json, ai_description, and value_text
@@ -233,6 +277,9 @@ def upsert_tenant_integration_param(*, tenant_integration_param: Optional[Dict[s
         analysis_result: Optional dict containing the OpenAI analysis result to store in value_json
         ai_description: Optional string containing AI-generated description to store in ai_description field
         value_text: Optional string containing markdown or text content to store in value_text field
+        revision_source: for Speako knowledge writes, records a knowledge_revisions version
+            ('file' | 'url' | 'sync' | 'scrape') in the same transaction (version history,
+            docs/plans/knowledge-approval.md). None = no revision (non-knowledge params).
     
     Returns the param_id if successful, None otherwise.
     """
@@ -259,6 +306,18 @@ def upsert_tenant_integration_param(*, tenant_integration_param: Optional[Dict[s
     try:
         with conn:
             with conn.cursor() as cur:
+                record_rev = bool(
+                    revision_source and value_text
+                    and provider == 'speako' and service == 'knowledge'
+                )
+                old_text = None
+                if param_id and record_rev:
+                    cur.execute(
+                        "SELECT value_text FROM public.tenant_integration_params WHERE param_id = %s FOR UPDATE",
+                        (param_id,),
+                    )
+                    _old = cur.fetchone()
+                    old_text = _old[0] if _old else None
                 if param_id:
                     # UPDATE existing row
                     if analysis_result or ai_description or value_text:
@@ -303,6 +362,9 @@ def upsert_tenant_integration_param(*, tenant_integration_param: Optional[Dict[s
                             (param_id,)
                         )
                     row = cur.fetchone()
+                    if row and record_rev:
+                        _record_knowledge_revision(cur, tenant_id, location_id, param_code,
+                                                   value_text, revision_source, old_text)
                     return int(row[0]) if row else None
                 else:
                     # INSERT new row (no unique constraint, so no ON CONFLICT needed)
@@ -331,6 +393,9 @@ def upsert_tenant_integration_param(*, tenant_integration_param: Optional[Dict[s
                         tuple(insert_values)
                     )
                     row = cur.fetchone()
+                    if row and record_rev:
+                        _record_knowledge_revision(cur, tenant_id, location_id, param_code,
+                                                   value_text, revision_source, None)
                     return int(row[0]) if row else None
     finally:
         try:
