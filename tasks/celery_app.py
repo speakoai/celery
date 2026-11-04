@@ -86,3 +86,4 @@ import tasks.provision_sip_location
 import tasks.rebuild_knowledge_chunks
 import tasks.embed_knowledge_param
 import tasks.summarize_chat_sessions
+import tasks.purge_chat_client_metadata

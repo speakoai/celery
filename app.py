@@ -25,7 +25,7 @@ from tasks.analyze_knowledge import analyze_knowledge_file
 from tasks.scrape_url import scrape_url_to_markdown
 from tasks.scrape_business_profile import scrape_business_profile
 from tasks.sync_speako_data import sync_speako_data
-from tasks.embed_knowledge_param import embed_knowledge_param
+from tasks.embed_knowledge_param import embed_knowledge_param, embed_knowledge_draft
 from tasks.publish_elevenlabs_agent import publish_elevenlabs_agent
 from tasks.publish_native_agent import publish_native_agent
 from tasks.create_ai_agent import create_conversation_ai_agent
@@ -2547,6 +2547,28 @@ def api_embed_knowledge_param():
             }
         }), 202
 
+    except Exception as e:
+        return jsonify({'error': 'Internal server error', 'message': str(e)}), 500
+
+
+@app.route('/api/knowledge/embed-draft', methods=['POST'])
+@require_api_key
+def api_embed_knowledge_draft():
+    """
+    [aiknowledges] Index ONE pending knowledge draft into knowledge_draft_chunks (Test it live
+    "Live + pending changes"; knowledge approval Phase 3). Never touches live knowledge_chunks.
+    Safe to call after any draft save or decision: drafts that are no longer pending are purged.
+
+    Expected JSON payload: { "revision_id": 123 }
+    Returns 202 with celery_task_id.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        revision_id = data.get('revision_id')
+        if not revision_id:
+            return jsonify({'error': 'Missing required fields', 'missing_fields': ['revision_id']}), 400
+        task = embed_knowledge_draft.delay(revision_id=int(revision_id))
+        return jsonify({'success': True, 'data': {'celery_task_id': task.id, 'revision_id': int(revision_id)}}), 202
     except Exception as e:
         return jsonify({'error': 'Internal server error', 'message': str(e)}), 500
 

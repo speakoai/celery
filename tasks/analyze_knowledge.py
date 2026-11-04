@@ -26,7 +26,10 @@ from .utils.knowledge_utils import (
     preprocess_for_model,
 )
 # New: DB helpers for task lifecycle and artifacts
-from .utils.task_db import mark_task_running, mark_task_failed, mark_task_succeeded, record_task_artifact, upsert_tenant_integration_param
+from .utils.task_db import (
+    mark_task_running, mark_task_failed, mark_task_succeeded, record_task_artifact,
+    upsert_tenant_integration_param, knowledge_approval_enabled, save_knowledge_draft,
+)
 
 
 logger = get_task_logger(__name__)
@@ -409,33 +412,48 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
             except Exception as desc_e:
                 logger.warning(f"⚠️ [analyze_knowledge_file] Failed to generate AI description: {desc_e}")
             
-            # Update tenant_integration_params table to mark as configured and save analysis result
-            try:
-                param_id = upsert_tenant_integration_param(
-                    tenant_integration_param=tenant_integration_param,
-                    analysis_result=payload,  # Save the OpenAI analysis JSON
-                    ai_description=ai_description,  # Save the AI-generated description
-                    value_text=markdown_text  # Save the extracted markdown text
-                )
-                if param_id:
-                    desc_msg = " with AI description" if ai_description else ""
-                    markdown_msg = " and markdown" if markdown_text else ""
-                    logger.info(f"✅ [analyze_knowledge_file] Updated tenant_integration_param (param_id={param_id}) status to 'configured' with analysis result{desc_msg}{markdown_msg}")
-                else:
-                    logger.warning(f"⚠️ [analyze_knowledge_file] Failed to update tenant_integration_param - no param_id returned")
-            except Exception as tip_e:
-                logger.warning(f"[tasks] upsert_tenant_integration_param failed: {tip_e}")
+            # Knowledge approval on (Phase 2): the import becomes a pending draft; the live row,
+            # voice agent and chat index stay as they are until an owner/admin approves.
+            _tip = tenant_integration_param or {}
+            _draft_code = _tip.get('paramCode') or _tip.get('param_code') or knowledge_type
+            sent_for_review = bool(markdown_text and location_id is not None and knowledge_approval_enabled(tenant_id))
+            if sent_for_review:
+                _rev = save_knowledge_draft(tenant_id=tenant_id, location_id=location_id, param_code=_draft_code,
+                                            value_text=markdown_text, source="file")
+                logger.info(f"📝 [analyze_knowledge_file] Sent for approval as draft revision {_rev} ({_draft_code})")
+                if _rev:
+                    # Phase 3: index the draft so Test it live can chat against it.
+                    from .embed_knowledge_param import embed_knowledge_draft
+                    embed_knowledge_draft.delay(revision_id=_rev)
+            else:
+                # Update tenant_integration_params table to mark as configured and save analysis result
+                try:
+                    param_id = upsert_tenant_integration_param(
+                        tenant_integration_param=tenant_integration_param,
+                        analysis_result=payload,  # Save the OpenAI analysis JSON
+                        ai_description=ai_description,  # Save the AI-generated description
+                        value_text=markdown_text,  # Save the extracted markdown text
+                        revision_source="file",  # version history (knowledge_revisions)
+                    )
+                    if param_id:
+                        desc_msg = " with AI description" if ai_description else ""
+                        markdown_msg = " and markdown" if markdown_text else ""
+                        logger.info(f"✅ [analyze_knowledge_file] Updated tenant_integration_param (param_id={param_id}) status to 'configured' with analysis result{desc_msg}{markdown_msg}")
+                    else:
+                        logger.warning(f"⚠️ [analyze_knowledge_file] Failed to update tenant_integration_param - no param_id returned")
+                except Exception as tip_e:
+                    logger.warning(f"[tasks] upsert_tenant_integration_param failed: {tip_e}")
 
-            # RAG: chunk + embed markdown into knowledge_chunks (best-effort, never fails the save)
-            try:
-                from .utils.knowledge_utils import chunk_and_embed_knowledge, NON_CONTENT_PARAM_CODES
-                _pc = (tenant_integration_param or {}).get('param_code') or knowledge_type
-                if markdown_text and location_id is not None and _pc not in NON_CONTENT_PARAM_CODES:
-                    _n = chunk_and_embed_knowledge(tenant_id, location_id, _pc, markdown_text,
-                                                   openai_client=oa_client)
-                    logger.info(f"🧩 [analyze_knowledge_file] Embedded {_n} knowledge chunks for {_pc}")
-            except Exception as kc_e:
-                logger.warning(f"[analyze_knowledge_file] knowledge_chunks embed failed: {kc_e}")
+                # RAG: chunk + embed markdown into knowledge_chunks (best-effort, never fails the save)
+                try:
+                    from .utils.knowledge_utils import chunk_and_embed_knowledge, NON_CONTENT_PARAM_CODES
+                    _pc = (tenant_integration_param or {}).get('param_code') or knowledge_type
+                    if markdown_text and location_id is not None and _pc not in NON_CONTENT_PARAM_CODES:
+                        _n = chunk_and_embed_knowledge(tenant_id, location_id, _pc, markdown_text,
+                                                       openai_client=oa_client)
+                        logger.info(f"🧩 [analyze_knowledge_file] Embedded {_n} knowledge chunks for {_pc}")
+                except Exception as kc_e:
+                    logger.warning(f"[analyze_knowledge_file] knowledge_chunks embed failed: {kc_e}")
 
             try:
                 mark_task_succeeded(
@@ -453,7 +471,8 @@ def analyze_knowledge_file(self, *, tenant_id: str, location_id: str, knowledge_
                             'content_type': content_type,
                         },
                         'analysis': {'status': status, 'model': model_used},
-                        'artifacts': {'analysis_key': analysis_key, 'analysis_url': analysis_url}
+                        'artifacts': {'analysis_key': analysis_key, 'analysis_url': analysis_url},
+                        'sent_for_review': sent_for_review,
                     },
                     actor='celery',
                     progress=100
