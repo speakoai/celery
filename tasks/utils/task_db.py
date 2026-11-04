@@ -224,21 +224,25 @@ def record_task_artifact(*, task_id: str, kind: str, uri: str,
 
 def _record_knowledge_revision(cur, tenant_id, location_id, param_code, new_text, source, old_text):
     """Version history for Speako knowledge (knowledge_revisions). Runs inside the caller's
-    transaction. On an item's first recorded change, the previous text is kept as a 'backfill'
-    baseline so it can be restored. Unchanged text (e.g. a routine auto-sync) records nothing.
+    transaction. When History doesn't already end with the previous text (first recorded change,
+    or a write that skipped history) it is kept as a 'backfill' version so it can be restored. Unchanged text (e.g. a routine auto-sync) records nothing.
     Best-effort: a missing table (pre-DDL env) is ignored."""
     if old_text is not None and old_text == new_text:
         return
     try:
         cur.execute("SAVEPOINT knowledge_rev")
         item = (tenant_id, location_id, param_code)
+        # Keep the text being replaced unless History already ends with it (first recorded change,
+        # or a write that skipped version history), so nothing that was live is lost.
         cur.execute(
-            """SELECT 1 FROM public.knowledge_revisions
+            """SELECT value_text FROM public.knowledge_revisions
                 WHERE tenant_id = %s AND location_id IS NOT DISTINCT FROM %s AND param_code = %s
-                  AND state <> 'pending' LIMIT 1""",
+                  AND state = 'live'
+                ORDER BY created_at DESC LIMIT 1""",
             item,
         )
-        if cur.fetchone() is None and old_text and old_text != new_text:
+        _last = cur.fetchone()
+        if old_text and old_text != new_text and (_last is None or _last[0] != old_text):
             cur.execute(
                 """INSERT INTO public.knowledge_revisions
                      (tenant_id, location_id, param_code, value_text, state, source)
