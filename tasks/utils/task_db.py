@@ -319,6 +319,8 @@ def save_knowledge_draft(*, tenant_id, location_id, param_code, value_text, sour
                             WHERE revision_id = %s""",
                         (value_text, source, row[0]),
                     )
+                    # Test-index of the old draft text is now stale (re-indexed by the caller).
+                    cur.execute("DELETE FROM public.knowledge_draft_chunks WHERE revision_id = %s", (row[0],))
                     return int(row[0])
                 cur.execute(
                     """INSERT INTO public.knowledge_revisions

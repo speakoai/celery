@@ -24,7 +24,11 @@ from psycopg2.extras import RealDictCursor
 
 from tasks.celery_app import app
 from .utils.task_db import _get_conn
-from .utils.knowledge_utils import chunk_and_embed_knowledge, NON_CONTENT_PARAM_CODES
+from psycopg2.extras import execute_values
+
+from .utils.knowledge_utils import (
+    chunk_and_embed_knowledge, NON_CONTENT_PARAM_CODES, EMBEDDING_MODEL, _chunk_text, _vector_literal,
+)
 
 logger = get_task_logger(__name__)
 
@@ -96,3 +100,67 @@ def embed_knowledge_param(self, tenant_id=None, location_id=None, param_code=Non
         return {"action": "embedded", "chunks": n_chunks, "param_code": param_code}
     finally:
         conn.close()
+
+
+@app.task(bind=True, name='tasks.embed_knowledge_param.embed_knowledge_draft')
+def embed_knowledge_draft(self, revision_id=None):
+    """Knowledge approval Phase 3: (re)index ONE pending draft into knowledge_draft_chunks so the
+    dashboard's Test it live page can chat against it ("Live + pending changes"). Never touches the
+    live knowledge_chunks. Not pending any more (approved / rejected / discarded) or empty (a
+    removal request) → its draft chunks are deleted. Idempotent; if the draft text changes while
+    embedding, the stale result is dropped (the save that changed it queued a fresh run)."""
+    if not revision_id:
+        raise ValueError("revision_id is required")
+    conn = _get_conn()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT tenant_id, location_id, param_code, value_text, state "
+                "FROM public.knowledge_revisions WHERE revision_id = %s",
+                (revision_id,),
+            )
+            rev = cur.fetchone()
+        conn.commit()
+        text = (rev or {}).get("value_text") or ""
+        if not rev or rev["state"] != "pending" or not text.strip() or rev["location_id"] is None \
+                or rev["param_code"] in NON_CONTENT_PARAM_CODES:
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM public.knowledge_draft_chunks WHERE revision_id = %s", (revision_id,))
+                    removed = cur.rowcount
+            return {"action": "purged", "removed": removed, "revision_id": revision_id}
+
+        chunks = _chunk_text(text)
+        embeddings = _embed_texts(chunks) if chunks else []
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT value_text, state FROM public.knowledge_revisions WHERE revision_id = %s FOR UPDATE",
+                    (revision_id,),
+                )
+                now = cur.fetchone()
+                if not now or now[1] != "pending" or now[0] != text:
+                    logger.info("[embed_knowledge_draft] revision %s changed while embedding; skipped", revision_id)
+                    return {"action": "stale", "revision_id": revision_id}
+                cur.execute("DELETE FROM public.knowledge_draft_chunks WHERE revision_id = %s", (revision_id,))
+                if chunks:
+                    execute_values(
+                        cur,
+                        "INSERT INTO public.knowledge_draft_chunks "
+                        "(revision_id, tenant_id, location_id, param_code, chunk_index, content, embedding) VALUES %s",
+                        [(revision_id, rev["tenant_id"], rev["location_id"], rev["param_code"], i, chunks[i],
+                          _vector_literal(embeddings[i])) for i in range(len(chunks))],
+                        template="(%s,%s,%s,%s,%s,%s,%s::vector)",
+                    )
+        logger.info("[embed_knowledge_draft] revision %s: %d chunks", revision_id, len(chunks))
+        return {"action": "embedded", "chunks": len(chunks), "revision_id": revision_id}
+    finally:
+        conn.close()
+
+
+def _embed_texts(chunks):
+    import os
+    from openai import OpenAI
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    resp = client.embeddings.create(model=EMBEDDING_MODEL, input=chunks)
+    return [d.embedding for d in sorted(resp.data, key=lambda d: d.index)]

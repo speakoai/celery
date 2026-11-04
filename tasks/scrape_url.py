@@ -549,6 +549,10 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
                     _rev = save_knowledge_draft(tenant_id=tenant_id, location_id=location_id, param_code=_draft_code,
                                                 value_text=_md, source="url")
                     logger.info(f"📝 [scrape_url_to_markdown] Sent for approval as draft revision {_rev} ({_draft_code})")
+                    if _rev:
+                        # Phase 3: index the draft so Test it live can chat against it.
+                        from .embed_knowledge_param import embed_knowledge_draft
+                        embed_knowledge_draft.delay(revision_id=_rev)
                 else:
                     # Update tenant_integration_params table to mark as configured
                     try:
