@@ -234,7 +234,8 @@ def _record_knowledge_revision(cur, tenant_id, location_id, param_code, new_text
         item = (tenant_id, location_id, param_code)
         cur.execute(
             """SELECT 1 FROM public.knowledge_revisions
-                WHERE tenant_id = %s AND location_id IS NOT DISTINCT FROM %s AND param_code = %s LIMIT 1""",
+                WHERE tenant_id = %s AND location_id IS NOT DISTINCT FROM %s AND param_code = %s
+                  AND state <> 'pending' LIMIT 1""",
             item,
         )
         if cur.fetchone() is None and old_text and old_text != new_text:
@@ -260,6 +261,106 @@ def _record_knowledge_revision(cur, tenant_id, location_id, param_code, new_text
     except Exception as e:
         cur.execute("ROLLBACK TO SAVEPOINT knowledge_rev")
         logger.warning(f"[knowledge_revisions] not recorded for {param_code}: {e}")
+
+
+def knowledge_approval_enabled(tenant_id) -> bool:
+    """Knowledge approval (docs/plans/knowledge-approval.md, Phase 2): chat_settings switch.
+    Missing table/column (pre-DDL env) or no row = off."""
+    if not tenant_id:
+        return False
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT knowledge_approval_enabled FROM public.chat_settings WHERE tenant_id = %s",
+                    (tenant_id,),
+                )
+                row = cur.fetchone()
+                return bool(row and row[0])
+    except Exception as e:
+        logger.warning(f"[knowledge approval] setting not read for tenant {tenant_id}: {e}")
+        return False
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def save_knowledge_draft(*, tenant_id, location_id, param_code, value_text, source) -> Optional[int]:
+    """With knowledge approval on, a file/URL import becomes the item's pending draft
+    (knowledge_revisions state='pending', one per item) instead of changing
+    tenant_integration_params; the live text, voice agent and chat index are untouched until an
+    owner/admin approves in the dashboard. A NEW draft also adds a bell notification
+    ('knowledge' type). Returns the revision_id, or None on failure."""
+    if not (tenant_id and location_id and param_code and value_text):
+        return None
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT revision_id FROM public.knowledge_revisions
+                        WHERE tenant_id = %s AND location_id = %s AND param_code = %s AND state = 'pending'
+                        FOR UPDATE""",
+                    (tenant_id, location_id, param_code),
+                )
+                row = cur.fetchone()
+                if row:
+                    cur.execute(
+                        """UPDATE public.knowledge_revisions
+                              SET value_text = %s, source = %s, created_by = NULL,
+                                  created_by_name = NULL, created_at = clock_timestamp(), check_result = NULL
+                            WHERE revision_id = %s""",
+                        (value_text, source, row[0]),
+                    )
+                    return int(row[0])
+                cur.execute(
+                    """INSERT INTO public.knowledge_revisions
+                         (tenant_id, location_id, param_code, value_text, state, source)
+                       VALUES (%s, %s, %s, %s, 'pending', %s)
+                       RETURNING revision_id""",
+                    (tenant_id, location_id, param_code, value_text, source),
+                )
+                revision_id = int(cur.fetchone()[0])
+                try:
+                    cur.execute("SAVEPOINT knowledge_notify")
+                    cur.execute("SELECT name FROM public.ai_knowledge_types WHERE key = %s LIMIT 1", (param_code,))
+                    _n = cur.fetchone()
+                    name = (_n[0] if _n else None) or "Knowledge"
+                    how = "A website import" if source == "url" else "A file import"
+                    cur.execute(
+                        """INSERT INTO public.notifications
+                             (type_key, title, message, link_url, link_label, metadata, is_broadcast)
+                           VALUES ('knowledge', %s, %s, %s, 'Review changes', %s, false)
+                           RETURNING notification_id""",
+                        (
+                            f"{name}: changes waiting for approval",
+                            f"{how} updated {name}. The AI keeps using the current version until an owner or admin approves.",
+                            f"/agent/knowledges/all?review={param_code}",
+                            Json({"kind": "knowledge_draft", "param_code": param_code}),
+                        ),
+                    )
+                    nid = cur.fetchone()[0]
+                    cur.execute(
+                        "INSERT INTO public.tenant_notifications (tenant_id, notification_id) VALUES (%s, %s)",
+                        (tenant_id, nid),
+                    )
+                    cur.execute("RELEASE SAVEPOINT knowledge_notify")
+                except Exception as ne:
+                    # The draft is the source of truth; a missing bell entry isn't fatal.
+                    cur.execute("ROLLBACK TO SAVEPOINT knowledge_notify")
+                    logger.warning(f"[knowledge approval] notification not created for {param_code}: {ne}")
+                return revision_id
+    except Exception as e:
+        logger.warning(f"[knowledge approval] draft not saved for {param_code}: {e}")
+        return None
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def upsert_tenant_integration_param(*, tenant_integration_param: Optional[Dict[str, Any]] = None,

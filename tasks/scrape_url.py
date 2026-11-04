@@ -23,7 +23,10 @@ from .utils.knowledge_utils import (
     parse_model_json_output,
     extract_dual_output,
 )
-from .utils.task_db import mark_task_running, mark_task_failed, mark_task_succeeded, record_task_artifact, upsert_tenant_integration_param
+from .utils.task_db import (
+    mark_task_running, mark_task_failed, mark_task_succeeded, record_task_artifact,
+    upsert_tenant_integration_param, knowledge_approval_enabled, save_knowledge_draft,
+)
 
 logger = get_task_logger(__name__)
 
@@ -536,34 +539,46 @@ def scrape_url_to_markdown(self, *, tenant_id: str, location_id: str, url: str,
                     except Exception as desc_e:
                         logger.warning(f"⚠️ [scrape_url_to_markdown] Failed to generate AI description: {desc_e}")
 
-                # Update tenant_integration_params table to mark as configured
-                try:
-                    # Check if analysis variables are available in locals()
-                    analysis_to_save = payload if 'payload' in locals() and payload else None
-                    markdown_to_save = markdown_text if 'markdown_text' in locals() and markdown_text else None
+                # Knowledge approval on (Phase 2): the import becomes a pending draft; the live row,
+                # voice agent and chat index stay as they are until an owner/admin approves.
+                _md = markdown_text if 'markdown_text' in locals() and markdown_text else None
+                _tip = tenant_integration_param or {}
+                _draft_code = _tip.get('paramCode') or _tip.get('param_code') or knowledge_type
+                sent_for_review = bool(_md and location_id is not None and knowledge_approval_enabled(tenant_id))
+                if sent_for_review:
+                    _rev = save_knowledge_draft(tenant_id=tenant_id, location_id=location_id, param_code=_draft_code,
+                                                value_text=_md, source="url")
+                    logger.info(f"📝 [scrape_url_to_markdown] Sent for approval as draft revision {_rev} ({_draft_code})")
+                else:
+                    # Update tenant_integration_params table to mark as configured
+                    try:
+                        # Check if analysis variables are available in locals()
+                        analysis_to_save = payload if 'payload' in locals() and payload else None
+                        markdown_to_save = markdown_text if 'markdown_text' in locals() and markdown_text else None
 
-                    param_id = upsert_tenant_integration_param(
-                        tenant_integration_param=tenant_integration_param,
-                        analysis_result=analysis_to_save,
-                        ai_description=ai_description,
-                        value_text=markdown_to_save,
-                        revision_source="url",  # version history (knowledge_revisions)
-                    )
-                    if param_id:
-                        if analysis_to_save:
-                            desc_msg = " and AI description" if ai_description else ""
-                            markdown_msg = " and markdown" if markdown_to_save else ""
-                            logger.info(f"✅ [scrape_url_to_markdown] Updated tenant_integration_param (param_id={param_id}) status to 'configured' with analysis JSON{desc_msg}{markdown_msg} saved")
+                        param_id = upsert_tenant_integration_param(
+                            tenant_integration_param=tenant_integration_param,
+                            analysis_result=analysis_to_save,
+                            ai_description=ai_description,
+                            value_text=markdown_to_save,
+                            revision_source="url",  # version history (knowledge_revisions)
+                        )
+                        if param_id:
+                            if analysis_to_save:
+                                desc_msg = " and AI description" if ai_description else ""
+                                markdown_msg = " and markdown" if markdown_to_save else ""
+                                logger.info(f"✅ [scrape_url_to_markdown] Updated tenant_integration_param (param_id={param_id}) status to 'configured' with analysis JSON{desc_msg}{markdown_msg} saved")
+                            else:
+                                logger.info(f"✅ [scrape_url_to_markdown] Updated tenant_integration_param (param_id={param_id}) status to 'configured'")
                         else:
-                            logger.info(f"✅ [scrape_url_to_markdown] Updated tenant_integration_param (param_id={param_id}) status to 'configured'")
-                    else:
-                        logger.warning(f"⚠️ [scrape_url_to_markdown] Failed to update tenant_integration_param - no param_id returned")
-                except Exception as tip_e:
-                    logger.warning(f"[tasks] upsert_tenant_integration_param failed: {tip_e}")
+                            logger.warning(f"⚠️ [scrape_url_to_markdown] Failed to update tenant_integration_param - no param_id returned")
+                    except Exception as tip_e:
+                        logger.warning(f"[tasks] upsert_tenant_integration_param failed: {tip_e}")
 
                 try:
                     mark_task_succeeded(task_id=str(speako_task_id), celery_task_id=str(self.request.id),
-                                        details={'url': url, 'artifacts': artifacts, 'pipeline': pipeline, 'knowledge_type': knowledge_type},
+                                        details={'url': url, 'artifacts': artifacts, 'pipeline': pipeline, 'knowledge_type': knowledge_type,
+                                                 'sent_for_review': sent_for_review},
                                         actor='celery', progress=100)
                 except Exception as db_e:
                     logger.warning(f"mark_task_succeeded failed: {db_e}")
